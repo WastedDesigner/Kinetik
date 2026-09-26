@@ -1419,7 +1419,8 @@ class SettingsForm : Form
         BackColor = Theme.Bg; ForeColor = Theme.Text;
         Font = Theme.UI(9.5f);
         AutoScaleMode = AutoScaleMode.Dpi;
-        ShowIcon = false;
+        using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("icon.ico"))
+            if (st != null) Icon = new Icon(st);
 
         // Preview strip on top (looks like a slice of taskbar)
         var top = new Panel { Dock = DockStyle.Top, Height = 84, BackColor = Theme.Bg, Padding = new Padding(16, 14, 16, 10) };
