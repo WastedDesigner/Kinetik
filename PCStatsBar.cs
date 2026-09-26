@@ -21,6 +21,15 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
+[assembly: AssemblyTitle("PC Stats Bar")]
+[assembly: AssemblyDescription("Taskbar overlay showing PC stats and device battery levels")]
+[assembly: AssemblyProduct("PC Stats Bar")]
+[assembly: AssemblyCompany("WastedDesigner")]
+[assembly: AssemblyCopyright("Copyright © 2026 WastedDesigner. MIT License.")]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyInformationalVersion("1.0")]
+
 // ======================================================================= Settings
 class Settings
 {
