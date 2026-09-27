@@ -4,6 +4,8 @@ A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It
 
 > **About this project:** I originally made this for my own personal use and decided to share it in case anyone else finds it useful. If you run into a bug or have an idea for a feature, please [open an issue](../../issues). I'll do my best to look into it and implement what I can.
 
+![PC Stats Bar on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
+
 **Latest version: v1.3.0.** [Download it from Releases](../../releases/latest).
 
 ## Contents
@@ -39,6 +41,15 @@ Each one can be turned on or off. There are 28 in total.
 \* CPU temperature and power need the app to run as administrator ([see below](#cpu-temperature)).
 
 ### Customisation
+
+The same bar can look very different. Here it is in the compact two-line layout:
+
+![Two-line layout](screenshots/bar-two-line.png)
+
+And with text labels instead of icons and dot-style dividers:
+
+![Text labels and dot dividers](screenshots/bar-text-labels.png)
+
 
 - **Arrange page:** drag rows to set the left-to-right order. Rows follow the mouse, the others slide out of the way, and the page scrolls by itself when you drag near the edge. You can also use the ▲ / ▼ buttons, or select a row and press **Alt+↑ / Alt+↓**.
 - **Icon picker:** click any stat's icon to choose one of 37 preset icons, **No icon**, or a short **Text label** such as `CPU`, `GPU` or `RAM`.
