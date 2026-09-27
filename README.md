@@ -10,28 +10,33 @@ A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It
 
 | Category | What it shows |
 |---|---|
-| Network | Upload speed, download speed |
+| Network | Upload speed, download speed, total speed, ping to any address |
 | CPU | Usage, per-core usage bars, clock speed (GHz), temperature\*, package power\* |
-| Memory | RAM usage %, RAM used / total (GB) |
-| GPU (NVIDIA, AMD, Intel) | Usage, temperature, VRAM used / total, power draw. If you have more than one GPU, you can choose which one to show |
-| Storage | Disk activity |
-| Batteries | Laptop battery, plus Bluetooth headphones, mice, keyboards and controllers (with an icon for each device type) |
+| Memory | RAM usage %, RAM used / total (GB), committed memory % |
+| GPU (NVIDIA, AMD, Intel) | Usage, temperature, clock speed, fan speed, VRAM used / total, VRAM %, power draw. If you have more than one GPU, you can choose which one to show |
+| Storage | Disk activity, read speed, write speed, free space on any drive |
+| System | Running processes, uptime |
+| Batteries | Laptop battery and time left, plus Bluetooth headphones, mice, keyboards and controllers (with an icon for each device type) |
 
 \* CPU temperature and power need the app to run as administrator (see below).
 
 **Customisation**
 
-- **Arrange page:** drag-and-drop or ▲ / ▼ buttons to set the left-to-right order, plus dividers to split stats into groups
+- **Arrange page:** drag rows (they follow the mouse and the page auto-scrolls), use ▲ / ▼, or select a row and press Alt+↑/↓ to set the left-to-right order
+- **Icon and colour picker:** click any stat's icon to choose from 37 preset icons, no icon, or a short text label, and give that stat its own colour
+- **Dividers:** add as many as you like, in line, dotted, dot or blank-space style, with adjustable height
+- **Spacing:** sliders for the gap between stats, icon-to-value gap, edge padding, icon size and two-line spacing
 - One-line or compact two-line layout
 - Font and font-size picker (monospace fonts keep numbers from jumping around)
-- Colour picker for every icon, the text, the warning colour and the background
-- Rounded, see-through background with adjustable opacity
+- Colour picker for every icon group, the text, the warning colour and the background
+- Rounded, see-through background with adjustable opacity and corner roundness
 - Live preview inside the Settings window
 
 **Quality of life**
 
 - Matches light/dark taskbar automatically
-- Warning colour when usage, temperature or battery levels hit their limits
+- Warning colour when usage, temperature, ping, disk space or battery levels pass limits you set
+- Light on resources: only redraws when something changes, and only runs the sensors for stats you show (about 15 MB of memory in use)
 - Hides itself in fullscreen games, videos and presentations
 - Left-click opens Task Manager, and hovering shows details (CPU/GPU model, device names)
 - Optional run at startup (as an elevated scheduled task when run as admin, so there's no UAC prompt at login)

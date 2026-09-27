@@ -1,39 +1,60 @@
-# PC Stats Bar v1.0.0
+# PC Stats Bar v1.1.0
 
-The first public release of PC Stats Bar: a lightweight, TrafficMonitor-style stats overlay that sits on your Windows 11 taskbar, just left of the system tray.
+A customisation and efficiency update: pick your own icons and colours per stat, add as many dividers as you like, fine-tune spacing, reorder with a much smoother Arrange page, and choose from 11 new stats. It also uses a fraction of the memory it did before.
 
-I originally built this for my own PC and decided to share it. If you find a bug or have a feature idea, please [open an issue](../../issues) and I'll do my best to add it.
+Your existing settings carry over. Any of v1.0's three dividers that you had switched on are kept, and the rest are removed.
 
 ## Download
 
-Download **`PCStatsBar.exe`** below and run it. It's a single portable file, with no installer. Right-click the bar and choose **Settings…** to customise it.
+Download **`PCStatsBar.exe`** below and replace your old copy. If PC Stats Bar is running, right-click it and choose **Exit** first. It's still a single portable file with no installer.
 
-## Features
+## What's new
 
-### Live stats, each with its own icon
-- **Network:** upload and download speed
-- **CPU:** usage, per-core usage bars, clock speed, temperature\*, package power\*
-- **Memory:** RAM usage %, used / total GB
-- **GPU:** usage, temperature, VRAM, power draw for **NVIDIA, AMD and Intel** cards, with a picker for PCs with more than one GPU
-- **Storage:** disk activity
-- **Batteries:** laptop battery, plus Bluetooth headphones, mice, keyboards and controllers, each with an icon for its device type
+### Icon and colour picker
+- Click any stat's icon on the **Arrange** page to open a picker with 37 preset icons
+- Choose **No icon** or a short **Text** label (for example `CPU` or `GPU`) instead of an icon
+- Give any single stat, or any divider, its own colour from 15 swatches or a custom colour
 
-\* Needs the app to run as administrator (right-click the bar → **Restart as administrator**).
+### Dividers
+- Add as many dividers as you want with **+ Add divider**, and remove them with ✕ (or the Delete key)
+- Four styles: line, dotted line, dot or blank space, plus an adjustable height
 
-### Customisation
-- **Arrange page:** drag-and-drop or ▲ / ▼ buttons to reorder stats, plus dividers to group them
-- One-line or compact two-line layout
-- Font and size picker
-- Colour picker for every icon, the text, the warning colour and the background
-- Rounded, see-through background with adjustable opacity
-- Live preview in a dark-themed Settings window
+### Spacing and shape
+- New **Spacing** sliders: between stats, between icon and value, edge padding, icon size, and line spacing for the two-line layout
+- **Corner roundness** slider for the background pill
+- **Reset spacing** puts everything back to the defaults
 
-### Quality of life
-- Automatically matches a light or dark taskbar
-- Values turn red when usage or temperature gets high, or a battery gets low
-- Hides in fullscreen games, videos and presentations
-- Left-click opens Task Manager, and hovering shows CPU/GPU models and device names
-- Optional run at startup, which uses an elevated scheduled task when run as admin so there's no UAC prompt at login
+### A better Arrange page
+- Rows follow your mouse when you drag them, and the other rows slide out of the way
+- The page scrolls automatically when you drag near the top or bottom
+- Keyboard support: ↑/↓ to select, **Alt+↑/↓** to move, Space to switch on/off
+- **Show switched-off stats** can be turned off to list only what's on your taskbar
+- **Reset order** button
+
+### New stats
+- **Network:** total speed (upload + download), ping to any address you choose
+- **Memory:** committed memory %
+- **GPU:** clock speed, fan speed, VRAM usage %
+- **Storage:** disk read speed, disk write speed, free space on any drive
+- **System:** running processes, uptime
+- **Battery:** time left on a laptop battery
+
+### Warning limits
+- New **General → Warnings** section to set when values turn to the warning colour: CPU/RAM/GPU usage, CPU/GPU temperature, low battery, high ping and low disk space
+
+### Lower memory use
+- Measured side by side with the same settings: memory in use (working set) went from about 100 MB to about 15 MB, the app's own heap from 31 MB to 20 MB, and CPU time was roughly halved
+- The bar is only redrawn when something on it has changed, and it's drawn into one reusable buffer instead of a new image every second
+- The LibreHardwareMonitor sensor library is only loaded when a stat needs it, and unloads after a minute when nothing does
+- Performance counters, the battery scan and ping only run while their stats are shown
+- The network adapter list, installed-font list and fonts are cached instead of rebuilt every update
+- Memory is handed back to Windows after startup and after closing Settings
+- Settings are saved once you stop adjusting, instead of on every slider movement
+
+### Other improvements
+- Right-click menu has a new **Arrange stats…** shortcut
+- 5-second update interval option
+- The version number is shown in the Settings window
 
 ## Requirements
 - Windows 10 / 11 (64-bit)
@@ -42,7 +63,7 @@ Download **`PCStatsBar.exe`** below and run it. It's a single portable file, wit
 
 ## Known limitations
 - Batteries of devices on proprietary USB dongles (Razer HyperSpeed, Logitech Lightspeed, SteelSeries, etc.) are only visible to their vendor apps, so they aren't shown. The same devices connected over Bluetooth work.
-- Integrated graphics often don't report temperature or power.
+- Integrated graphics often don't report temperature, power, clock or fan speed.
 - Windows SmartScreen may warn you because the exe isn't code-signed. Click **More info → Run anyway**.
 
 ## Credits
