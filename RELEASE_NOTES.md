@@ -1,3 +1,14 @@
+# PC Stats Bar v1.4.1
+
+- **New: tray icon.** PC Stats Bar now has an icon in the system tray, next to the clock.
+  - Click it to open Settings
+  - Right-click it for the same menu as the bar, so the menu is still reachable when the bar is hidden (for example by a fullscreen app)
+  - Hover over it for a quick CPU / RAM / GPU summary
+  - Turn it off in **Settings → General → Show tray icon**
+  - Windows 11 puts new tray icons under the **^** arrow at first. Drag it onto the taskbar to keep it visible.
+
+---
+
 # PC Stats Bar v1.4.0
 
 - **New: desktop widget.** A floating panel for your desktop, like LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or **Settings → Widget**.

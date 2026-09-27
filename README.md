@@ -6,7 +6,7 @@ A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It
 
 ![PC Stats Bar on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
 
-**Latest version: v1.4.0.** [Download it from Releases](../../releases/latest).
+**Latest version: v1.4.1.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 
@@ -93,6 +93,7 @@ Everything about the widget is set on the **Widget** page in Settings:
 - Matches a light or dark taskbar automatically
 - Hides itself in fullscreen games, videos and presentations
 - Left-click opens Task Manager
+- Tray icon: click it for Settings, right-click it for the menu (even while the bar is hidden), hover for a CPU / RAM / GPU summary
 - Hovering shows details: CPU and GPU model, the ping address, the free-space drive and Bluetooth device names
 - Optional run at startup. When it's running as admin, it's set up as an elevated scheduled task, so there's no UAC prompt at login.
 - Update interval from 0.5 to 5 seconds
@@ -127,7 +128,7 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 | **Appearance** | Font and size, one or two lines, spacing sliders (with **Reset spacing**), divider style and height, and the background pill's opacity and corner roundness. |
 | **Colours** | Match the taskbar theme, text and warning colours, a colour for each icon group, and the background colour. |
 | **Widget** | Turn the desktop widget on, and set its placement, lock, click-through and snapping, style, theme, colours, size, width, roundness, shadow, title, headings and graph history. Its **Contents** list works like the Arrange page. |
-| **General** | Update interval, shift left, left-click action, hide in fullscreen, warning limits, run at startup, restart as administrator, and restore default settings. |
+| **General** | Update interval, shift left, left-click action, hide in fullscreen, tray icon, warning limits, run at startup, restart as administrator, and restore default settings. |
 | **About** | Version number and copyright. |
 
 ### Screenshots
@@ -141,6 +142,7 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 
 ## Tips and shortcuts
 
+- **Tray icon:** click for Settings, right-click for the same menu as the bar. If it's hidden under the **^** arrow, drag it onto the taskbar.
 - **Right-click menu:** Settings…, Arrange stats…, Desktop widget, Unlock desktop widget (when it's locked), Refresh batteries now, Restart as administrator, Exit
 - **Widget:** drag to move it, and right-click it for Widget settings, Lock position and Hide widget. If it's locked and click-through, unlock it from the bar's right-click menu.
 - **Arrange page keys:** ↑ / ↓ select a row, **Alt+↑ / Alt+↓** (or Ctrl) move it, **Space** switches it on or off, **Delete** removes a divider
@@ -175,6 +177,14 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v1.4.1: tray icon
+- **New: tray icon.** PC Stats Bar now has an icon in the system tray, next to the clock.
+  - Click it to open Settings
+  - Right-click it for the same menu as the bar, so the menu is still reachable when the bar is hidden (for example by a fullscreen app)
+  - Hover over it for a quick CPU / RAM / GPU summary
+  - Turn it off in **Settings → General → Show tray icon**
+  - Windows 11 puts new tray icons under the **^** arrow at first. Drag it onto the taskbar to keep it visible.
 
 ### v1.4.0: desktop widget
 - **New: desktop widget.** A floating panel for your desktop, like LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or **Settings → Widget**.

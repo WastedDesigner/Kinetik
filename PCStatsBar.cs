@@ -38,9 +38,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("PC Stats Bar")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("1.4.0.0")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
-[assembly: AssemblyInformationalVersion("1.4.0")]
+[assembly: AssemblyVersion("1.4.1.0")]
+[assembly: AssemblyFileVersion("1.4.1.0")]
+[assembly: AssemblyInformationalVersion("1.4.1")]
 
 // ======================================================================= Settings
 class Settings
@@ -95,7 +95,7 @@ class Settings
     public int WarnCpu = 90, WarnRam = 90, WarnGpu = 95, WarnCpuTemp = 85, WarnGpuTemp = 83, WarnBattery = 20, WarnPing = 150, WarnFreePct = 10;
     // Behaviour
     public int Interval = 1000, Offset = 0;
-    public bool ClickTaskMgr = true, HideFullscreen = true;
+    public bool ClickTaskMgr = true, HideFullscreen = true, TrayIcon = true;
 
     // Every stat that can appear on the bar, in default order. Dividers ("Sep1", "Sep2", ...) are added by the user.
     public const string DefaultOrder = "Up,Down,NetTotal,Ping,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit," +
@@ -1712,11 +1712,46 @@ class StatsBar : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.Close(); // flushes unsaved settings
+        if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; } // otherwise a dead icon lingers until hovered
         base.OnFormClosing(e);
+    }
+
+    // ---- Tray icon: click for Settings, right-click for the same menu as the bar.
+    // Useful when the bar is hidden (fullscreen apps) or there's no room for it on the taskbar.
+    NotifyIcon tray;
+    string trayText;
+
+    void SyncTray()
+    {
+        if (Cfg.TrayIcon && tray == null)
+        {
+            Icon icon = null;
+            using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("icon.ico"))
+                if (st != null) icon = new Icon(st, SystemInformation.SmallIconSize);
+            tray = new NotifyIcon { Icon = icon ?? SystemIcons.Application, Text = "PC Stats Bar", ContextMenuStrip = menu };
+            tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) OpenSettings(null); };
+            tray.Visible = true;
+            trayText = null;
+        }
+        else if (!Cfg.TrayIcon && tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
+    }
+
+    // A short live summary for the tray tooltip (Windows allows at most 63 characters).
+    void UpdateTrayText(Snapshot s)
+    {
+        if (tray == null) return;
+        var parts = new List<string>();
+        if (Cfg.Wants("Cpu")) parts.Add("CPU " + s.Cpu.ToString("0") + "%");
+        parts.Add("RAM " + s.RamLoad + "%");
+        if (s.HasGpu) parts.Add("GPU " + s.GpuUtil.ToString("0") + "%");
+        var text = "PC Stats Bar\n" + string.Join(" · ", parts);
+        if (text.Length > 63) text = text.Substring(0, 63);
+        if (text != trayText) { trayText = text; tray.Text = text; }
     }
 
     protected override void Dispose(bool disposing)
     {
+        if (disposing && tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
         surface.Dispose();
         if (disposing && widget != null) widget.Dispose();
         if (disposing) { DisposeFonts(); if (measureG != null) { measureG.Dispose(); measureBmp.Dispose(); } brush.Dispose(); }
@@ -2119,6 +2154,8 @@ class StatsBar : Form
         bool fullscreen = Cfg.HideFullscreen && SHQueryUserNotificationState(out qs) == 0 && (qs == 2 || qs == 3 || qs == 4);
         SyncWidget();
         if (widget != null) { if (fullscreen) widget.HideNow(); else widget.Render(force); }
+        SyncTray();
+        UpdateTrayText(Sampler.Snap);
 
         IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
         RECT tb;
@@ -4034,6 +4071,7 @@ class SettingsForm : Form
         Add(Icons.Spacing, Theme.Accent, "Shift left", "Pixels between the bar and the tray icons", off);
         Switch(Icons.Chip, Theme.Accent, "Left-click opens Task Manager", "ClickTaskMgr");
         Switch(Icons.Monitor, Theme.Accent, "Hide in fullscreen apps", "HideFullscreen", "Games, videos and presentations");
+        Switch(Icons.Grid, Theme.Accent, "Show tray icon", "TrayIcon", "Click it for Settings, right-click for the menu");
 
         Header("Warnings");
         Hint("Values switch to the warning colour past these limits.", 30);
