@@ -28,6 +28,7 @@ using System.Runtime;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -37,9 +38,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("PC Stats Bar")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("1.3.1.0")]
-[assembly: AssemblyFileVersion("1.3.1.0")]
-[assembly: AssemblyInformationalVersion("1.3.1")]
+[assembly: AssemblyVersion("1.4.0.0")]
+[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyInformationalVersion("1.4.0")]
 
 // ======================================================================= Settings
 class Settings
@@ -62,6 +63,18 @@ class Settings
     public string FreeDrive = ""; // "" = the drive Windows is on
     public string Custom = "";    // per-item icon and colour: "id=icon|AARRGGBB;..."
     public bool ArrangeShowOff = true;
+
+    // Desktop widget
+    public bool WidgetShow = false;
+    public string WidgetOrder = DefaultWidgetOrder, WidgetItems = DefaultWidgetItems;
+    public int WidgetX = int.MinValue, WidgetY = int.MinValue; // int.MinValue = top-right corner of the main screen
+    public int WidgetWidth = 280, WidgetScale = 100, WidgetOpacity = 88, WidgetRound = 100, WidgetGraphSecs = 60;
+    public int WidgetStyle = 0; // 0 bars, 1 graphs, 2 bars and graphs, 3 minimal
+    public int WidgetTheme = 0; // 0 dark, 1 light, 2 match Windows
+    public int WidgetLayer = 0; // 0 on the desktop (behind windows), 1 normal, 2 always on top
+    public bool WidgetLocked = false, WidgetClickThrough = false, WidgetSnap = true, WidgetHeadings = true, WidgetHwNames = true, WidgetShadow = true;
+    public string WidgetTitle = "";
+    public Color WidgetBg = Color.FromArgb(0, 0, 0, 0); // fully transparent = the theme's own background colour
 
     // Appearance
     public string FontName = DefaultFont();
@@ -89,14 +102,23 @@ class Settings
         "Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
     public static readonly string[] StatIds = DefaultOrder.Split(',');
 
+    // The widget has its own order (grouped by hardware) and its own set of stats that are switched on.
+    public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower," +
+        "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
+    public const string DefaultWidgetItems = "Cpu,CpuTemp,CpuClock,Gpu,GpuTemp,GpuVram,Ram,RamGb,Down,Up";
+    public static readonly string[] WidgetIds = DefaultWidgetOrder.Split(',');
+
     public static bool IsDivider(string id) { return id.Length > 3 && id.StartsWith("Sep") && id.Substring(3).All(char.IsDigit); }
 
-    public List<string> OrderList()
+    public List<string> OrderList() { return Merge(Order, StatIds); }
+    public List<string> WidgetOrderList() { return Merge(WidgetOrder, WidgetIds); }
+
+    static List<string> Merge(string saved, string[] defaults)
     {
-        var list = (Order ?? "").Split(',').Where(id => StatIds.Contains(id) || IsDivider(id)).Distinct().ToList();
+        var list = (saved ?? "").Split(',').Where(id => defaults.Contains(id) || IsDivider(id)).Distinct().ToList();
         // Stats missing from a saved order (e.g. added in a newer version) go next to their default neighbour.
         string prev = null;
-        foreach (var id in StatIds)
+        foreach (var id in defaults)
         {
             if (!list.Contains(id)) list.Insert(prev == null ? 0 : list.IndexOf(prev) + 1, id);
             prev = id;
@@ -106,7 +128,7 @@ class Settings
 
     public string NewDividerId()
     {
-        var used = OrderList();
+        var used = OrderList().Concat(WidgetOrderList()).ToList(); // unique across both, so per-divider colours don't clash
         int n = 1;
         while (used.Contains("Sep" + n)) n++;
         return "Sep" + n;
@@ -124,6 +146,26 @@ class Settings
     }
 
     public bool IsOn(string id) { return IsDivider(id) || (bool)Field(id).GetValue(this); }
+
+    Tuple<string, HashSet<string>> widgetCache; // read from the sampler thread too, so it's swapped as one object
+    public bool WidgetIsOn(string id)
+    {
+        if (IsDivider(id)) return true;
+        var src = WidgetItems ?? "";
+        var cache = widgetCache;
+        if (cache == null || cache.Item1 != src) widgetCache = cache = Tuple.Create(src, new HashSet<string>(src.Split(',')));
+        return cache.Item2.Contains(id);
+    }
+
+    public void SetWidgetOn(string id, bool on)
+    {
+        var set = (WidgetItems ?? "").Split(',').Where(x => x != "" && x != id).ToList();
+        if (on) set.Add(id);
+        WidgetItems = string.Join(",", set);
+    }
+
+    // True when the bar or the widget shows this stat, i.e. when it needs measuring.
+    public bool Wants(string id) { return IsOn(id) || (WidgetShow && WidgetIsOn(id)); }
 
     // ---- Per-item icon / colour overrides
     string customSrc;
@@ -506,7 +548,7 @@ class Sampler
 
     static double Clamp(double v) { return Math.Max(0, Math.Min(100, v)); }
 
-    bool AnyGpuStat { get { var c = cfg; return c.Gpu || c.GpuTemp || c.GpuClock || c.GpuFan || c.GpuVram || c.GpuVramPct || c.GpuPower; } }
+    bool AnyGpuStat { get { var c = cfg; return c.Wants("Gpu") || c.Wants("GpuTemp") || c.Wants("GpuClock") || c.Wants("GpuFan") || c.Wants("GpuVram") || c.Wants("GpuVramPct") || c.Wants("GpuPower"); } }
     bool NvidiaChosen { get { return gpu != IntPtr.Zero && (cfg.GpuSource == "" || cfg.GpuSource == gpuName); } }
 
     Snapshot Sample()
@@ -515,13 +557,13 @@ class Sampler
         var now = DateTime.UtcNow;
         var s = new Snapshot { CpuName = cpuName };
         double v;
-        v = cpuTotal.Read(c.Cpu); if (!double.IsNaN(v)) s.Cpu = Clamp(v);
-        v = cpuPerf.Read(c.CpuClock); if (!double.IsNaN(v) && maxMhz > 0) s.CpuMhz = v * maxMhz / 100;
-        v = diskIdle.Read(c.Disk); if (!double.IsNaN(v)) s.Disk = Clamp(100 - v);
-        v = diskRead.Read(c.DiskRead); if (!double.IsNaN(v)) s.DiskRead = Math.Max(0, v);
-        v = diskWrite.Read(c.DiskWrite); if (!double.IsNaN(v)) s.DiskWrite = Math.Max(0, v);
-        v = procCount.Read(c.Processes); if (!double.IsNaN(v)) s.Processes = (int)v;
-        s.Cores = ReadCores(c.CpuCores);
+        v = cpuTotal.Read(c.Wants("Cpu")); if (!double.IsNaN(v)) s.Cpu = Clamp(v);
+        v = cpuPerf.Read(c.Wants("CpuClock")); if (!double.IsNaN(v) && maxMhz > 0) s.CpuMhz = v * maxMhz / 100;
+        v = diskIdle.Read(c.Wants("Disk")); if (!double.IsNaN(v)) s.Disk = Clamp(100 - v);
+        v = diskRead.Read(c.Wants("DiskRead")); if (!double.IsNaN(v)) s.DiskRead = Math.Max(0, v);
+        v = diskWrite.Read(c.Wants("DiskWrite")); if (!double.IsNaN(v)) s.DiskWrite = Math.Max(0, v);
+        v = procCount.Read(c.Wants("Processes")); if (!double.IsNaN(v)) s.Processes = (int)v;
+        s.Cores = ReadCores(c.Wants("CpuCores"));
 
         var mem = new MEMSTATUS();
         if (GlobalMemoryStatusEx(mem))
@@ -532,14 +574,14 @@ class Sampler
             if (mem.TotalPage > 0) s.Commit = (mem.TotalPage - mem.AvailPage) * 100.0 / mem.TotalPage;
         }
 
-        if (c.Up || c.Down || c.NetTotal) ReadNet(s, now);
+        if (c.Wants("Up") || c.Wants("Down") || c.Wants("NetTotal")) ReadNet(s, now);
         else { lastNet = DateTime.MinValue; nics = null; }
 
         UpdateSensors(now);
         if (AnyGpuStat) ReadGpu(s);
 
         if (!Program.IsAdmin) sensorStatus = "needs admin – right-click → Restart as administrator";
-        else if (sensors != null && sensors.HasCpu && (c.CpuTemp || c.CpuPower))
+        else if (sensors != null && sensors.HasCpu && (c.Wants("CpuTemp") || c.Wants("CpuPower")))
         {
             try
             {
@@ -550,9 +592,9 @@ class Sampler
         }
         s.CpuTempStatus = sensorStatus;
 
-        if (c.DiskFree) { ReadFree(now); s.FreeGb = freeGb; s.FreePct = freePct; s.FreeName = freeName; }
+        if (c.Wants("DiskFree")) { ReadFree(now); s.FreeGb = freeGb; s.FreePct = freePct; s.FreeName = freeName; }
         ManagePing();
-        s.Ping = c.Ping ? pingMs : -1;
+        s.Ping = c.Wants("Ping") ? pingMs : -1;
         ManageBatteries();
         s.Uptime = GetTickCount64() / 1000.0;
         return s;
@@ -615,7 +657,7 @@ class Sampler
     // LibreHardwareMonitor is only loaded while something needs it, and closed again after a minute unused.
     void UpdateSensors(DateTime now)
     {
-        bool wantCpu = Program.IsAdmin && (cfg.CpuTemp || cfg.CpuPower);
+        bool wantCpu = Program.IsAdmin && (cfg.Wants("CpuTemp") || cfg.Wants("CpuPower"));
         bool wantGpu = (AnyGpuStat && !NvidiaChosen) || gpuScanRequested;
         if (wantCpu || wantGpu)
         {
@@ -679,7 +721,7 @@ class Sampler
             if (nvmlDeviceGetMemoryInfo(gpu, out m) == 0) { s.VramUsed = m.Used / 1073741824.0; s.VramTotal = m.Total / 1073741824.0; }
             if (nvmlDeviceGetPowerUsage(gpu, out mw) == 0) s.GpuPower = mw / 1000.0;
             if (nvmlDeviceGetClockInfo(gpu, 0, out mhz) == 0) s.GpuMhz = mhz;
-            if (cfg.GpuFan && nvmlDeviceGetFanSpeed(gpu, out fan) == 0) s.GpuFan = fan;
+            if (cfg.Wants("GpuFan") && nvmlDeviceGetFanSpeed(gpu, out fan) == 0) s.GpuFan = fan;
             return;
         }
         if (sensors != null)
@@ -702,8 +744,8 @@ class Sampler
 
     void ManagePing()
     {
-        if (cfg.Ping && pingTimer == null) pingTimer = new System.Threading.Timer(_ => DoPing(), null, 0, 2000);
-        else if (!cfg.Ping && pingTimer != null) { pingTimer.Dispose(); pingTimer = null; pingMs = -1; }
+        if (cfg.Wants("Ping") && pingTimer == null) pingTimer = new System.Threading.Timer(_ => DoPing(), null, 0, 2000);
+        else if (!cfg.Wants("Ping") && pingTimer != null) { pingTimer.Dispose(); pingTimer = null; pingMs = -1; }
     }
 
     void DoPing()
@@ -723,8 +765,8 @@ class Sampler
 
     void ManageBatteries()
     {
-        if (cfg.Batteries && batTimer == null) batTimer = new System.Threading.Timer(_ => ReadBatteries(), null, 0, 60000);
-        else if (!cfg.Batteries && batTimer != null) { batTimer.Dispose(); batTimer = null; Devices = new Dictionary<string, int>(); }
+        if (cfg.Wants("Batteries") && batTimer == null) batTimer = new System.Threading.Timer(_ => ReadBatteries(), null, 0, 60000);
+        else if (!cfg.Wants("Batteries") && batTimer != null) { batTimer.Dispose(); batTimer = null; Devices = new Dictionary<string, int>(); }
     }
 
     const string BatteryKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2"; // DEVPKEY_Bluetooth_Battery
@@ -757,7 +799,7 @@ class Sampler
         }
         catch { }
         finally { readingBatteries = 0; }
-        if (cfg.Batteries) Devices = found;
+        if (cfg.Wants("Batteries")) Devices = found;
     }
 }
 
@@ -1546,10 +1588,10 @@ static class Program
     }
 }
 
-// ======================================================================= Bar
-class StatsBar : Form
+// ======================================================================= Layered drawing surface
+// One reusable DIB for a per-pixel-alpha window, instead of allocating a bitmap + HBITMAP every frame.
+class DibSurface : IDisposable
 {
-    [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] struct SIZE { public int CX, CY; }
     [StructLayout(LayoutKind.Sequential, Pack = 1)] struct BLEND { public byte Op, Flags, Alpha, Format; }
@@ -1558,17 +1600,60 @@ class StatsBar : Form
         public int Size, Width, Height; public short Planes, BitCount;
         public int Compression, SizeImage, XPels, YPels, ClrUsed, ClrImportant;
     }
-    [DllImport("user32.dll")] static extern IntPtr FindWindow(string c, string w);
-    [DllImport("user32.dll")] static extern IntPtr FindWindowEx(IntPtr p, IntPtr a, string c, string w);
-    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
-    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);
-    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("user32.dll")] static extern bool UpdateLayeredWindow(IntPtr h, IntPtr dst, ref POINT pos, ref SIZE size, IntPtr src, ref POINT srcPos, int key, ref BLEND b, int flags);
     [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
     [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
     [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
     [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
     [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref BITMAPINFOHEADER bmi, uint usage, out IntPtr bits, IntPtr section, uint offset);
+
+    IntPtr memDC, dib, oldObj;
+    Bitmap bmp;
+    int w, h;
+
+    // A premultiplied-alpha bitmap (as UpdateLayeredWindow expects) backed by the DIB, reused while the size stays the same.
+    public Bitmap Canvas(int width, int height)
+    {
+        if (dib != IntPtr.Zero && width == w && height == h) return bmp;
+        Free();
+        memDC = CreateCompatibleDC(IntPtr.Zero);
+        var bmi = new BITMAPINFOHEADER { Size = 40, Width = width, Height = -height, Planes = 1, BitCount = 32 }; // negative height = top-down rows
+        IntPtr bits;
+        dib = CreateDIBSection(memDC, ref bmi, 0, out bits, IntPtr.Zero, 0);
+        oldObj = SelectObject(memDC, dib);
+        bmp = new Bitmap(width, height, width * 4, PixelFormat.Format32bppPArgb, bits);
+        w = width; h = height;
+        return bmp;
+    }
+
+    public void Push(IntPtr hwnd, int x, int y)
+    {
+        var size = new SIZE { CX = w, CY = h };
+        var src = new POINT();
+        var pos = new POINT { X = x, Y = y };
+        var blend = new BLEND { Op = 0, Flags = 0, Alpha = 255, Format = 1 };
+        UpdateLayeredWindow(hwnd, IntPtr.Zero, ref pos, ref size, memDC, ref src, 0, ref blend, 2);
+    }
+
+    void Free()
+    {
+        if (bmp != null) { bmp.Dispose(); bmp = null; }
+        if (memDC != IntPtr.Zero) { SelectObject(memDC, oldObj); DeleteDC(memDC); memDC = IntPtr.Zero; }
+        if (dib != IntPtr.Zero) { DeleteObject(dib); dib = IntPtr.Zero; }
+    }
+
+    public void Dispose() { Free(); }
+}
+
+// ======================================================================= Bar
+class StatsBar : Form
+{
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
+    [DllImport("user32.dll")] static extern IntPtr FindWindow(string c, string w);
+    [DllImport("user32.dll")] static extern IntPtr FindWindowEx(IntPtr p, IntPtr a, string c, string w);
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
     [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
 
     public readonly Settings Cfg = new Settings();
@@ -1589,6 +1674,13 @@ class StatsBar : Form
         menu.Renderer = new DarkMenuRenderer();
         menu.Items.Add("Settings…", null, (s, e) => OpenSettings(null));
         menu.Items.Add("Arrange stats…", null, (s, e) => OpenSettings("Arrange"));
+        var widgetItem = new ToolStripMenuItem("Desktop widget");
+        widgetItem.Click += (s, e) => SetWidget(!Cfg.WidgetShow);
+        var unlockItem = new ToolStripMenuItem("Unlock desktop widget");
+        unlockItem.Click += (s, e) => { Cfg.WidgetLocked = false; Cfg.Save(); Render(true); NotifySettings("Widget"); };
+        menu.Items.Add(widgetItem);
+        menu.Items.Add(unlockItem);
+        menu.Opening += (s, e) => { widgetItem.Checked = Cfg.WidgetShow; unlockItem.Visible = Cfg.WidgetShow && Cfg.WidgetLocked; };
         menu.Items.Add("Refresh batteries now", null, (s, e) => ThreadPool.QueueUserWorkItem(_ => Sampler.ReadBatteries()));
         if (!Program.IsAdmin) menu.Items.Add("Restart as administrator (CPU temp)", null, (s, e) => Program.RestartAsAdmin());
         menu.Items.Add(new ToolStripSeparator());
@@ -1625,7 +1717,8 @@ class StatsBar : Form
 
     protected override void Dispose(bool disposing)
     {
-        FreeDib();
+        surface.Dispose();
+        if (disposing && widget != null) widget.Dispose();
         if (disposing) { DisposeFonts(); if (measureG != null) { measureG.Dispose(); measureBmp.Dispose(); } brush.Dispose(); }
         base.Dispose(disposing);
     }
@@ -1668,7 +1761,7 @@ class StatsBar : Form
         public string Key;
     }
 
-    static string Speed(double b)
+    public static string Speed(double b)
     {
         if (b >= 1073741824) return (b / 1073741824).ToString("0.00") + " GB/s";
         if (b >= 1048576) return (b / 1048576).ToString(b >= 104857600 ? "0" : b >= 10485760 ? "0.0" : "0.00") + " MB/s";
@@ -1676,13 +1769,13 @@ class StatsBar : Form
         return b.ToString("0") + " B/s";
     }
 
-    static string SizeGb(double gb)
+    public static string SizeGb(double gb)
     {
         if (gb >= 1000) return (gb / 1024).ToString("0.0") + " TB";
         return gb.ToString(gb >= 100 ? "0" : "0.0") + " GB";
     }
 
-    static string Duration(double secs)
+    public static string Duration(double secs)
     {
         var t = TimeSpan.FromSeconds(secs);
         if (t.TotalDays >= 1) return (int)t.TotalDays + "d " + t.Hours + "h";
@@ -2022,12 +2115,15 @@ class StatsBar : Form
 
     public void Render(bool force)
     {
+        int qs;
+        bool fullscreen = Cfg.HideFullscreen && SHQueryUserNotificationState(out qs) == 0 && (qs == 2 || qs == 3 || qs == 4);
+        SyncWidget();
+        if (widget != null) { if (fullscreen) widget.HideNow(); else widget.Render(force); }
+
         IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
         RECT tb;
         if (taskbar == IntPtr.Zero || !GetWindowRect(taskbar, out tb)) return;
-        int qs;
-        if (Cfg.HideFullscreen && SHQueryUserNotificationState(out qs) == 0 && (qs == 2 || qs == 3 || qs == 4))
-        { ShowWindow(Handle, 0); return; }
+        if (fullscreen) { ShowWindow(Handle, 0); return; }
 
         TaskbarHeight = tb.B - tb.T;
         var L = Build(TaskbarHeight, LightTaskbar());
@@ -2063,39 +2159,619 @@ class StatsBar : Form
     }
 
     // ---- The bar is drawn straight into one reusable DIB, instead of allocating a bitmap + HBITMAP every tick.
-    IntPtr memDC, dib, oldObj;
-    Bitmap dibBmp;
-    int dibW, dibH;
-
-    void EnsureDib(int w, int h)
-    {
-        if (dib != IntPtr.Zero && w == dibW && h == dibH) return;
-        FreeDib();
-        memDC = CreateCompatibleDC(IntPtr.Zero);
-        var bmi = new BITMAPINFOHEADER { Size = 40, Width = w, Height = -h, Planes = 1, BitCount = 32 }; // negative height = top-down rows
-        IntPtr bits;
-        dib = CreateDIBSection(memDC, ref bmi, 0, out bits, IntPtr.Zero, 0);
-        oldObj = SelectObject(memDC, dib);
-        dibBmp = new Bitmap(w, h, w * 4, PixelFormat.Format32bppPArgb, bits); // premultiplied, as UpdateLayeredWindow expects
-        dibW = w; dibH = h;
-    }
-
-    void FreeDib()
-    {
-        if (dibBmp != null) { dibBmp.Dispose(); dibBmp = null; }
-        if (memDC != IntPtr.Zero) { SelectObject(memDC, oldObj); DeleteDC(memDC); memDC = IntPtr.Zero; }
-        if (dib != IntPtr.Zero) { DeleteObject(dib); dib = IntPtr.Zero; }
-    }
+    readonly DibSurface surface = new DibSurface();
 
     void Push(BarLayout L, int height, int x, int y)
     {
-        EnsureDib(L.Width, height);
-        using (var g = Graphics.FromImage(dibBmp)) PaintBar(g, L, height);
-        var size = new SIZE { CX = L.Width, CY = height };
-        var src = new POINT();
-        var pos = new POINT { X = x, Y = y };
-        var blend = new BLEND { Op = 0, Flags = 0, Alpha = 255, Format = 1 };
-        UpdateLayeredWindow(Handle, IntPtr.Zero, ref pos, ref size, memDC, ref src, 0, ref blend, 2);
+        var bmp = surface.Canvas(L.Width, height);
+        using (var g = Graphics.FromImage(bmp)) PaintBar(g, L, height);
+        surface.Push(Handle, x, y);
+    }
+
+    // ---- Desktop widget: created and destroyed to match the settings.
+    WidgetForm widget;
+
+    void SyncWidget()
+    {
+        if (widget != null && (!Cfg.WidgetShow || widget.Layer != Cfg.WidgetLayer)) { widget.Close(); widget.Dispose(); widget = null; }
+        if (Cfg.WidgetShow && widget == null) { widget = new WidgetForm(this); widget.Show(); }
+    }
+
+    public void SetWidget(bool on)
+    {
+        Cfg.WidgetShow = on;
+        Cfg.Save();
+        BeginInvoke((Action)(() => { Render(true); NotifySettings("Widget"); }));
+    }
+
+    // Keeps an open Settings page in step with changes made from a right-click menu.
+    public void NotifySettings(string page)
+    {
+        if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.RefreshIfShowing(page);
+    }
+}
+
+// ======================================================================= Desktop widget
+// A floating panel of stats with usage bars and history graphs, grouped by hardware. It's a per-pixel-alpha
+// window like the bar, so it gets smooth rounded corners, a soft shadow and a see-through background.
+class WidgetForm : Form
+{
+    [StructLayout(LayoutKind.Sequential)] struct WINDOWPOS { public IntPtr hwnd, hwndInsertAfter; public int x, y, cx, cy; public uint flags; }
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
+    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int i, int v);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+
+    // Recent values of one stat, oldest first, for its graph.
+    class Hist
+    {
+        public readonly float[] V;
+        public int Count, Head;
+        public Hist(int n) { V = new float[n]; }
+        public void Push(float x) { V[Head] = x; Head = (Head + 1) % V.Length; if (Count < V.Length) Count++; }
+        public float At(int i) { return V[(Head - Count + i + V.Length) % V.Length]; }
+    }
+
+    class Item
+    {
+        public int Kind; // 0 stat row, 1 group heading, 2 divider, 3 title, 4 per-core chart
+        public string Id, Label, Value, Sub, IconLabel, HistKey;
+        public IconFn Icon;
+        public Color Color;
+        public bool Warn, Dim;
+        public double Frac = double.NaN, GraphValue = double.NaN, GraphMax, GraphFloor = 1;
+        public Hist Hist;
+        public double[] Cores;
+    }
+
+    readonly StatsBar bar;
+    readonly Settings c;
+    public readonly int Layer;
+    readonly DibSurface surface = new DibSurface();
+    readonly ContextMenuStrip menu = new ContextMenuStrip();
+    readonly Dictionary<string, Hist> history = new Dictionary<string, Hist>();
+    readonly SolidBrush brush = new SolidBrush(Color.White);
+    Snapshot lastSnap;
+    int winW, winH, margin;
+    bool dragging, clickThrough;
+    Point grab;
+    float u = 1, fontU;
+    Font fLabel, fValue, fHead, fSmall, fTitle;
+    static readonly StringFormat Trim = new StringFormat(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter, LineAlignment = StringAlignment.Center };
+    static readonly StringFormat Typo = MakeTypo();
+
+    static StringFormat MakeTypo()
+    {
+        var f = (StringFormat)StringFormat.GenericTypographic.Clone();
+        f.FormatFlags |= StringFormatFlags.NoWrap | StringFormatFlags.MeasureTrailingSpaces;
+        return f;
+    }
+
+    public WidgetForm(StatsBar bar)
+    {
+        this.bar = bar; c = bar.Cfg; Layer = c.WidgetLayer;
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+        clickThrough = ClickThroughWanted;
+
+        menu.Renderer = new DarkMenuRenderer();
+        var lockItem = new ToolStripMenuItem("Lock position");
+        lockItem.Click += (s, e) => { c.WidgetLocked = !c.WidgetLocked; c.Save(); bar.NotifySettings("Widget"); Render(true); };
+        menu.Opening += (s, e) => lockItem.Checked = c.WidgetLocked;
+        menu.Items.Add("Widget settings…", null, (s, e) => bar.OpenSettings("Widget"));
+        menu.Items.Add(lockItem);
+        menu.Items.Add("Hide widget", null, (s, e) => bar.SetWidget(false));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("PC Stats Bar settings…", null, (s, e) => bar.OpenSettings(null));
+    }
+
+    bool ClickThroughWanted { get { return c.WidgetLocked && c.WidgetClickThrough; } }
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= 0x80000 | 0x80 | 0x08000000; // LAYERED | TOOLWINDOW | NOACTIVATE
+            if (Layer == 2) cp.ExStyle |= 0x8;          // TOPMOST
+            if (clickThrough) cp.ExStyle |= 0x20;       // TRANSPARENT: clicks fall through to what's underneath
+            return cp;
+        }
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == 0x21) { m.Result = (IntPtr)3; return; } // WM_MOUSEACTIVATE → MA_NOACTIVATE: clicking it never steals focus
+        if (m.Msg == 0x46 && Layer == 0) // WM_WINDOWPOSCHANGING: "on the desktop" keeps it underneath every other window
+        {
+            var wp = (WINDOWPOS)Marshal.PtrToStructure(m.LParam, typeof(WINDOWPOS));
+            if ((wp.flags & 0x4) == 0) { wp.hwndInsertAfter = new IntPtr(1); Marshal.StructureToPtr(wp, m.LParam, false); }
+        }
+        base.WndProc(ref m);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        surface.Dispose();
+        if (disposing) { DisposeFonts(); brush.Dispose(); menu.Dispose(); }
+        base.Dispose(disposing);
+    }
+
+    public void HideNow() { if (IsHandleCreated) ShowWindow(Handle, 0); }
+
+    // ---- dragging, snapping and the menu
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left && !c.WidgetLocked)
+        {
+            dragging = true;
+            grab = new Point(Cursor.Position.X - c.WidgetX, Cursor.Position.Y - c.WidgetY);
+        }
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        Cursor = c.WidgetLocked ? Cursors.Default : Cursors.SizeAll;
+        if (dragging)
+        {
+            var p = Snap(new Point(Cursor.Position.X - grab.X, Cursor.Position.Y - grab.Y));
+            c.WidgetX = p.X; c.WidgetY = p.Y;
+            SetWindowPos(Handle, IntPtr.Zero, p.X, p.Y, 0, 0, 0x1 | 0x4 | 0x10); // NOSIZE | NOZORDER | NOACTIVATE
+        }
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        if (dragging) { dragging = false; c.Save(); }
+        else if (e.Button == MouseButtons.Right) menu.Show(Cursor.Position);
+        base.OnMouseUp(e);
+    }
+
+    // Pulls the card flush to a screen edge (with a small gap) when it's dragged close to one.
+    Point Snap(Point p)
+    {
+        if (!c.WidgetSnap) return p;
+        var wa = Screen.FromPoint(Cursor.Position).WorkingArea;
+        int gap = (int)(12 * u), reach = (int)(18 * u);
+        int left = p.X + margin, top = p.Y + margin, right = p.X + winW - margin, bottom = p.Y + winH - margin;
+        if (Math.Abs(left - (wa.Left + gap)) < reach) p.X = wa.Left + gap - margin;
+        else if (Math.Abs(right - (wa.Right - gap)) < reach) p.X = wa.Right - gap - winW + margin;
+        if (Math.Abs(top - (wa.Top + gap)) < reach) p.Y = wa.Top + gap - margin;
+        else if (Math.Abs(bottom - (wa.Bottom - gap)) < reach) p.Y = wa.Bottom - gap - winH + margin;
+        return p;
+    }
+
+    // A new or off-screen widget (e.g. its monitor was unplugged) goes to the top-right of the main screen.
+    void EnsurePosition()
+    {
+        if (c.WidgetX == int.MinValue || !Screen.AllScreens.Any(sc => sc.WorkingArea.IntersectsWith(new Rectangle(c.WidgetX, c.WidgetY, winW, winH))))
+        {
+            var wa = Screen.PrimaryScreen.WorkingArea;
+            int gap = (int)(12 * u);
+            c.WidgetX = wa.Right - gap - winW + margin;
+            c.WidgetY = wa.Top + gap - margin;
+        }
+    }
+
+    // ---- fonts and theme
+    void EnsureFonts()
+    {
+        if (fLabel != null && Math.Abs(fontU - u) < 0.001f) return;
+        DisposeFonts();
+        var fam = Theme.Family;
+        fLabel = new Font(fam, 12.5f * u, FontStyle.Regular, GraphicsUnit.Pixel);
+        fValue = new Font(fam, 12.5f * u, FontStyle.Bold, GraphicsUnit.Pixel);
+        fHead = new Font(fam, 10f * u, FontStyle.Bold, GraphicsUnit.Pixel);
+        fSmall = new Font(fam, 10.5f * u, FontStyle.Regular, GraphicsUnit.Pixel);
+        fTitle = new Font(fam, 15f * u, FontStyle.Bold, GraphicsUnit.Pixel);
+        fontU = u;
+    }
+
+    void DisposeFonts()
+    {
+        foreach (var f in new[] { fLabel, fValue, fHead, fSmall, fTitle }) if (f != null) f.Dispose();
+        fLabel = fValue = fHead = fSmall = fTitle = null;
+    }
+
+    static bool appsLight; static DateTime appsLightAt;
+    bool IsLight()
+    {
+        if (c.WidgetTheme != 2) return c.WidgetTheme == 1;
+        if ((DateTime.UtcNow - appsLightAt).TotalSeconds > 3)
+        {
+            appsLightAt = DateTime.UtcNow;
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                    appsLight = k != null && Convert.ToInt32(k.GetValue("AppsUseLightTheme", 0)) == 1;
+            }
+            catch { appsLight = false; }
+        }
+        return appsLight;
+    }
+
+    // ---- what to show
+    static string Group(string id)
+    {
+        if (id == "Up" || id == "Down" || id == "NetTotal" || id == "Ping") return "Network";
+        if (id.StartsWith("Cpu")) return "Processor";
+        if (id.StartsWith("Ram")) return "Memory";
+        if (id.StartsWith("Gpu")) return "Graphics";
+        if (id.StartsWith("Disk")) return "Storage";
+        if (id == "Processes" || id == "Uptime") return "System";
+        return "Battery";
+    }
+
+    static string CleanCpu(string n)
+    {
+        n = n.Replace("(R)", "").Replace("(TM)", "").Replace(" CPU", "").Replace("Processor", "");
+        int at = n.IndexOf('@');
+        if (at > 0) n = n.Substring(0, at);
+        n = Regex.Replace(n, @"\s\d+-Core", "");
+        return Regex.Replace(n, @"\s+", " ").Trim();
+    }
+
+    static string HwName(string group, Snapshot s)
+    {
+        if (group == "Processor") return s.CpuName == "" ? null : CleanCpu(s.CpuName);
+        if (group == "Graphics") return s.HasGpu ? s.GpuName : null;
+        if (group == "Memory") return s.RamTotal > 0 ? s.RamTotal.ToString("0") + " GB" : null;
+        return null;
+    }
+
+    static Item Graph(Item r, double value, double max, double floor)
+    {
+        r.HistKey = r.Id; r.GraphValue = value; r.GraphMax = max; r.GraphFloor = floor;
+        return r;
+    }
+
+    // A percentage-style stat: bar, 0–100 graph, and the warning colour past its limit.
+    static Item Pct(Item r, double value, int warnAt)
+    {
+        r.Frac = Math.Max(0, Math.Min(1, value / 100));
+        r.Warn = value >= warnAt;
+        return Graph(r, value, 100, 1);
+    }
+
+    void AddStat(List<Item> rows, string id, Snapshot s)
+    {
+        var info = Stats.Get(id, c);
+        bool customIcon = c.IconOf(id) != "";
+        Func<string, string, Item> row = (label, value) =>
+        {
+            var it = new Item { Id = id, Label = label, Value = value, Icon = info.Icon, IconLabel = info.TextLabel ? info.Short : null, Color = info.Color };
+            rows.Add(it);
+            return it;
+        };
+        Item r;
+        switch (id)
+        {
+            case "Up": Graph(row("Upload", StatsBar.Speed(s.Up)), s.Up, 0, 10240); break;
+            case "Down": Graph(row("Download", StatsBar.Speed(s.Down)), s.Down, 0, 10240); break;
+            case "NetTotal": Graph(row("Network total", StatsBar.Speed(s.Up + s.Down)), s.Up + s.Down, 0, 10240); break;
+            case "Ping":
+                if (s.Ping >= 0) { r = Graph(row("Ping", s.Ping + " ms"), s.Ping, 0, 20); r.Warn = s.Ping >= c.WarnPing; }
+                else { r = row("Ping", s.Ping == -2 ? "timeout" : "-- ms"); r.Warn = s.Ping == -2; r.Dim = s.Ping == -1; }
+                break;
+            case "Cpu": Pct(row("CPU usage", s.Cpu.ToString("0") + "%"), s.Cpu, c.WarnCpu); break;
+            case "CpuCores":
+                if (s.Cores.Length > 0) { r = row("CPU cores", "max " + s.Cores.Max().ToString("0") + "%"); r.Kind = 4; r.Cores = s.Cores; }
+                break;
+            case "CpuClock": if (s.CpuMhz > 0) Graph(row("CPU clock", (s.CpuMhz / 1000).ToString("0.00") + " GHz"), s.CpuMhz, 0, 1000); break;
+            case "CpuTemp":
+                if (double.IsNaN(s.CpuTemp)) { r = row("CPU temperature", "--°C"); r.Dim = true; }
+                else Pct(row("CPU temperature", s.CpuTemp.ToString("0") + "°C"), s.CpuTemp, c.WarnCpuTemp);
+                break;
+            case "CpuPower": if (!double.IsNaN(s.CpuPower)) Graph(row("CPU power", s.CpuPower.ToString("0") + " W"), s.CpuPower, 0, 10); break;
+            case "Ram": Pct(row("Memory usage", s.RamLoad + "%"), s.RamLoad, c.WarnRam); break;
+            case "RamGb":
+                r = Graph(row("Memory used", s.RamUsed.ToString("0.0") + " / " + s.RamTotal.ToString("0") + " GB"), s.RamUsed, s.RamTotal, 1);
+                if (s.RamTotal > 0) r.Frac = s.RamUsed / s.RamTotal;
+                break;
+            case "RamCommit": Pct(row("Committed memory", s.Commit.ToString("0") + "%"), s.Commit, c.WarnRam); break;
+            case "Gpu": if (s.HasGpu) Pct(row("GPU usage", s.GpuUtil.ToString("0") + "%"), s.GpuUtil, c.WarnGpu); break;
+            case "GpuTemp": if (s.HasGpu) Pct(row("GPU temperature", s.GpuTemp.ToString("0") + "°C"), s.GpuTemp, c.WarnGpuTemp); break;
+            case "GpuClock": if (s.HasGpu && s.GpuMhz > 0) Graph(row("GPU clock", s.GpuMhz.ToString("0") + " MHz"), s.GpuMhz, 0, 300); break;
+            case "GpuFan":
+                if (s.HasGpu && s.GpuFan >= 0)
+                {
+                    if (s.GpuFanRpm) Graph(row("GPU fan", s.GpuFan.ToString("0") + " rpm"), s.GpuFan, 0, 500);
+                    else Pct(row("GPU fan", s.GpuFan.ToString("0") + "%"), s.GpuFan, 101);
+                }
+                break;
+            case "GpuVram":
+                if (s.HasGpu && s.VramTotal > 0)
+                {
+                    r = Graph(row("VRAM used", s.VramUsed.ToString("0.0") + " / " + s.VramTotal.ToString("0") + " GB"), s.VramUsed, s.VramTotal, 1);
+                    r.Frac = s.VramUsed / s.VramTotal;
+                }
+                break;
+            case "GpuVramPct":
+                if (s.HasGpu && s.VramTotal > 0) { double p = s.VramUsed * 100 / s.VramTotal; Pct(row("VRAM usage", p.ToString("0") + "%"), p, c.WarnRam); }
+                break;
+            case "GpuPower": if (s.HasGpu) Graph(row("GPU power", s.GpuPower.ToString("0") + " W"), s.GpuPower, 0, 10); break;
+            case "Disk": if (s.Disk >= 0) Pct(row("Disk activity", s.Disk.ToString("0") + "%"), s.Disk, 95); break;
+            case "DiskRead": if (s.DiskRead >= 0) Graph(row("Disk read", StatsBar.Speed(s.DiskRead)), s.DiskRead, 0, 10240); break;
+            case "DiskWrite": if (s.DiskWrite >= 0) Graph(row("Disk write", StatsBar.Speed(s.DiskWrite)), s.DiskWrite, 0, 10240); break;
+            case "DiskFree":
+                if (s.FreeGb >= 0)
+                {
+                    r = row("Free space (" + s.FreeName + ")", StatsBar.SizeGb(s.FreeGb) + " free");
+                    r.Frac = Math.Max(0, Math.Min(1, 1 - s.FreePct / 100)); // the bar shows how full the drive is
+                    r.Warn = s.FreePct <= c.WarnFreePct;
+                }
+                break;
+            case "Processes": if (s.Processes >= 0) Graph(row("Processes", s.Processes.ToString()), s.Processes, 0, 10); break;
+            case "Uptime": row("Uptime", StatsBar.Duration(s.Uptime)); break;
+            case "PcBattery":
+            {
+                var ps = SystemInformation.PowerStatus;
+                if (ps.BatteryChargeStatus != BatteryChargeStatus.NoSystemBattery && ps.BatteryLifePercent <= 1)
+                {
+                    int p = (int)Math.Round(ps.BatteryLifePercent * 100);
+                    r = row("Battery", (ps.PowerLineStatus == PowerLineStatus.Online ? "Charging · " : "") + p + "%");
+                    r.Frac = p / 100.0; r.Warn = p <= c.WarnBattery;
+                    if (!customIcon) r.Icon = (g, rr, cc) => Icons.Battery(g, rr, cc, p);
+                }
+                break;
+            }
+            case "BatTime":
+            {
+                var ps = SystemInformation.PowerStatus;
+                if (ps.BatteryChargeStatus != BatteryChargeStatus.NoSystemBattery && ps.PowerLineStatus != PowerLineStatus.Online && ps.BatteryLifeRemaining > 0)
+                    row("Battery left", StatsBar.Duration(ps.BatteryLifeRemaining));
+                break;
+            }
+            case "Batteries":
+                foreach (var d in bar.Sampler.Devices)
+                {
+                    int p = d.Value;
+                    r = row(d.Key, p + "%");
+                    r.Frac = p / 100.0; r.Warn = p <= c.WarnBattery;
+                    if (!customIcon) r.Icon = Icons.ForDevice(d.Key, p);
+                }
+                break;
+        }
+    }
+
+    int HistoryLength() { return Math.Max(10, Math.Min(600, c.WidgetGraphSecs * 1000 / Math.Max(250, c.Interval))); }
+
+    List<Item> Build(Snapshot s, bool fresh)
+    {
+        var items = new List<Item>();
+        if (!string.IsNullOrEmpty(c.WidgetTitle)) items.Add(new Item { Kind = 3, Label = c.WidgetTitle });
+        string group = null;
+        bool pendingDivider = false;
+        foreach (var id in c.WidgetOrderList())
+        {
+            if (!c.WidgetIsOn(id)) continue;
+            if (Settings.IsDivider(id)) { if (items.Count > 0) pendingDivider = true; continue; }
+            var rows = new List<Item>();
+            AddStat(rows, id, s);
+            if (rows.Count == 0) continue;
+            var g = Group(id);
+            if (c.WidgetHeadings && g != group)
+            {
+                // A heading already separates groups, so a divider right before one is dropped.
+                items.Add(new Item { Kind = 1, Label = g.ToUpperInvariant(), Sub = c.WidgetHwNames ? HwName(g, s) : null });
+                pendingDivider = false;
+            }
+            group = g;
+            if (pendingDivider) { items.Add(new Item { Kind = 2 }); pendingDivider = false; }
+            items.AddRange(rows);
+        }
+        if (items.Count == 0 || items.All(x => x.Kind == 3))
+            items.Add(new Item { Label = "Right-click → Widget settings to pick stats", Value = "", Icon = Icons.Gear, Color = Theme.Accent, Dim = true });
+
+        int n = HistoryLength();
+        foreach (var it in items)
+        {
+            if (it.HistKey == null) continue;
+            Hist h;
+            if (!history.TryGetValue(it.HistKey, out h) || h.V.Length != n) history[it.HistKey] = h = new Hist(n);
+            if (fresh) h.Push((float)it.GraphValue);
+            it.Hist = h;
+        }
+        return items;
+    }
+
+    // ---- layout and drawing
+    bool ShowBars { get { return c.WidgetStyle == 0 || c.WidgetStyle == 2; } }
+    bool ShowGraphs { get { return c.WidgetStyle == 1 || c.WidgetStyle == 2; } }
+
+    float HeightOf(Item it, bool first)
+    {
+        switch (it.Kind)
+        {
+            case 3: return 30 * u;
+            case 1: return (first ? 18 : 30) * u;
+            case 2: return 13 * u;
+            case 4: return (20 + (c.WidgetStyle == 3 ? 18 : 28) + 6) * u;
+            default:
+                float h = 20 * u;
+                if (ShowBars && !double.IsNaN(it.Frac)) h += 9 * u;
+                if (ShowGraphs && it.Hist != null) h += 31 * u;
+                return h + 6 * u;
+        }
+    }
+
+    public void Render(bool force)
+    {
+        var s = bar.Sampler.Snap;
+        bool fresh = s != lastSnap;
+        if (!fresh && !force) return;
+        lastSnap = s;
+        if (clickThrough != ClickThroughWanted && IsHandleCreated)
+        {
+            clickThrough = ClickThroughWanted;
+            int ex = GetWindowLong(Handle, -20);
+            SetWindowLong(Handle, -20, clickThrough ? ex | 0x20 : ex & ~0x20);
+        }
+        u = DeviceDpi / 96f * c.WidgetScale / 100f;
+        EnsureFonts();
+        var items = Build(s, fresh);
+
+        float pad = 14 * u, contentH = 0;
+        for (int i = 0; i < items.Count; i++) contentH += HeightOf(items[i], i == 0);
+        margin = c.WidgetShadow && c.WidgetOpacity >= 25 ? (int)Math.Ceiling(14 * u) : 1;
+        int cardW = Math.Max(120, (int)(c.WidgetWidth * u));
+        winW = cardW + margin * 2;
+        winH = (int)Math.Ceiling(contentH + pad * 2 - 6 * u) + margin * 2;
+        EnsurePosition();
+
+        var bmp = surface.Canvas(winW, winH);
+        using (var g = Graphics.FromImage(bmp)) PaintWidget(g, items, cardW, pad);
+        surface.Push(Handle, c.WidgetX, c.WidgetY);
+        ShowWindow(Handle, 8); // SW_SHOWNA
+        if (Layer == 0) SetWindowPos(Handle, new IntPtr(1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10);       // bottom of the pile
+        else if (Layer == 2) SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10); // stay on top
+    }
+
+    void PaintWidget(Graphics g, List<Item> items, int cardW, float pad)
+    {
+        g.Clear(Color.Transparent);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+        bool light = IsLight();
+        Color bg = c.WidgetBg.A != 0 ? Color.FromArgb(255, c.WidgetBg) : light ? Color.FromArgb(246, 246, 248) : Color.FromArgb(22, 22, 26);
+        Color text = light ? Color.FromArgb(24, 24, 28) : Color.FromArgb(240, 240, 244);
+        Color sub = light ? Color.FromArgb(96, 96, 106) : Color.FromArgb(150, 150, 162);
+        Color track = light ? Color.FromArgb(26, 0, 0, 0) : Color.FromArgb(34, 255, 255, 255);
+        Color line = light ? Color.FromArgb(30, 0, 0, 0) : Color.FromArgb(28, 255, 255, 255);
+        int alpha = (int)Math.Round(c.WidgetOpacity * 2.55);
+
+        var card = new RectangleF(margin, margin, cardW, winH - margin * 2);
+        float rad = Math.Min(card.Height / 2, 12 * u * c.WidgetRound / 100f);
+        if (margin > 1) // soft shadow: stacked, slightly larger translucent shapes
+            for (int k = 7; k >= 1; k--)
+            {
+                var r = card;
+                r.Inflate(k * 1.6f * u, k * 1.6f * u);
+                r.Offset(0, 2 * u);
+                Theme.FillRound(g, r, rad + k * 1.6f * u, Color.FromArgb(Math.Max(1, 7 * alpha / 255), 0, 0, 0));
+            }
+        Theme.FillRound(g, card, rad, Color.FromArgb(Math.Max(1, alpha), bg)); // alpha ≥ 1 so the whole card still catches clicks
+        if (alpha > 0) Theme.StrokeRound(g, card, rad, line, 1);
+
+        float x0 = card.X + pad, x1 = card.Right - pad, y = card.Y + pad;
+        for (int i = 0; i < items.Count; i++)
+        {
+            var it = items[i];
+            float h = HeightOf(it, i == 0);
+            switch (it.Kind)
+            {
+                case 3:
+                    brush.Color = text;
+                    g.DrawString(it.Label, fTitle, brush, new RectangleF(x0, y, x1 - x0, 22 * u), Trim);
+                    break;
+                case 1:
+                {
+                    float ty = y + h - 16 * u;
+                    var hsz = g.MeasureString(it.Label, fHead, PointF.Empty, Typo);
+                    brush.Color = sub;
+                    g.DrawString(it.Label, fHead, brush, x0, ty, Typo);
+                    if (!string.IsNullOrEmpty(it.Sub))
+                    {
+                        brush.Color = Color.FromArgb(170, sub);
+                        var sf = new StringFormat(Trim) { Alignment = StringAlignment.Far };
+                        g.DrawString(it.Sub, fSmall, brush, new RectangleF(x0 + hsz.Width + 10 * u, ty - 2 * u, x1 - x0 - hsz.Width - 10 * u, hsz.Height + 4 * u), sf);
+                        sf.Dispose();
+                    }
+                    break;
+                }
+                case 2:
+                    using (var p = new Pen(line, 1)) g.DrawLine(p, x0, y + 6 * u, x1, y + 6 * u);
+                    break;
+                default:
+                    DrawRow(g, it, x0, x1, y, text, sub, track, line);
+                    break;
+            }
+            y += h;
+        }
+    }
+
+    void DrawRow(Graphics g, Item it, float x0, float x1, float y, Color text, Color sub, Color track, Color line)
+    {
+        float lineH = 20 * u, isz = 15 * u, lx = x0, w = x1 - x0;
+        Color accent = it.Warn ? c.WarnColor : it.Color;
+
+        if (it.IconLabel != null)
+        {
+            var sz = g.MeasureString(it.IconLabel, fHead, PointF.Empty, Typo);
+            brush.Color = it.Color;
+            g.DrawString(it.IconLabel, fHead, brush, x0, y + (lineH - sz.Height) / 2, Typo);
+            lx += Math.Max(isz, sz.Width) + 8 * u;
+        }
+        else if (it.Icon != null)
+        {
+            it.Icon(g, new RectangleF(x0, y + (lineH - isz) / 2, isz, isz), it.Color);
+            lx += isz + 9 * u;
+        }
+
+        var vsz = g.MeasureString(it.Value ?? "", fValue, PointF.Empty, Typo);
+        brush.Color = it.Warn ? c.WarnColor : it.Dim ? sub : text;
+        g.DrawString(it.Value ?? "", fValue, brush, x1 - vsz.Width, y + (lineH - vsz.Height) / 2, Typo);
+        brush.Color = Color.FromArgb(215, text);
+        g.DrawString(it.Label, fLabel, brush, new RectangleF(lx, y, Math.Max(1, x1 - vsz.Width - 10 * u - lx), lineH), Trim);
+
+        float yy = y + lineH;
+        if (it.Kind == 4)
+        {
+            float ch = (c.WidgetStyle == 3 ? 16 : 24) * u, top = yy + 3 * u;
+            int n = it.Cores.Length;
+            float gap = n > 24 ? 1 : Math.Max(1, 2 * u), bw = Math.Max(1, (w - gap * (n - 1)) / n);
+            for (int k = 0; k < n; k++)
+            {
+                float bx = x0 + k * (bw + gap), bh = ch * (float)Math.Max(0, Math.Min(1, it.Cores[k] / 100));
+                Theme.FillRound(g, new RectangleF(bx, top, bw, ch), Math.Min(bw / 2, 1.5f * u), track);
+                if (bh > 0.5f) Theme.FillRound(g, new RectangleF(bx, top + ch - bh, bw, bh), Math.Min(bw / 2, 1.5f * u), it.Cores[k] >= c.WarnCpu ? c.WarnColor : it.Color);
+            }
+            return;
+        }
+        if (ShowBars && !double.IsNaN(it.Frac))
+        {
+            var tr = new RectangleF(x0, yy + 3 * u, w, 5 * u);
+            Theme.FillRound(g, tr, tr.Height / 2, track);
+            float fw = (float)(w * Math.Max(0, Math.Min(1, it.Frac)));
+            if (fw >= 1) Theme.FillRound(g, new RectangleF(x0, tr.Y, Math.Max(fw, tr.Height), tr.Height), tr.Height / 2, accent);
+            yy += 9 * u;
+        }
+        if (ShowGraphs && it.Hist != null) DrawGraph(g, it, new RectangleF(x0, yy + 5 * u, w, 24 * u), accent, line);
+    }
+
+    void DrawGraph(Graphics g, Item it, RectangleF r, Color col, Color line)
+    {
+        var h = it.Hist;
+        int cap = h.V.Length, n = h.Count;
+        using (var p = new Pen(line, 1)) g.DrawLine(p, r.X, r.Bottom, r.Right, r.Bottom);
+        if (n < 2) return;
+        double max = it.GraphMax;
+        if (max <= 0) { max = it.GraphFloor; for (int i = 0; i < n; i++) max = Math.Max(max, h.At(i) * 1.15); }
+        // Newest sample at the right edge; the graph fills in from the right as history builds up.
+        var pts = new PointF[n];
+        for (int i = 0; i < n; i++)
+        {
+            float x = r.X + r.Width * (cap - n + i) / (cap - 1f);
+            float v = (float)Math.Max(0, Math.Min(1, h.At(i) / max));
+            pts[i] = new PointF(x, r.Bottom - v * r.Height);
+        }
+        using (var path = new GraphicsPath())
+        {
+            path.AddLines(pts);
+            path.AddLine(pts[n - 1].X, pts[n - 1].Y, pts[n - 1].X, r.Bottom);
+            path.AddLine(pts[n - 1].X, r.Bottom, pts[0].X, r.Bottom);
+            path.CloseFigure();
+            using (var fill = new LinearGradientBrush(new RectangleF(r.X, r.Y - 1, r.Width, r.Height + 2), Color.FromArgb(110, col), Color.FromArgb(6, col), 90f))
+                g.FillPath(fill, path);
+        }
+        using (var p = new Pen(col, Math.Max(1.2f, 1.5f * u)) { LineJoin = LineJoin.Round }) g.DrawLines(p, pts);
     }
 }
 
@@ -2109,13 +2785,21 @@ static class Theme
     static readonly Dictionary<string, Font> fonts = new Dictionary<string, Font>();
     static string family;
 
+    public static string Family
+    {
+        get
+        {
+            if (family == null) family = FontList.Has("Segoe UI Variable Text") ? "Segoe UI Variable Text" : "Segoe UI";
+            return family;
+        }
+    }
+
     // Cached: callers must not dispose these.
     public static Font UI(float size, FontStyle st = FontStyle.Regular)
     {
-        if (family == null) family = FontList.Has("Segoe UI Variable Text") ? "Segoe UI Variable Text" : "Segoe UI";
         var key = size + "|" + st;
         Font f;
-        if (!fonts.TryGetValue(key, out f)) fonts[key] = f = new Font(family, size, st);
+        if (!fonts.TryGetValue(key, out f)) fonts[key] = f = new Font(Family, size, st);
         return f;
     }
 
@@ -2339,9 +3023,13 @@ class ReorderList : Control
     public event Action<string> Toggled, Removed;
     public event Action<string, Rectangle> IconClicked;
 
-    public ReorderList(Settings c, List<string> items, int width)
+    readonly Func<string, bool> isOn;
+    readonly Action<string, bool> setOn;
+    readonly string dividerDesc;
+
+    public ReorderList(Settings c, List<string> items, int width, Func<string, bool> isOn, Action<string, bool> setOn, string dividerDesc)
     {
-        this.c = c; this.items = items;
+        this.c = c; this.items = items; this.isOn = isOn; this.setOn = setOn; this.dividerDesc = dividerDesc;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
         BackColor = Theme.Bg; TabStop = true;
         for (int i = 0; i < items.Count; i++) pos[items[i]] = i * Step;
@@ -2453,7 +3141,7 @@ class ReorderList : Control
         switch (part)
         {
             case "toggle":
-                Settings.Field(id).SetValue(c, !c.IsOn(id));
+                setOn(id, !isOn(id));
                 Invalidate();
                 if (Toggled != null) Toggled(id);
                 break;
@@ -2585,7 +3273,7 @@ class ReorderList : Control
     {
         string id = items[i];
         var info = Stats.Get(id, c);
-        bool divider = Settings.IsDivider(id), on = c.IsOn(id), lifted = i == drag, hot = i == hover && drag < 0;
+        bool divider = Settings.IsDivider(id), on = isOn(id), lifted = i == drag, hot = i == hover && drag < 0;
         float y = pos[id];
         var r = new RectangleF(0, y, Width - 1, RowH);
         if (lifted) Theme.FillRound(g, new RectangleF(3, y + 4, Width - 4, RowH), 8, Color.FromArgb(120, 0, 0, 0));
@@ -2613,7 +3301,7 @@ class ReorderList : Control
         // Title and status
         var tf = Theme.UI(10f); var sf = Theme.UI(8.5f);
         string title = divider ? "Divider" : info.Title;
-        string desc = divider ? dividerStyles[Math.Max(0, Math.Min(3, c.DividerStyle))] + " · separates groups" : on ? null : "Hidden";
+        string desc = divider ? (dividerDesc ?? dividerStyles[Math.Max(0, Math.Min(3, c.DividerStyle))] + " · separates groups") : on ? null : "Hidden";
         using (var tb = new SolidBrush(on ? Theme.Text : Theme.Sub)) using (var sb = new SolidBrush(Theme.Sub))
         {
             if (desc == null) g.DrawString(title, tf, tb, 68, y + (RowH - tf.GetHeight(g)) / 2);
@@ -2823,7 +3511,7 @@ class SettingsForm : Form
         var brand = new Label { Text = "PC Stats Bar", Font = Theme.UI(13f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Height = 64, Dock = DockStyle.Top, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var version = new Label { Text = "v" + VersionText, Font = Theme.UI(8.5f), ForeColor = Theme.Sub, AutoSize = false, Height = 36, Dock = DockStyle.Bottom, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var navList = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(10, 0, 10, 0), BackColor = Theme.Nav };
-        foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "General", "About" }) navList.Controls.Add(NavItem(p));
+        foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "Widget", "General", "About" }) navList.Controls.Add(NavItem(p));
         nav.Controls.Add(navList); nav.Controls.Add(brand); nav.Controls.Add(version);
 
         var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
@@ -2851,7 +3539,7 @@ class SettingsForm : Form
 
     static readonly Dictionary<string, IconFn> navIcons = new Dictionary<string, IconFn>
     {
-        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "General", Icons.Gear }, { "About", Icons.Info }
+        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "Widget", Icons.Monitor }, { "General", Icons.Gear }, { "About", Icons.Info }
     };
 
     Label NavItem(string name)
@@ -2979,12 +3667,15 @@ class SettingsForm : Form
         else if (name == "Arrange") BuildArrange();
         else if (name == "Appearance") BuildAppearance();
         else if (name == "Colours") BuildColours();
+        else if (name == "Widget") BuildWidget();
         else if (name == "General") BuildGeneral();
         else BuildAbout();
 
         content.ResumeLayout();
         UpdatePreview();
     }
+
+    public void RefreshIfShowing(string name) { if (page == name) RefreshPage(); }
 
     // Rebuilds the current page without losing the scroll position.
     void RefreshPage()
@@ -3103,7 +3794,7 @@ class SettingsForm : Form
         Add(Icons.List, Theme.Accent, "Show switched-off stats", "Turn off to see only what's on the taskbar", showOff);
 
         var visible = c.OrderList().Where(id => c.ArrangeShowOff || c.IsOn(id)).ToList();
-        arrangeList = new ReorderList(c, visible, RowW) { Margin = new Padding(0, 4, 0, 0) };
+        arrangeList = new ReorderList(c, visible, RowW, c.IsOn, (id, on) => Settings.Field(id).SetValue(c, on), null) { Margin = new Padding(0, 4, 0, 0) };
         arrangeList.Moved += order =>
         {
             // Hidden items keep their slots; the visible ones fill theirs in the new order.
@@ -3247,6 +3938,89 @@ class SettingsForm : Form
         Hint("A lightweight stats overlay for the Windows taskbar.", 28);
         Add(Icons.Info, Theme.Accent, "Version", null, new Label { Text = VersionText, AutoSize = false, Size = new Size(120, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Text, BackColor = Theme.Card, Font = Theme.UI(10f) });
         Add(Icons.Heart, Theme.Accent, "© Akila Sella Hennedige", "Free software under the GNU General Public License v3", null);
+    }
+
+    // ---- Widget: a desktop panel with its own stats, order and look.
+    void BuildWidget()
+    {
+        Hint("A desktop panel with live bars and graphs. Drag it to move it and right-click it for quick options. Icons and colours are shared with the taskbar bar.", 48);
+
+        Header("Desktop widget");
+        Switch(Icons.Monitor, Theme.Accent, "Show desktop widget", "WidgetShow");
+        Add(Icons.Layers, Theme.Accent, "Placement", "Where it sits among your windows",
+            Combo(new[] { "On the desktop (behind windows)", "Normal window", "Always on top" }, c.WidgetLayer, i => { c.WidgetLayer = i; Apply(); }, 230));
+        Switch(Icons.Grip, Theme.Accent, "Lock position", "WidgetLocked", "Stops it being dragged by accident");
+        Switch(Icons.Mouse, Theme.Accent, "Click-through when locked", "WidgetClickThrough", "Clicks pass to whatever is underneath. Unlock it from the taskbar bar's menu.");
+        Switch(Icons.Spacing, Theme.Accent, "Snap to screen edges", "WidgetSnap");
+        Add(Icons.Monitor, Theme.Accent, "Position", "Moves it back to the top-right corner", Btn("Reset position", (s, e) => { c.WidgetX = c.WidgetY = int.MinValue; Apply(); }));
+
+        Header("Look");
+        Add(Icons.Pulse, Theme.Accent, "Style", null,
+            Combo(new[] { "Bars", "Graphs", "Bars and graphs", "Minimal" }, c.WidgetStyle, i => { c.WidgetStyle = i; Apply(); }, 170));
+        Add(Icons.Palette, Theme.Accent, "Theme", null,
+            Combo(new[] { "Dark", "Light", "Match Windows" }, c.WidgetTheme, i => { c.WidgetTheme = i; Apply(); }, 170));
+        var bgTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
+        var sw = new Swatch { Value = c.WidgetBg.A != 0 ? Color.FromArgb(255, c.WidgetBg) : Color.FromArgb(22, 22, 26), Margin = new Padding(0, 3, 8, 0) };
+        sw.Click += (s, e) =>
+        {
+            using (var dlg = new ColorDialog { Color = sw.Value, FullOpen = true })
+                if (dlg.ShowDialog(this) == DialogResult.OK) { c.WidgetBg = Color.FromArgb(255, dlg.Color); Apply(); RefreshPage(); }
+        };
+        bgTools.Controls.Add(sw);
+        bgTools.Controls.Add(Btn("Default", (s, e) => { c.WidgetBg = Color.FromArgb(0, 0, 0, 0); Apply(); RefreshPage(); }));
+        Add(Icons.Palette, Theme.Accent, "Background colour", c.WidgetBg.A != 0 ? "Custom colour" : "Follows the theme", bgTools);
+        SliderRow(Icons.Palette, Theme.Accent, "Background opacity", "WidgetOpacity", 0, 100, "%");
+        SliderRow(Icons.Chip, Theme.Accent, "Size", "WidgetScale", 60, 180, "%");
+        SliderRow(Icons.Spacing, Theme.Accent, "Width", "WidgetWidth", 200, 520, " px");
+        SliderRow(Icons.Palette, Theme.Accent, "Corner roundness", "WidgetRound", 0, 200, "%");
+        Switch(Icons.Layers, Theme.Accent, "Shadow", "WidgetShadow");
+        var title = new TextBox { Text = c.WidgetTitle, Width = 170, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Font = Theme.UI(9.5f) };
+        Action commit = () => { var v = title.Text.Trim(); if (v != c.WidgetTitle) { c.WidgetTitle = v; Apply(); } };
+        title.Leave += (s, e) => commit();
+        title.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { commit(); e.SuppressKeyPress = true; } };
+        Add(Icons.Text, Theme.Accent, "Title", "Shown at the top. Leave empty for none.", title);
+        Switch(Icons.List, Theme.Accent, "Group headings", "WidgetHeadings", "Processor, Graphics, Memory… above each group");
+        Switch(Icons.Chip, Theme.Accent, "Hardware names", "WidgetHwNames", "CPU and GPU model next to the headings");
+        var secs = new[] { 30, 60, 120, 300 };
+        Add(Icons.Clock, Theme.Accent, "Graph history", null,
+            Combo(new[] { "30 seconds", "1 minute", "2 minutes", "5 minutes" }, Array.IndexOf(secs, c.WidgetGraphSecs), i => { c.WidgetGraphSecs = secs[i]; Apply(); }, 150));
+
+        Header("Contents");
+        Hint("Switch on the stats to show, and drag rows to reorder them. Dividers add a line within a group.", 30);
+        var tools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 8) };
+        var addBtn = Btn("+  Add divider", (s, e) =>
+        {
+            var id = c.NewDividerId();
+            var o = c.WidgetOrderList();
+            int at = arrangeList != null && arrangeList.SelectedId != null ? o.IndexOf(arrangeList.SelectedId) + 1 : o.Count;
+            o.Insert(at, id);
+            c.WidgetOrder = string.Join(",", o);
+            Apply();
+            pendingSelect = id;
+            RefreshPage();
+        }, true);
+        addBtn.Margin = new Padding(0, 0, 8, 0);
+        var resetBtn = Btn("Reset contents", (s, e) =>
+        {
+            if (MessageBox.Show(this, "Put the widget's stats back to the default selection and order, and remove its dividers?", "PC Stats Bar", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            c.WidgetOrder = Settings.DefaultWidgetOrder;
+            c.WidgetItems = Settings.DefaultWidgetItems;
+            Apply(); RefreshPage();
+        });
+        tools.Controls.Add(addBtn); tools.Controls.Add(resetBtn);
+        list.Controls.Add(tools);
+
+        arrangeList = new ReorderList(c, c.WidgetOrderList(), RowW, c.WidgetIsOn, c.SetWidgetOn, "Separator line") { Margin = new Padding(0, 4, 0, 0) };
+        arrangeList.Moved += order => { c.WidgetOrder = string.Join(",", order); Apply(); };
+        arrangeList.Toggled += id => Apply();
+        arrangeList.Removed += id =>
+        {
+            c.WidgetOrder = string.Join(",", c.WidgetOrderList().Where(x => x != id));
+            c.SetCustom(id, "", null);
+            Apply();
+        };
+        arrangeList.IconClicked += ShowIconPicker;
+        list.Controls.Add(arrangeList);
     }
 
     void BuildGeneral()

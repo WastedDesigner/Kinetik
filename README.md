@@ -6,11 +6,12 @@ A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It
 
 ![PC Stats Bar on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
 
-**Latest version: v1.3.1.** [Download it from Releases](../../releases/latest).
+**Latest version: v1.4.0.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 
 - [Features](#features)
+- [Desktop widget](#desktop-widget)
 - [Download and use](#download-and-use)
 - [Settings guide](#settings-guide)
 - [Tips and shortcuts](#tips-and-shortcuts)
@@ -63,6 +64,26 @@ And with text labels instead of icons and dot-style dividers:
 - **Warning limits:** choose when values turn to the warning colour (CPU / RAM / GPU usage, CPU / GPU temperature, low battery, high ping, low disk space).
 - **Live preview** at the top of the Settings window shows every change as you make it.
 
+## Desktop widget
+
+<img src="screenshots/widget.png" alt="The desktop widget in the Bars and graphs style" align="right" width="300">
+
+Alongside the taskbar bar, PC Stats Bar can show a floating panel on your desktop, similar to LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or in **Settings → Widget**.
+
+- **Grouped and labelled:** stats sit under headings (Processor, Graphics, Memory, Network, Storage, System, Battery), with your CPU and GPU model names next to them
+- **Bars and graphs:** each stat can have a coloured usage bar and a scrolling history graph. CPU cores get a per-thread bar chart.
+- **Four styles:** Bars, Graphs, Bars and graphs, or Minimal
+- **Your look:** dark, light or match-Windows theme, any background colour and opacity, size, width, corner roundness, shadow and an optional title
+- **Placement:** on the desktop behind your windows, as a normal window, or always on top
+- **Moving it:** drag it anywhere. It snaps to screen edges and remembers its position. Lock it in place, or make it click-through so clicks pass to whatever is underneath.
+- **Its own contents:** choose which stats to show and drag them into any order, with optional dividers. Icons, colours and warning limits are shared with the bar.
+- **Graph history:** 30 seconds, 1, 2 or 5 minutes
+- **Right-click the widget** for Widget settings, Lock position and Hide widget
+
+The widget costs nothing while it's switched off. Stats are only measured when the bar or the widget shows them.
+
+<br clear="right">
+
 ### Quality of life
 
 - Matches a light or dark taskbar automatically
@@ -101,17 +122,19 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 | **Arrange** | The order of everything on the bar. Drag rows, click an icon to change it or its colour, **+ Add divider**, remove dividers with ✕, and **Reset order**. Turn off **Show switched-off stats** to list only what's on your taskbar. |
 | **Appearance** | Font and size, one or two lines, spacing sliders (with **Reset spacing**), divider style and height, and the background pill's opacity and corner roundness. |
 | **Colours** | Match the taskbar theme, text and warning colours, a colour for each icon group, and the background colour. |
+| **Widget** | Turn the desktop widget on, and set its placement, lock, click-through and snapping, style, theme, colours, size, width, roundness, shadow, title, headings and graph history. Its **Contents** list works like the Arrange page. |
 | **General** | Update interval, shift left, left-click action, hide in fullscreen, warning limits, run at startup, restart as administrator, and restore default settings. |
 | **About** | Version number and copyright. |
 
 ## Tips and shortcuts
 
-- **Right-click menu:** Settings…, Arrange stats…, Refresh batteries now, Restart as administrator, Exit
+- **Right-click menu:** Settings…, Arrange stats…, Desktop widget, Unlock desktop widget (when it's locked), Refresh batteries now, Restart as administrator, Exit
+- **Widget:** drag to move it, and right-click it for Widget settings, Lock position and Hide widget. If it's locked and click-through, unlock it from the bar's right-click menu.
 - **Arrange page keys:** ↑ / ↓ select a row, **Alt+↑ / Alt+↓** (or Ctrl) move it, **Space** switches it on or off, **Delete** removes a divider
 - **Sliders:** click one first, then use the mouse wheel or ← / → keys for fine adjustments
 - **Text labels instead of icons:** open the icon picker and choose **Text** for a compact, icon-free look
 - **Grouping:** add dividers, then pick a divider style on the Appearance page. **Blank space** gives gaps without lines.
-- **Command line:** `PCStatsBar.exe --settings Arrange` opens Settings on a specific page (Stats, Arrange, Appearance, Colours, General or About)
+- **Command line:** `PCStatsBar.exe --settings Arrange` opens Settings on a specific page (Stats, Arrange, Appearance, Colours, Widget, General or About)
 
 ## CPU temperature
 
@@ -135,9 +158,22 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Some stats aren't available on every GPU. Integrated graphics often don't report temperature, power, clock or fan speed.
 - GPU fan speed shows 0% when the card's fans have stopped at idle, which many cards do.
 - Batteries of devices on proprietary USB dongles (Razer HyperSpeed, Logitech Lightspeed, SteelSeries, etc.) are only visible to their vendor apps, so they aren't shown. The same devices connected over Bluetooth do work.
+- The widget's "On the desktop" placement keeps it behind your windows, but Windows' Show desktop (Win+D) may hide it. If it does, choose **Always on top** instead.
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v1.4.0: desktop widget
+- **New: desktop widget.** A floating panel for your desktop, like LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or **Settings → Widget**.
+  - Stats are grouped under headings (Processor, Graphics, Memory, Network, Storage, System, Battery) with your CPU and GPU model names
+  - Each stat has a coloured usage bar and/or a scrolling history graph, and CPU cores get a per-thread bar chart
+  - Four styles: Bars, Graphs, Bars and graphs, Minimal
+  - Dark, light or match-Windows theme, with custom background colour, opacity, size, width, corner roundness, shadow and an optional title
+  - Place it on the desktop behind your windows, as a normal window, or always on top
+  - Drag it anywhere. It snaps to screen edges and remembers its position, and can be locked or made click-through.
+  - Has its own list of stats and order (drag to rearrange, with dividers), while sharing icons, colours and warning limits with the bar
+  - Graph history of 30 seconds to 5 minutes
+- Stats are measured only when the bar or the widget shows them, so the widget costs nothing while it's off.
 
 ### v1.3.1
 - **Run at startup no longer uses PowerShell.** The startup task is now created with Windows' built-in `schtasks` tool, so antivirus programs (such as Bitdefender) no longer flag it as suspicious. It works the same as before: it starts elevated at sign-in with no UAC prompt, runs on battery, and has no time limit. If you already had Run at startup on, you don't need to change anything.

@@ -1,3 +1,18 @@
+# PC Stats Bar v1.4.0
+
+- **New: desktop widget.** A floating panel for your desktop, like LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or **Settings → Widget**.
+  - Stats are grouped under headings (Processor, Graphics, Memory, Network, Storage, System, Battery) with your CPU and GPU model names
+  - Each stat has a coloured usage bar and/or a scrolling history graph, and CPU cores get a per-thread bar chart
+  - Four styles: Bars, Graphs, Bars and graphs, Minimal
+  - Dark, light or match-Windows theme, with custom background colour, opacity, size, width, corner roundness, shadow and an optional title
+  - Place it on the desktop behind your windows, as a normal window, or always on top
+  - Drag it anywhere. It snaps to screen edges and remembers its position, and can be locked or made click-through.
+  - Has its own list of stats and order (drag to rearrange, with dividers), while sharing icons, colours and warning limits with the bar
+  - Graph history of 30 seconds to 5 minutes
+- Stats are measured only when the bar or the widget shows them, so the widget costs nothing while it's off.
+
+---
+
 # PC Stats Bar v1.3.1
 
 - **Run at startup no longer uses PowerShell.** The startup task is now created with Windows' built-in `schtasks` tool, so antivirus programs (such as Bitdefender) no longer flag it as suspicious. It works the same as before: it starts elevated at sign-in with no UAC prompt, runs on battery, and has no time limit. If you already had Run at startup on, you don't need to change anything.
