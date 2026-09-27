@@ -1,3 +1,10 @@
+# PC Stats Bar v1.3.0
+
+- **License change:** PC Stats Bar is now free software under the [GNU General Public License v3.0](LICENSE). You can still use, modify and share it freely, but modified versions you distribute must also be GPL with source available. Earlier releases (v1.2.1 and before) remain under the MIT License.
+- The About tab shows the new license.
+
+---
+
 # PC Stats Bar v1.2.1
 
 - The license and the exe's company details now name Akila Sella Hennedige as the copyright holder

@@ -4,6 +4,13 @@
 // connected Bluetooth devices. Every item can be reordered, given its own icon and colour, and split into groups
 // with dividers. CPU temperature/power come from LibreHardwareMonitorLib (embedded in the exe) and need admin rights.
 // Right-click the bar for Settings. Build: build.bat (uses the .NET Framework compiler built into Windows).
+//
+// Copyright (C) 2026 Akila Sella Hennedige
+// This program is free software: you can redistribute it and/or modify it under the terms of the GNU General
+// Public License as published by the Free Software Foundation, either version 3 of the License, or (at your
+// option) any later version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+// without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the LICENSE
+// file or <https://www.gnu.org/licenses/> for details.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -29,10 +36,10 @@ using Microsoft.Win32;
 [assembly: AssemblyDescription("Taskbar overlay showing PC stats and device battery levels")]
 [assembly: AssemblyProduct("PC Stats Bar")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
-[assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. MIT License.")]
-[assembly: AssemblyVersion("1.2.1.0")]
-[assembly: AssemblyFileVersion("1.2.1.0")]
-[assembly: AssemblyInformationalVersion("1.2.1")]
+[assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyInformationalVersion("1.3.0")]
 
 // ======================================================================= Settings
 class Settings
@@ -3214,7 +3221,7 @@ class SettingsForm : Form
         list.Controls.Add(new Label { Text = "PC Stats Bar", Font = Theme.UI(16f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 0, 0, 0) });
         Hint("A lightweight stats overlay for the Windows taskbar.", 28);
         Add(Icons.Info, Theme.Accent, "Version", null, new Label { Text = VersionText, AutoSize = false, Size = new Size(120, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Text, BackColor = Theme.Card, Font = Theme.UI(10f) });
-        Add(Icons.Heart, Theme.Accent, "© Akila Sella Hennedige", "Released under the MIT License", null);
+        Add(Icons.Heart, Theme.Accent, "© Akila Sella Hennedige", "Free software under the GNU General Public License v3", null);
     }
 
     void BuildGeneral()

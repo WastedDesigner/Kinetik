@@ -90,6 +90,8 @@ Found a bug or want a feature? [Open an issue](../../issues) and include your Wi
 
 ## License
 
-Released under the [MIT License](LICENSE). You're free to use, modify and share it, including commercially.
+Released under the [GNU General Public License v3.0](LICENSE) (GPL-3.0-or-later). You're free to use, study, modify and share it, including commercially, as long as anything you distribute that's based on it is also released under the GPL with its source code available.
+
+Versions up to and including v1.2.1 were released under the MIT License.
 
 Third-party components bundled in the release exe keep their own licenses. [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) is licensed under MPL-2.0, and HidSharp under Apache-2.0.
