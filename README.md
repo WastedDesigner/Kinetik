@@ -130,6 +130,15 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 | **General** | Update interval, shift left, left-click action, hide in fullscreen, warning limits, run at startup, restart as administrator, and restore default settings. |
 | **About** | Version number and copyright. |
 
+### Screenshots
+
+<table>
+<tr><td width="50%" valign="top"><img src="screenshots/settings-stats.png" alt="Stats page"><br><sub><b>Stats</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-arrange.png" alt="Arrange page"><br><sub><b>Arrange</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/settings-appearance.png" alt="Appearance page"><br><sub><b>Appearance</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-colours.png" alt="Colours page"><br><sub><b>Colours</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/settings-widget.png" alt="Widget page"><br><sub><b>Widget</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-general.png" alt="General page"><br><sub><b>General</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td><td width="50%"></td></tr>
+</table>
+
 ## Tips and shortcuts
 
 - **Right-click menu:** Settings…, Arrange stats…, Desktop widget, Unlock desktop widget (when it's locked), Refresh batteries now, Restart as administrator, Exit
