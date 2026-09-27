@@ -84,6 +84,10 @@ The widget costs nothing while it's switched off. Stats are only measured when t
 
 <br clear="right">
 
+Everything about the widget is set on the **Widget** page in Settings:
+
+![The Widget page in Settings](screenshots/settings-widget.png)
+
 ### Quality of life
 
 - Matches a light or dark taskbar automatically
