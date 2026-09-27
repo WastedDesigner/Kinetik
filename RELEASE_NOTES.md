@@ -1,3 +1,9 @@
+# PC Stats Bar v1.2.1
+
+- The license and the exe's company details now name Akila Sella Hennedige as the copyright holder
+
+---
+
 # PC Stats Bar v1.2.0
 
 ## What's new

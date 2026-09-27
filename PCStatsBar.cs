@@ -28,11 +28,11 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("PC Stats Bar")]
 [assembly: AssemblyDescription("Taskbar overlay showing PC stats and device battery levels")]
 [assembly: AssemblyProduct("PC Stats Bar")]
-[assembly: AssemblyCompany("WastedDesigner")]
+[assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. MIT License.")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
-[assembly: AssemblyInformationalVersion("1.2.0")]
+[assembly: AssemblyVersion("1.2.1.0")]
+[assembly: AssemblyFileVersion("1.2.1.0")]
+[assembly: AssemblyInformationalVersion("1.2.1")]
 
 // ======================================================================= Settings
 class Settings
