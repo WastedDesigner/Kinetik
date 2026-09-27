@@ -1,3 +1,13 @@
+# PC Stats Bar v1.2.0
+
+## What's new
+- New **About** tab in Settings showing the version number and copyright (© Akila Sella Hennedige)
+- The version shown at the bottom of the Settings sidebar now includes the patch number (e.g. v1.2.0)
+
+Download **`PCStatsBar.exe`** below and replace your old copy (right-click the bar → **Exit** first). Your settings carry over unchanged.
+
+---
+
 # PC Stats Bar v1.1.0
 
 A customisation and efficiency update: pick your own icons and colours per stat, add as many dividers as you like, fine-tune spacing, reorder with a much smoother Arrange page, and choose from 11 new stats. It also uses a fraction of the memory it did before.

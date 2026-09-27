@@ -1,4 +1,4 @@
-// PC Stats Bar: a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
+﻿// PC Stats Bar: a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
 // Shows network speed and ping, CPU (usage, clock, temp, power, per-core), RAM and commit, GPU (usage, temp, clock,
 // fan, VRAM, power), disk activity / throughput / free space, processes, uptime, and battery levels of the PC and
 // connected Bluetooth devices. Every item can be reordered, given its own icon and colour, and split into groups
@@ -29,10 +29,10 @@ using Microsoft.Win32;
 [assembly: AssemblyDescription("Taskbar overlay showing PC stats and device battery levels")]
 [assembly: AssemblyProduct("PC Stats Bar")]
 [assembly: AssemblyCompany("WastedDesigner")]
-[assembly: AssemblyCopyright("Copyright © 2026 WastedDesigner. MIT License.")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
-[assembly: AssemblyInformationalVersion("1.1")]
+[assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. MIT License.")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyInformationalVersion("1.2.0")]
 
 // ======================================================================= Settings
 class Settings
@@ -1213,6 +1213,17 @@ static class Icons
             }
             g.DrawEllipse(p, cx - s * 0.28f, cy - s * 0.28f, s * 0.56f, s * 0.56f);
             g.DrawEllipse(p, cx - s * 0.1f, cy - s * 0.1f, s * 0.2f, s * 0.2f);
+        }
+    }
+
+    public static void Info(Graphics g, RectangleF r, Color c)
+    {
+        float s = r.Width, cx = r.X + s / 2, d = s * 0.13f;
+        using (var p = P(c, s)) using (var b = new SolidBrush(c))
+        {
+            g.DrawEllipse(p, r.X + s * 0.08f, r.Y + s * 0.08f, s * 0.84f, s * 0.84f);
+            g.FillEllipse(b, cx - d / 2, r.Y + s * 0.26f, d, d);
+            g.DrawLine(p, cx, r.Y + s * 0.46f, cx, r.Y + s * 0.72f);
         }
     }
 
@@ -2778,9 +2789,9 @@ class SettingsForm : Form
 
         // Navigation
         var brand = new Label { Text = "PC Stats Bar", Font = Theme.UI(13f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Height = 64, Dock = DockStyle.Top, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
-        var version = new Label { Text = "v" + Application.ProductVersion, Font = Theme.UI(8.5f), ForeColor = Theme.Sub, AutoSize = false, Height = 36, Dock = DockStyle.Bottom, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
+        var version = new Label { Text = "v" + VersionText, Font = Theme.UI(8.5f), ForeColor = Theme.Sub, AutoSize = false, Height = 36, Dock = DockStyle.Bottom, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var navList = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(10, 0, 10, 0), BackColor = Theme.Nav };
-        foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "General" }) navList.Controls.Add(NavItem(p));
+        foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "General", "About" }) navList.Controls.Add(NavItem(p));
         nav.Controls.Add(navList); nav.Controls.Add(brand); nav.Controls.Add(version);
 
         var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
@@ -2808,7 +2819,7 @@ class SettingsForm : Form
 
     static readonly Dictionary<string, IconFn> navIcons = new Dictionary<string, IconFn>
     {
-        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "General", Icons.Gear }
+        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "General", Icons.Gear }, { "About", Icons.Info }
     };
 
     Label NavItem(string name)
@@ -2936,7 +2947,8 @@ class SettingsForm : Form
         else if (name == "Arrange") BuildArrange();
         else if (name == "Appearance") BuildAppearance();
         else if (name == "Colours") BuildColours();
-        else BuildGeneral();
+        else if (name == "General") BuildGeneral();
+        else BuildAbout();
 
         content.ResumeLayout();
         UpdatePreview();
@@ -3164,6 +3176,45 @@ class SettingsForm : Form
         ColourRow(Icons.Clock, "Other (processes, uptime)", "MiscColor");
         Header("Background");
         ColourRow(Icons.Palette, "Pill colour", "PillColor");
+    }
+
+    static string VersionText { get { return Assembly.GetExecutingAssembly().GetName().Version.ToString(3); } }
+
+    // The app icon's frames are PNG-compressed, which Icon.ToBitmap garbles, so decode the PNG frame directly.
+    static Bitmap LoadLogo(int size)
+    {
+        try
+        {
+            using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("icon.ico"))
+            {
+                if (st == null) return null;
+                var b = new byte[st.Length];
+                st.Read(b, 0, b.Length);
+                int count = BitConverter.ToUInt16(b, 4), best = -1, bestSize = 0;
+                for (int i = 0; i < count; i++)
+                {
+                    int w = b[6 + 16 * i] == 0 ? 256 : b[6 + 16 * i];
+                    if (best < 0 || (w >= size ? (bestSize < size || w < bestSize) : w > bestSize && bestSize < size)) { best = i; bestSize = w; }
+                }
+                int len = BitConverter.ToInt32(b, 6 + 16 * best + 8), off = BitConverter.ToInt32(b, 6 + 16 * best + 12);
+                using (var ms = new MemoryStream(b, off, len))
+                using (var img = Image.FromStream(ms))
+                    return new Bitmap(img);
+            }
+        }
+        catch { return null; }
+    }
+
+    void BuildAbout()
+    {
+        var logo = new PictureBox { Size = new Size(64, 64), SizeMode = PictureBoxSizeMode.Zoom, Margin = new Padding(2, 24, 0, 8), BackColor = Theme.Bg };
+        logo.Image = LoadLogo(128);
+        logo.Disposed += (s, e) => { if (logo.Image != null) logo.Image.Dispose(); };
+        list.Controls.Add(logo);
+        list.Controls.Add(new Label { Text = "PC Stats Bar", Font = Theme.UI(16f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 0, 0, 0) });
+        Hint("A lightweight stats overlay for the Windows taskbar.", 28);
+        Add(Icons.Info, Theme.Accent, "Version", null, new Label { Text = VersionText, AutoSize = false, Size = new Size(120, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Text, BackColor = Theme.Card, Font = Theme.UI(10f) });
+        Add(Icons.Heart, Theme.Accent, "© Akila Sella Hennedige", "Released under the MIT License", null);
     }
 
     void BuildGeneral()
