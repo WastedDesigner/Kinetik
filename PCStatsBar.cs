@@ -37,9 +37,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("PC Stats Bar")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
-[assembly: AssemblyInformationalVersion("1.3.0")]
+[assembly: AssemblyVersion("1.3.1.0")]
+[assembly: AssemblyFileVersion("1.3.1.0")]
+[assembly: AssemblyInformationalVersion("1.3.1")]
 
 // ======================================================================= Settings
 class Settings
@@ -1509,15 +1509,40 @@ static class Program
         using (var k = Registry.CurrentUser.CreateSubKey(RunKey)) k.DeleteValue(AppName, false);
         if (IsAdmin) Run("schtasks.exe", "/Delete /F /TN " + AppName);
         if (!on) return;
-        if (IsAdmin)
-        {
-            var ps = "$a=New-ScheduledTaskAction -Execute '" + Application.ExecutablePath.Replace("'", "''") + "';" +
-                     "$t=New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME;" +
-                     "$s=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0;" +
-                     "Register-ScheduledTask -TaskName '" + AppName + "' -Action $a -Trigger $t -Settings $s -RunLevel Highest -Force";
-            if (Run("powershell.exe", "-NoProfile -NonInteractive -Command \"" + ps.Replace("\"", "\\\"") + "\"") == 0) return;
-        }
+        if (IsAdmin && CreateLogonTask(Application.ExecutablePath, AppName, true)) return;
         using (var k = Registry.CurrentUser.CreateSubKey(RunKey)) k.SetValue(AppName, "\"" + Application.ExecutablePath + "\"");
+    }
+
+    // Registers a logon task with schtasks.exe. It uses a task XML file because plain schtasks switches can't turn off
+    // "only start on AC power" or the 72-hour run limit, which would stop the bar on laptops or after three days.
+    // (This used to go through PowerShell, which some antivirus programs flag.)
+    public static bool CreateLogonTask(string exe, string name, bool elevated)
+    {
+        var user = System.Security.SecurityElement.Escape(WindowsIdentity.GetCurrent().Name);
+        var xml =
+            "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
+            "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n" +
+            "  <RegistrationInfo><Description>Starts PC Stats Bar when you sign in.</Description></RegistrationInfo>\r\n" +
+            "  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + user + "</UserId></LogonTrigger></Triggers>\r\n" +
+            "  <Principals><Principal id=\"Author\"><UserId>" + user + "</UserId><LogonType>InteractiveToken</LogonType>" +
+            "<RunLevel>" + (elevated ? "HighestAvailable" : "LeastPrivilege") + "</RunLevel></Principal></Principals>\r\n" +
+            "  <Settings>\r\n" +
+            "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\r\n" +
+            "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\r\n" +
+            "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\r\n" +
+            "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\r\n" +
+            "    <Enabled>true</Enabled>\r\n" +
+            "  </Settings>\r\n" +
+            "  <Actions Context=\"Author\"><Exec><Command>" + System.Security.SecurityElement.Escape(exe) + "</Command></Exec></Actions>\r\n" +
+            "</Task>\r\n";
+        var file = Path.Combine(Path.GetTempPath(), name + "-task.xml");
+        try
+        {
+            File.WriteAllText(file, xml, Encoding.Unicode);
+            return Run("schtasks.exe", "/Create /F /TN \"" + name + "\" /XML \"" + file + "\"") == 0;
+        }
+        catch { return false; }
+        finally { try { File.Delete(file); } catch { } }
     }
 }
 

@@ -6,7 +6,7 @@ A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It
 
 ![PC Stats Bar on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
 
-**Latest version: v1.3.0.** [Download it from Releases](../../releases/latest).
+**Latest version: v1.3.1.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 
@@ -138,6 +138,9 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v1.3.1
+- **Run at startup no longer uses PowerShell.** The startup task is now created with Windows' built-in `schtasks` tool, so antivirus programs (such as Bitdefender) no longer flag it as suspicious. It works the same as before: it starts elevated at sign-in with no UAC prompt, runs on battery, and has no time limit. If you already had Run at startup on, you don't need to change anything.
 
 ### v1.3.0: license change
 - PC Stats Bar is now free software under the **GNU General Public License v3.0** (or later). Versions up to and including v1.2.1 were released under the MIT License.

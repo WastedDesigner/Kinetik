@@ -1,3 +1,9 @@
+# PC Stats Bar v1.3.1
+
+- **Run at startup no longer uses PowerShell.** The startup task is now created with Windows' built-in `schtasks` tool, so antivirus programs (such as Bitdefender) no longer flag it as suspicious. It works the same as before: it starts elevated at sign-in with no UAC prompt, runs on battery, and has no time limit. If you already had Run at startup on, you don't need to change anything.
+
+---
+
 # PC Stats Bar v1.3.0
 
 - **License change:** PC Stats Bar is now free software under the [GNU General Public License v3.0](LICENSE). You can still use, modify and share it freely, but modified versions you distribute must also be GPL with source available. Earlier releases (v1.2.1 and before) remain under the MIT License.
