@@ -50,7 +50,7 @@ class Settings
     public int SettingsVersion = CurrentVersion;
 
     // What to show. Each id in StatIds is also the name of its on/off field.
-    public bool Up = true, Down = true, NetTotal = false, Ping = false;
+    public bool Up = true, Down = true, NetTotal = false, Ping = false, Wifi = false;
     public bool Cpu = true, CpuCores = false, CpuClock = true, CpuTemp = true, CpuPower = false;
     public bool Ram = true, RamGb = true, RamCommit = false;
     public bool Gpu = true, GpuTemp = true, GpuClock = false, GpuFan = false, GpuVram = false, GpuVramPct = false, GpuPower = false;
@@ -97,16 +97,16 @@ class Settings
     public int Interval = 1000, Offset = 0;
     public bool ClickTaskMgr = true, HideFullscreen = true, TrayIcon = true;
     public bool TrayAnimate = true;
-    public int AnimFps = 60, TrayStyle = 0; // icon animation frame rate; tray icon background (see TrayIconArt.Styles)
+    public int AnimFps = 60, TrayStyle = 0, AppBackground = 0; // icon animation frame rate; tray icon background (see TrayIconArt.Styles)
 
     // Every stat that can appear on the bar, in default order. Dividers ("Sep1", "Sep2", ...) are added by the user.
-    public const string DefaultOrder = "Up,Down,NetTotal,Ping,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit," +
+    public const string DefaultOrder = "Up,Down,NetTotal,Ping,Wifi,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit," +
         "Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
     public static readonly string[] StatIds = DefaultOrder.Split(',');
 
     // The widget has its own order (grouped by hardware) and its own set of stats that are switched on.
     public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower," +
-        "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
+        "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Wifi,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
     public const string DefaultWidgetItems = "Cpu,CpuTemp,CpuClock,Gpu,GpuTemp,GpuVram,Ram,RamGb,Down,Up";
     public static readonly string[] WidgetIds = DefaultWidgetOrder.Split(',');
 
@@ -298,6 +298,7 @@ class Snapshot
     public double GpuUtil, GpuTemp, VramUsed, VramTotal, GpuPower, GpuMhz, GpuFan = -1;
     public bool GpuFanRpm;
     public double FreeGb = -1, FreePct; public string FreeName = "";
+    public int Wifi = -1; public string WifiName = ""; // signal quality 0–100, -1 = not on Wi-Fi
     public int Processes = -1, Ping = -1; // Ping: -1 = no reply yet, -2 = timed out
     public double Uptime;
     public string CpuName = "", CpuTempStatus = "";
@@ -504,8 +505,9 @@ class Sampler
     volatile List<string> lhmGpus = new List<string>();
 
     double freeGb = -1, freePct; string freeName = "", freeFor; DateTime freeAt;
-    System.Threading.Timer pingTimer, batTimer;
-    volatile int pingMs = -1;
+    System.Threading.Timer pingTimer, batTimer, wifiTimer;
+    volatile int pingMs = -1, wifiPct = -1;
+    volatile string wifiName = "";
     int pinging, readingBatteries;
 
     public Sampler(Settings cfg, Action onSample) { this.cfg = cfg; this.onSample = onSample; }
@@ -597,6 +599,8 @@ class Sampler
         if (c.Wants("DiskFree")) { ReadFree(now); s.FreeGb = freeGb; s.FreePct = freePct; s.FreeName = freeName; }
         ManagePing();
         s.Ping = c.Wants("Ping") ? pingMs : -1;
+        ManageWifi();
+        if (c.Wants("Wifi")) { s.Wifi = wifiPct; s.WifiName = wifiName; }
         ManageBatteries();
         s.Uptime = GetTickCount64() / 1000.0;
         return s;
@@ -748,6 +752,12 @@ class Sampler
     {
         if (cfg.Wants("Ping") && pingTimer == null) pingTimer = new System.Threading.Timer(_ => DoPing(), null, 0, 2000);
         else if (!cfg.Wants("Ping") && pingTimer != null) { pingTimer.Dispose(); pingTimer = null; pingMs = -1; }
+    }
+
+    void ManageWifi()
+    {
+        if (cfg.Wants("Wifi") && wifiTimer == null) wifiTimer = new System.Threading.Timer(_ => { string n; wifiPct = WifiSignal.Read(out n); wifiName = n; }, null, 0, 2000);
+        else if (!cfg.Wants("Wifi") && wifiTimer != null) { wifiTimer.Dispose(); wifiTimer = null; wifiPct = -1; WifiSignal.Close(); }
     }
 
     void DoPing()
@@ -1389,6 +1399,7 @@ static class Stats
         { "Down", new[] { "Download speed", "Download", "DownColor", "DN" } },
         { "NetTotal", new[] { "Total network speed", "Up / down", "DownColor", "NET" } },
         { "Ping", new[] { "Ping", "Signal", "UpColor", "PING" } },
+        { "Wifi", new[] { "Wi-Fi signal strength", "Wi-Fi", "DownColor", "WIFI" } },
         { "Cpu", new[] { "CPU usage", "Chip", "CpuColor", "CPU" } },
         { "CpuCores", new[] { "CPU per-core bars", "Cores", "CpuColor", "CORE" } },
         { "CpuClock", new[] { "CPU clock speed", "Gauge", "CpuColor", "CLK" } },
@@ -1699,6 +1710,7 @@ class StatsBar : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         Cfg.Load();
+        Theme.Use(Cfg.AppBackground);
 
         menu.Renderer = new DarkMenuRenderer();
         menu.Items.Add("Settings…", null, (s, e) => OpenSettings(null));
@@ -1896,6 +1908,7 @@ class StatsBar : Form
                 case "Ping":
                     add(s.Ping >= 0 ? s.Ping + " ms" : "-- ms", "888 ms", s.Ping == -2 || s.Ping >= c.WarnPing ? c.WarnColor : s.Ping < 0 ? dim : val);
                     break;
+                case "Wifi": if (s.Wifi >= 0) add(s.Wifi + "%", "100%", s.Wifi <= 25 ? c.WarnColor : val); break;
                 case "Cpu": add(s.Cpu.ToString("0") + "%", "100%", warn(s.Cpu, c.WarnCpu)); break;
                 case "CpuCores":
                     if (s.Cores.Length > 0) { var sg = seg(); sg.Bars = s.Cores; sg.BarColor = info.Color; segs.Add(sg); }
@@ -2246,6 +2259,7 @@ class StatsBar : Form
         if (s.CpuTempStatus != "" && (Cfg.CpuTemp || Cfg.CpuPower)) sb.AppendLine("CPU temp: " + s.CpuTempStatus);
         if (s.HasGpu) sb.AppendLine("GPU: " + s.GpuName);
         if (Cfg.Ping) sb.AppendLine("Ping: " + Cfg.PingHost);
+        if (Cfg.Wifi && s.WifiName != "") sb.AppendLine("Wi-Fi: " + s.WifiName);
         if (Cfg.DiskFree && s.FreeName != "") sb.AppendLine("Free space: " + s.FreeName + " (" + s.FreePct.ToString("0") + "% free)");
         foreach (var d in Sampler.Devices) sb.AppendLine(d.Key + ": " + d.Value + "%");
         sb.Append("Left-click: Task Manager  ·  Right-click: Settings");
@@ -2295,6 +2309,66 @@ class StatsBar : Form
     public void NotifySettings(string page)
     {
         if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.RefreshIfShowing(page);
+    }
+}
+
+// ======================================================================= Wi-Fi signal
+// Signal quality of the connected Wi-Fi network, straight from Windows' Native Wifi API (no netsh, no polling a process).
+static class WifiSignal
+{
+    [DllImport("wlanapi.dll")] static extern int WlanOpenHandle(int ver, IntPtr res, out int negotiated, out IntPtr handle);
+    [DllImport("wlanapi.dll")] static extern int WlanCloseHandle(IntPtr handle, IntPtr res);
+    [DllImport("wlanapi.dll")] static extern int WlanEnumInterfaces(IntPtr handle, IntPtr res, out IntPtr list);
+    [DllImport("wlanapi.dll")] static extern int WlanQueryInterface(IntPtr handle, ref Guid iface, int opcode, IntPtr res, out int size, out IntPtr data, IntPtr type);
+    [DllImport("wlanapi.dll")] static extern void WlanFreeMemory(IntPtr p);
+
+    static IntPtr handle;
+    static readonly object gate = new object();
+
+    // Returns 0–100, or -1 when there's no connected Wi-Fi adapter.
+    public static int Read(out string ssid)
+    {
+        ssid = "";
+        lock (gate)
+        {
+            try
+            {
+                int ver;
+                if (handle == IntPtr.Zero && WlanOpenHandle(2, IntPtr.Zero, out ver, out handle) != 0) { handle = IntPtr.Zero; return -1; }
+                IntPtr list;
+                if (WlanEnumInterfaces(handle, IntPtr.Zero, out list) != 0) return -1;
+                try
+                {
+                    int n = Marshal.ReadInt32(list);
+                    for (int i = 0; i < n; i++)
+                    {
+                        IntPtr item = list + 8 + i * 532; // WLAN_INTERFACE_INFO: GUID, WCHAR[256] description, state
+                        if (Marshal.ReadInt32(item, 528) != 1) continue; // wlan_interface_state_connected
+                        var guid = (Guid)Marshal.PtrToStructure(item, typeof(Guid));
+                        int size; IntPtr data;
+                        if (WlanQueryInterface(handle, ref guid, 7, IntPtr.Zero, out size, out data, IntPtr.Zero) != 0) continue; // current connection
+                        try
+                        {
+                            // WLAN_CONNECTION_ATTRIBUTES: state, mode, WCHAR[256] profile, then the association attributes.
+                            int len = Math.Min(32, Marshal.ReadInt32(data, 520));
+                            var raw = new byte[len];
+                            Marshal.Copy(data + 524, raw, 0, len);
+                            ssid = Encoding.UTF8.GetString(raw);
+                            return Math.Max(0, Math.Min(100, Marshal.ReadInt32(data, 576)));
+                        }
+                        finally { WlanFreeMemory(data); }
+                    }
+                    return -1;
+                }
+                finally { WlanFreeMemory(list); }
+            }
+            catch { return -1; }
+        }
+    }
+
+    public static void Close()
+    {
+        lock (gate) { if (handle != IntPtr.Zero) { WlanCloseHandle(handle, IntPtr.Zero); handle = IntPtr.Zero; } }
     }
 }
 
@@ -2470,6 +2544,7 @@ class IconAnim
             case "DiskWrite": return Rate(s.DiskWrite);
             case "Disk": return Clamp(s.Disk / 100);
             case "Ping": return s.Ping >= 0 ? Clamp(1 - s.Ping / 250.0) : 0;
+            case "Wifi": return s.Wifi >= 0 ? Clamp(s.Wifi / 100.0) : 0;
             case "Cpu": return Clamp(s.Cpu / 100);
             case "CpuCores": return s.Cores.Length > 0 ? Clamp(s.Cores.Average() / 100) : 0;
             case "CpuClock": return Clamp(s.CpuMhz / 5500);
@@ -2869,11 +2944,12 @@ class IconAnim
             }
             case "wifi":
             {
-                // Waves radiate outward from the dot.
+                // Waves radiate outward from the dot. On the Wi-Fi stat, arcs past the signal strength stay dark.
                 float wy = r.Bottom - s * 0.16f;
                 for (int k = 1; k <= 3; k++)
                 {
-                    double lit = 0.3 + 0.7 * Clamp(1 - Math.Abs(frac * 4 - k));
+                    bool reach = id != "Wifi" || a * 3 >= k - 0.5;
+                    double lit = reach ? 0.3 + 0.7 * Clamp(1 - Math.Abs(frac * 4 - k)) : 0.15;
                     using (var pen = P(Mix(A(col, lit), Color.White, (lit - 0.3) * 0.3), s))
                     {
                         float rad = s * 0.23f * k;
@@ -3359,7 +3435,7 @@ class WidgetForm : Form
     // ---- what to show
     static string Group(string id)
     {
-        if (id == "Up" || id == "Down" || id == "NetTotal" || id == "Ping") return "Network";
+        if (id == "Up" || id == "Down" || id == "NetTotal" || id == "Ping" || id == "Wifi") return "Network";
         if (id.StartsWith("Cpu")) return "Processor";
         if (id.StartsWith("Ram")) return "Memory";
         if (id.StartsWith("Gpu")) return "Graphics";
@@ -3418,6 +3494,9 @@ class WidgetForm : Form
             case "Ping":
                 if (s.Ping >= 0) { r = Graph(row("Ping", s.Ping + " ms"), s.Ping, 0, 20); r.Warn = s.Ping >= c.WarnPing; }
                 else { r = row("Ping", s.Ping == -2 ? "timeout" : "-- ms"); r.Warn = s.Ping == -2; r.Dim = s.Ping == -1; }
+                break;
+            case "Wifi":
+                if (s.Wifi >= 0) { r = Graph(row(s.WifiName != "" ? "Wi-Fi (" + s.WifiName + ")" : "Wi-Fi signal", s.Wifi + "%"), s.Wifi, 100, 1); r.Frac = s.Wifi / 100.0; r.Warn = s.Wifi <= 25; }
                 break;
             case "Cpu": Pct(row("CPU usage", s.Cpu.ToString("0") + "%"), s.Cpu, c.WarnCpu); break;
             case "CpuCores":
@@ -3744,8 +3823,30 @@ class WidgetForm : Form
 // ======================================================================= Settings UI
 static class Theme
 {
-    public static readonly Color Bg = Color.FromArgb(28, 28, 32), Nav = Color.FromArgb(22, 22, 26), Card = Color.FromArgb(38, 38, 44);
-    public static readonly Color CardHover = Color.FromArgb(46, 46, 53), Border = Color.FromArgb(56, 56, 64);
+    public static Color Bg = Color.FromArgb(28, 28, 32), Nav = Color.FromArgb(22, 22, 26), Card = Color.FromArgb(38, 38, 44);
+    public static Color CardHover = Color.FromArgb(46, 46, 53), Border = Color.FromArgb(56, 56, 64);
+
+    // Background colour choices for the settings window: name → page background. Nav, cards and borders are derived from it.
+    public static readonly KeyValuePair<string, Color>[] Backgrounds =
+    {
+        new KeyValuePair<string, Color>("Charcoal (default)", Color.FromArgb(28, 28, 32)),
+        new KeyValuePair<string, Color>("Pure black", Color.FromArgb(8, 8, 10)),
+        new KeyValuePair<string, Color>("Slate", Color.FromArgb(30, 36, 44)),
+        new KeyValuePair<string, Color>("Midnight blue", Color.FromArgb(18, 24, 44)),
+        new KeyValuePair<string, Color>("Deep violet", Color.FromArgb(32, 22, 50)),
+        new KeyValuePair<string, Color>("Forest", Color.FromArgb(18, 34, 28)),
+        new KeyValuePair<string, Color>("Wine", Color.FromArgb(42, 18, 26)),
+        new KeyValuePair<string, Color>("Espresso", Color.FromArgb(38, 28, 22)),
+    };
+
+    public static void Use(int background)
+    {
+        var b = Backgrounds[Math.Max(0, Math.Min(Backgrounds.Length - 1, background))].Value;
+        Func<int, Color> lift = k => Color.FromArgb(Math.Min(255, b.R + k), Math.Min(255, b.G + k), Math.Min(255, b.B + k));
+        Bg = b;
+        Nav = Color.FromArgb(Math.Max(0, b.R - 6), Math.Max(0, b.G - 6), Math.Max(0, b.B - 6));
+        Card = lift(10); CardHover = lift(18); Border = lift(28);
+    }
     public static readonly Color Text = Color.FromArgb(236, 236, 240), Sub = Color.FromArgb(150, 150, 162), Accent = Color.FromArgb(76, 194, 255);
     public static readonly Color WarnText = Color.FromArgb(255, 110, 110);
     static readonly Dictionary<string, Font> fonts = new Dictionary<string, Font>();
@@ -4664,6 +4765,7 @@ class SettingsForm : Form
         Header("Network");
         Stat("Up"); Stat("Down");
         Stat("NetTotal", "Upload and download added together");
+        Stat("Wifi", "Signal strength of the Wi-Fi network you're connected to");
         Stat("Ping", "Round-trip time to the address below");
         var host = new TextBox { Text = c.PingHost, Width = 170, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Font = Theme.UI(9.5f) };
         Action commit = () => { var v = host.Text.Trim(); if (v != "" && v != c.PingHost) { c.PingHost = v; Apply(); } };
@@ -5001,6 +5103,16 @@ class SettingsForm : Form
 
     void BuildGeneral()
     {
+        Header("Settings window");
+        Add(Icons.Palette, Theme.Accent, "Background colour", "The colour of this settings window",
+            Combo(Theme.Backgrounds.Select(x => x.Key).ToArray(), Math.Max(0, Math.Min(Theme.Backgrounds.Length - 1, c.AppBackground)), i =>
+            {
+                if (i == c.AppBackground) return;
+                c.AppBackground = i; c.Save(); Theme.Use(i);
+                // Controls take their colours when they're built, so reopen the window on this page.
+                BeginInvoke((Action)(() => { var b = bar; Close(); b.OpenSettings("General"); }));
+            }, 170));
+
         Header("Behaviour");
         var intervals = new[] { 500, 1000, 2000, 3000, 5000 };
         Add(Icons.Gauge, Theme.Accent, "Update interval", "Slower updates use less CPU",

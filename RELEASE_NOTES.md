@@ -4,6 +4,8 @@
   - Your settings are copied over automatically the first time Kinetik runs
   - If you had **Run at startup** on, start Kinetik once as administrator (right-click → **Restart as administrator**) so it can swap the old startup entry for the new one
 - **New: spinning tray icon.** The ring in the tray logo turns faster the busier your CPU is. Turn it off in **Settings → General → Spinning tray icon**.
+- **New stat: Wi-Fi signal strength**, on the bar and the widget. Shows the signal quality of the network you're connected to (the widget also shows its name), turns the warning colour at 25% or below, and on the animated Wi-Fi icon only as many waves light up as your signal reaches. Turn it on in **Settings → Stats → Network**.
+- **New: settings window background colours.** Pick from Charcoal (default), Pure black, Slate, Midnight blue, Deep violet, Forest, Wine or Espresso in **Settings → General → Background colour**.
 - **New: animated icons** on the taskbar bar and the desktop widget. Every icon acts out what it shows, and moves faster or harder the busier its stat is:
   - Fans spin with fan speed (with motion blur when fast), and the graphics-card icon's fan spins with GPU load
   - Upload/download arrows stream in their direction; drive arrows flow in and out while the activity LED flickers
