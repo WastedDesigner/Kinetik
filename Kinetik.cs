@@ -2545,7 +2545,32 @@ static class Shortcuts
 {
     public static string DesktopPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kinetik.lnk"); } }
 
-    public static void CreateDesktop()
+    // A multi-size .ico of the fan logo in the chosen colour, for the shortcut (the exe's own icon is fixed at build time).
+    static string IconFile(int style)
+    {
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "icon-" + style + ".ico");
+        if (File.Exists(path)) return path;
+        var sizes = new[] { 16, 24, 32, 48, 64, 128, 256 };
+        var pngs = sizes.Select(sz => { using (var b = TrayIconArt.Draw(style, sz, 0)) using (var ms = new MemoryStream()) { b.Save(ms, ImageFormat.Png); return ms.ToArray(); } }).ToList();
+        using (var w = new BinaryWriter(File.Create(path)))
+        {
+            w.Write((ushort)0); w.Write((ushort)1); w.Write((ushort)sizes.Length);
+            int offset = 6 + 16 * sizes.Length;
+            for (int k = 0; k < sizes.Length; k++)
+            {
+                byte dim = (byte)(sizes[k] >= 256 ? 0 : sizes[k]);
+                w.Write(dim); w.Write(dim); w.Write((byte)0); w.Write((byte)0);
+                w.Write((ushort)1); w.Write((ushort)32); w.Write(pngs[k].Length); w.Write(offset);
+                offset += pngs[k].Length;
+            }
+            foreach (var png in pngs) w.Write(png);
+        }
+        return path;
+    }
+
+    public static void CreateDesktop(int style)
     {
         try
         {
@@ -2557,7 +2582,9 @@ static class Shortcuts
             set("TargetPath", Application.ExecutablePath);
             set("WorkingDirectory", Path.GetDirectoryName(Application.ExecutablePath));
             set("Description", "Kinetik: live PC stats on your taskbar and desktop");
-            set("IconLocation", Application.ExecutablePath + ",0");
+            string ico;
+            try { ico = IconFile(style) + ",0"; } catch { ico = Application.ExecutablePath + ",0"; }
+            set("IconLocation", ico);
             t.InvokeMember("Save", BindingFlags.InvokeMethod, null, lnk, null);
             Marshal.FinalReleaseComObject(lnk); Marshal.FinalReleaseComObject(shell);
         }
@@ -4671,6 +4698,7 @@ class SettingsForm : Form
     {
         this.bar = bar; c = bar.Cfg;
         Text = "Kinetik";
+        Icon = TrayIconArt.Frame(c.TrayStyle, SystemInformation.IconSize.Width, 0);
         ClientSize = new Size(800, 640);
         MinimumSize = new Size(760, 480);
         StartPosition = FormStartPosition.CenterScreen;
@@ -5238,10 +5266,15 @@ class SettingsForm : Form
         Switch(Icons.Fan, Theme.Accent, "Spinning icon", "TrayAnimate", "The fan logo in the tray and taskbar spins faster the busier your CPU is");
         Switch(Icons.Monitor, Theme.Accent, "Show on the taskbar", "TaskbarButton", "A taskbar button like other running apps. Click it for Settings.");
         var lnk = new Toggle { On = File.Exists(Shortcuts.DesktopPath) };
-        lnk.Changed += (s, e) => { if (lnk.On) Shortcuts.CreateDesktop(); else Shortcuts.RemoveDesktop(); lnk.On = File.Exists(Shortcuts.DesktopPath); };
+        lnk.Changed += (s, e) => { if (lnk.On) Shortcuts.CreateDesktop(c.TrayStyle); else Shortcuts.RemoveDesktop(); lnk.On = File.Exists(Shortcuts.DesktopPath); };
         Add(Icons.Star, Theme.Accent, "Desktop shortcut", "Opens Kinetik, or its Settings if it's already running", lnk);
         Add(Icons.Palette, Theme.Accent, "Icon background", "For the tray icon and the taskbar button",
-            Combo(TrayIconArt.Styles.Select(x => x.Key).ToArray(), Math.Max(0, Math.Min(TrayIconArt.Styles.Length - 1, c.TrayStyle)), i => { c.TrayStyle = i; Apply(); }, 170));
+            Combo(TrayIconArt.Styles.Select(x => x.Key).ToArray(), Math.Max(0, Math.Min(TrayIconArt.Styles.Length - 1, c.TrayStyle)), i =>
+            {
+                c.TrayStyle = i; Apply();
+                Icon = TrayIconArt.Frame(i, SystemInformation.IconSize.Width, 0);
+                if (File.Exists(Shortcuts.DesktopPath)) Shortcuts.CreateDesktop(i); // so the shortcut's icon matches too
+            }, 170));
 
         Header("Warnings");
         Hint("Values switch to the warning colour past these limits.", 30);

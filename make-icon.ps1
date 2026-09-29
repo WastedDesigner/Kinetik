@@ -1,4 +1,4 @@
-# Generates icon.ico (16–256 px) for Kinetik: a gradient tile with rising stat bars inside a broken spin ring.
+# Generates icon.ico (16–256 px) for Kinetik: a three-bladed fan on an orange gradient tile, matching the default tray icon.
 # Run: powershell -ExecutionPolicy Bypass -File make-icon.ps1
 Add-Type -AssemblyName System.Drawing
 
@@ -15,31 +15,29 @@ function Draw([int]$s) {
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = 'AntiAlias'; $g.PixelOffsetMode = 'HighQuality'; $g.Clear([System.Drawing.Color]::Transparent)
 
-    # Tile: violet → cyan diagonal gradient with a soft top highlight
+    # Tile: Kinetik orange diagonal gradient (matches the default tray icon)
     $m = [Math]::Max(0.5, $s * 0.03)
     $tile = RoundRect $m $m ($s - 2 * $m) ($s - 2 * $m) ($s * 0.23)
     $rect = New-Object System.Drawing.RectangleF 0, 0, $s, $s
-    $grad = New-Object System.Drawing.Drawing2D.LinearGradientBrush $rect, ([System.Drawing.Color]::FromArgb(255, 108, 76, 255)), ([System.Drawing.Color]::FromArgb(255, 0, 198, 255)), 45
+    $c1 = [System.Drawing.Color]::FromArgb(255, 255, 106, 43); $c2 = [System.Drawing.Color]::FromArgb(255, 255, 140, 60)
+    $grad = New-Object System.Drawing.Drawing2D.LinearGradientBrush $rect, $c1, $c2, 45
     $g.FillPath($grad, $tile)
-    $hl = New-Object System.Drawing.Drawing2D.LinearGradientBrush $rect, ([System.Drawing.Color]::FromArgb(70, 255, 255, 255)), ([System.Drawing.Color]::FromArgb(0, 255, 255, 255)), 90
-    $g.FillPath($hl, $tile)
 
-    # Broken spin ring: four arcs with gaps
-    $cx = $s / 2; $rad = $s * 0.36; $pw = [Math]::Max(1.2, $s * 0.07)
-    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), $pw
-    $pen.StartCap = 'Round'; $pen.EndCap = 'Round'
-    for ($q = 0; $q -lt 4; $q++) { $g.DrawArc($pen, $cx - $rad, $cx - $rad, $rad * 2, $rad * 2, $q * 90 + 14, 62) }
-
-    # Rising bars, the tallest in full white
+    # Three-bladed fan
+    $cx = $s / 2
     $white = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
-    $soft = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(215, 255, 255, 255))
-    $bw = $s * 0.11; $gap = $s * 0.055; $x0 = $cx - (3 * $bw + 2 * $gap) / 2; $base = $cx + $s * 0.17
-    $heights = 0.16, 0.25, 0.34
-    for ($i = 0; $i -lt 3; $i++) {
-        $h = $s * $heights[$i]; $x = $x0 + $i * ($bw + $gap)
-        $bar = RoundRect $x ($base - $h) $bw $h ($bw * 0.4)
-        if ($i -eq 2) { $g.FillPath($white, $bar) } else { $g.FillPath($soft, $bar) }
+    for ($q = 0; $q -lt 3; $q++) {
+        $p = New-Object System.Drawing.Drawing2D.GraphicsPath
+        $p.AddEllipse($cx - $s * 0.106, $cx - $s * 0.3625, $s * 0.212, $s * 0.35)
+        $mx = New-Object System.Drawing.Drawing2D.Matrix
+        $mx.RotateAt($q * 120, (New-Object System.Drawing.PointF $cx, $cx))
+        $p.Transform($mx); $g.FillPath($white, $p)
     }
+    # Hub: a ring in the tile colour around a small dot
+    $hub = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 255, 123, 51))
+    $hr = $s * 0.075; $dr = $s * 0.037
+    $g.FillEllipse($hub, $cx - $hr, $cx - $hr, $hr * 2, $hr * 2)
+    $g.FillEllipse($white, $cx - $dr, $cx - $dr, $dr * 2, $dr * 2)
 
     $g.Dispose(); return $bmp
 }
