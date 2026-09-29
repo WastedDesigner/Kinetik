@@ -38,9 +38,12 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("2.0.0.0")]
-[assembly: AssemblyFileVersion("2.0.0.0")]
-[assembly: AssemblyInformationalVersion("1.4.1")]
+[assembly: AssemblyVersion("2.0.1.0")]
+[assembly: AssemblyFileVersion("2.0.1.0")]
+[assembly: AssemblyInformationalVersion("2.0.1")]
+// Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
+// exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
 
 // ======================================================================= Settings
 class Settings
@@ -470,6 +473,19 @@ class Sampler
     // NVIDIA driver's management library (ships with the driver in System32).
     [StructLayout(LayoutKind.Sequential)] struct NvUtil { public uint Gpu, Mem; }
     [StructLayout(LayoutKind.Sequential)] struct NvMem { public ulong Total, Free, Used; }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadLibraryEx(string path, IntPtr file, int flags);
+
+    // nvml.dll ships in System32 with current NVIDIA drivers, and in the admin-only NVSMI folder with older ones.
+    // Loading it by full path first means the imports below bind to that copy and nothing else.
+    static bool LoadNvml()
+    {
+        foreach (var path in new[] {
+            Path.Combine(Environment.SystemDirectory, "nvml.dll"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), @"NVIDIA Corporation\NVSMI\nvml.dll") })
+            if (File.Exists(path) && LoadLibraryEx(path, IntPtr.Zero, 0x100) != IntPtr.Zero) return true; // LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
+        return false;
+    }
+
     [DllImport("nvml.dll")] static extern int nvmlInit_v2();
     [DllImport("nvml.dll")] static extern int nvmlDeviceGetHandleByIndex_v2(uint i, out IntPtr d);
     [DllImport("nvml.dll")] static extern int nvmlDeviceGetName(IntPtr d, StringBuilder name, uint len);
@@ -530,7 +546,7 @@ class Sampler
         catch { }
         try
         {
-            if (nvmlInit_v2() == 0 && nvmlDeviceGetHandleByIndex_v2(0, out gpu) == 0)
+            if (LoadNvml() && nvmlInit_v2() == 0 && nvmlDeviceGetHandleByIndex_v2(0, out gpu) == 0)
             {
                 var sb = new StringBuilder(96);
                 nvmlDeviceGetName(gpu, sb, 96); gpuName = sb.ToString();
@@ -1449,6 +1465,7 @@ static class Program
     static readonly Dictionary<string, Assembly> loaded = new Dictionary<string, Assembly>();
 
     [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+    [DllImport("kernel32.dll")] static extern bool SetDefaultDllDirectories(int flags);
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll")] static extern bool SetProcessWorkingSetSize(IntPtr p, IntPtr min, IntPtr max);
 
@@ -1457,6 +1474,7 @@ static class Program
     {
         // No background GC thread: this app's heap is tiny, so concurrent collection only costs memory.
         GCSettings.LatencyMode = GCLatencyMode.Batch;
+        try { SetDefaultDllDirectories(0x800); } catch { } // LOAD_LIBRARY_SEARCH_SYSTEM32
         AppDomain.CurrentDomain.AssemblyResolve += ResolveEmbedded;
         bool created;
         MigrateLegacy();
@@ -1470,10 +1488,10 @@ static class Program
             }
             if (!created && !Wait(mutex)) return;
             SetProcessDPIAware();
+            HardenStartup();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
-            Application.ThreadException += (s, e) =>
-                File.AppendAllText(Path.Combine(Path.GetTempPath(), "Kinetik.log"), DateTime.Now + " " + e.Exception + Environment.NewLine);
+            Application.ThreadException += (s, e) => Log(e.Exception);
             var bar = new StatsBar();
             int si = Array.IndexOf(args, "--settings");
             if (si >= 0)
@@ -1485,8 +1503,11 @@ static class Program
         }
     }
 
+    // Skipped when elevated: an admin process appending to a file in the user's temp folder can be redirected
+    // (with links) into a protected file by any program running as the user.
     public static void Log(Exception e)
     {
+        if (IsAdmin) return;
         try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "Kinetik.log"), DateTime.Now + " " + e + Environment.NewLine); } catch { }
     }
 
@@ -1545,23 +1566,51 @@ static class Program
         catch { } // user cancelled UAC
     }
 
-    // ---- Startup: an elevated logon task when admin (no UAC prompt at login), otherwise the Run key.
+    // ---- Startup.
+    // Elevated startup (needed for CPU temperature) is a logon task that runs Kinetik as admin with no UAC prompt.
+    // The exe that task runs must be somewhere only admins can change; otherwise any program running as the user
+    // could replace it, or drop a DLL beside it, and get admin rights at the next sign-in. So elevated startup always
+    // runs a copy installed in Program Files. Without admin rights, startup uses the Run key and Kinetik starts
+    // unelevated. Tasks are managed through the Task Scheduler API: no schtasks.exe, and no temporary XML file that
+    // another program could swap before it's read.
     const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
 
-    static int Run(string exe, string args)
+    public static string SystemExe(string name) { return Path.Combine(Environment.SystemDirectory, name); }
+
+    static string InstallDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), AppName); } }
+    public static string InstalledExe { get { return Path.Combine(InstallDir, AppName + ".exe"); } }
+
+    static bool SamePath(string a, string b)
+    {
+        try { return string.Equals(Path.GetFullPath(a).TrimEnd('\\'), Path.GetFullPath(b).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase); }
+        catch { return false; }
+    }
+
+    static object Call(object o, string method, params object[] args) { return o.GetType().InvokeMember(method, BindingFlags.InvokeMethod, null, o, args); }
+    static object Prop(object o, string name, params object[] args) { return o.GetType().InvokeMember(name, BindingFlags.GetProperty, null, o, args); }
+
+    static object TaskFolder()
+    {
+        var svc = Activator.CreateInstance(Type.GetTypeFromProgID("Schedule.Service"));
+        Call(svc, "Connect");
+        return Call(svc, "GetFolder", "\\");
+    }
+
+    // The program a task starts, or null when there's no such task.
+    static string TaskCommand(string name)
     {
         try
         {
-            using (var p = Process.Start(new ProcessStartInfo(exe, args) { UseShellExecute = false, CreateNoWindow = true }))
-            {
-                p.WaitForExit(15000);
-                return p.ExitCode;
-            }
+            var task = Call(TaskFolder(), "GetTask", name);
+            var action = Prop(Prop(Prop(task, "Definition"), "Actions"), "Item", 1);
+            return Prop(action, "Path") as string;
         }
-        catch { return -1; }
+        catch { return null; }
     }
 
-    public static bool TaskExists() { return Run("schtasks.exe", "/Query /TN " + AppName) == 0; }
+    static void DeleteTask(string name) { try { Call(TaskFolder(), "DeleteTask", name, 0); } catch { } }
+
+    public static bool TaskExists() { return TaskCommand(AppName) != null; }
 
     // One-time move from the old "PC Stats Bar" name: copies its settings, and swaps its startup entry for Kinetik's.
     // Deleting the old elevated logon task needs admin, so that part waits until Kinetik runs as administrator.
@@ -1579,13 +1628,52 @@ static class Program
                 bool wanted = false;
                 using (var run = Registry.CurrentUser.CreateSubKey(RunKey))
                     if (run.GetValue(LegacyName) != null) { run.DeleteValue(LegacyName, false); wanted = true; }
-                bool oldTask = Run("schtasks.exe", "/Query /TN " + LegacyName) == 0;
-                if (oldTask && IsAdmin) { Run("schtasks.exe", "/Delete /F /TN " + LegacyName); wanted = true; oldTask = false; }
+                bool oldTask = TaskCommand(LegacyName) != null;
+                if (oldTask && IsAdmin) { DeleteTask(LegacyName); wanted = true; oldTask = false; }
                 if (wanted) SetStartup(true);
                 if (!oldTask) k.SetValue("LegacyStartupMoved", 1);
             }
         }
         catch { }
+    }
+
+    // Runs at every start with admin rights: moves an elevated startup task that points at an unprotected exe
+    // (from Kinetik 2.0.0 and earlier) onto the Program Files copy, and keeps that copy up to date.
+    static void HardenStartup()
+    {
+        if (!IsAdmin) return;
+        try
+        {
+            var cmd = TaskCommand(AppName);
+            if (cmd == null) return;
+            if (!SamePath(cmd, InstalledExe)) { SetStartup(true); return; }
+            var me = Application.ExecutablePath;
+            if (SamePath(me, InstalledExe) || !File.Exists(InstalledExe)) { if (!File.Exists(InstalledExe)) SetStartup(true); return; }
+            // Started by hand from elsewhere (as admin, so with the user's consent): refresh the installed copy if it differs.
+            var a = new FileInfo(me); var b = new FileInfo(InstalledExe);
+            if (a.Length != b.Length || FileVersionInfo.GetVersionInfo(me).FileVersion != FileVersionInfo.GetVersionInfo(InstalledExe).FileVersion)
+                File.Copy(me, InstalledExe, true);
+        }
+        catch { }
+    }
+
+    // Copies this exe into Program Files (created by an admin process, so it inherits the admin-only write access).
+    static bool InstallCopy()
+    {
+        try
+        {
+            Directory.CreateDirectory(InstallDir);
+            var me = Application.ExecutablePath;
+            if (!SamePath(me, InstalledExe)) File.Copy(me, InstalledExe, true);
+            return File.Exists(InstalledExe);
+        }
+        catch { return false; }
+    }
+
+    static void RemoveInstalledCopy()
+    {
+        if (SamePath(Application.ExecutablePath, InstalledExe)) return; // can't delete ourselves while running
+        try { if (File.Exists(InstalledExe)) File.Delete(InstalledExe); Directory.Delete(InstallDir); } catch { }
     }
 
     public static bool IsStartupEnabled()
@@ -1598,15 +1686,15 @@ static class Program
     public static void SetStartup(bool on)
     {
         using (var k = Registry.CurrentUser.CreateSubKey(RunKey)) k.DeleteValue(AppName, false);
-        if (IsAdmin) Run("schtasks.exe", "/Delete /F /TN " + AppName);
-        if (!on) return;
-        if (IsAdmin && CreateLogonTask(Application.ExecutablePath, AppName, true)) return;
+        if (IsAdmin) DeleteTask(AppName);
+        if (!on) { if (IsAdmin) RemoveInstalledCopy(); return; }
+        if (IsAdmin && InstallCopy() && CreateLogonTask(InstalledExe, AppName, true)) return;
+        // No admin rights (or the copy failed): start unelevated from wherever the exe is.
         using (var k = Registry.CurrentUser.CreateSubKey(RunKey)) k.SetValue(AppName, "\"" + Application.ExecutablePath + "\"");
     }
 
-    // Registers a logon task with schtasks.exe. It uses a task XML file because plain schtasks switches can't turn off
-    // "only start on AC power" or the 72-hour run limit, which would stop the bar on laptops or after three days.
-    // (This used to go through PowerShell, which some antivirus programs flag.)
+    // Registers a logon task. The XML form is used because the plain options can't turn off "only start on AC power"
+    // or the 72-hour run limit, which would stop the bar on laptops or after three days.
     public static bool CreateLogonTask(string exe, string name, bool elevated)
     {
         var user = System.Security.SecurityElement.Escape(WindowsIdentity.GetCurrent().Name);
@@ -1626,14 +1714,13 @@ static class Program
             "  </Settings>\r\n" +
             "  <Actions Context=\"Author\"><Exec><Command>" + System.Security.SecurityElement.Escape(exe) + "</Command></Exec></Actions>\r\n" +
             "</Task>\r\n";
-        var file = Path.Combine(Path.GetTempPath(), name + "-task.xml");
         try
         {
-            File.WriteAllText(file, xml, Encoding.Unicode);
-            return Run("schtasks.exe", "/Create /F /TN \"" + name + "\" /XML \"" + file + "\"") == 0;
+            // TASK_CREATE_OR_UPDATE (6), TASK_LOGON_INTERACTIVE_TOKEN (3)
+            Call(TaskFolder(), "RegisterTask", name, xml, 6, null, null, 3, null);
+            return true;
         }
         catch { return false; }
-        finally { try { File.Delete(file); } catch { } }
     }
 }
 
@@ -1878,7 +1965,7 @@ class StatsBar : Form
     {
         if (e.Button == MouseButtons.Right) menu.Show(Cursor.Position);
         else if (e.Button == MouseButtons.Left && Cfg.ClickTaskMgr)
-            try { Process.Start(new ProcessStartInfo("taskmgr.exe") { UseShellExecute = true }); } catch { }
+            try { Process.Start(new ProcessStartInfo(Program.SystemExe("taskmgr.exe")) { UseShellExecute = true }); } catch { }
         base.OnMouseUp(e);
     }
 
@@ -2561,12 +2648,13 @@ static class Shortcuts
     {
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik");
         Directory.CreateDirectory(dir);
+        if ((new DirectoryInfo(dir).Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Icon folder is redirected");
         var path = Path.Combine(dir, "icon-" + style + ".v2.ico");
         if (File.Exists(path)) return path;
         // Classic 32-bit bitmap entries for the small sizes (Explorer won't reliably show PNG ones), PNG for 256.
         var sizes = new[] { 16, 24, 32, 48, 64, 128, 256 };
         var data = sizes.Select(sz => { using (var b = TrayIconArt.Draw(style, sz, 0)) return sz >= 256 ? Png(b) : Dib(b); }).ToList();
-        using (var w = new BinaryWriter(File.Create(path)))
+        using (var w = new BinaryWriter(new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))) // fails rather than follow a planted file or link
         {
             w.Write((ushort)0); w.Write((ushort)1); w.Write((ushort)sizes.Length);
             int offset = 6 + 16 * sizes.Length;

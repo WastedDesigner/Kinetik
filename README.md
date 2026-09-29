@@ -115,7 +115,7 @@ Everything about the widget is set on the **Widget** page in Settings:
 2. Run it. The bar appears on your taskbar next to the tray icons.
 3. **Right-click** the bar and choose **Settings…** to customise it, or **Arrange stats…** to go straight to the order and icons.
 
-It's a single portable exe with no installer. Settings are saved in the registry at `HKCU\Software\Kinetik`.
+It's a single portable exe with no installer. (If you turn on Run at startup as administrator, Kinetik copies itself to `C:\Program Files\Kinetik` so the elevated startup task runs a copy only admins can change.) Settings are saved in the registry at `HKCU\Software\Kinetik`.
 
 **Updating:** right-click the bar, choose **Exit**, replace the exe with the new one and run it again. Your settings carry over.
 
@@ -179,6 +179,11 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v2.0.1: security fixes
+
+- Elevated startup now runs a protected copy in `C:\Program Files\Kinetik`, so other programs can't swap the exe to gain admin rights. Run Kinetik once as administrator after updating to move an existing startup entry over.
+- Native DLLs and helper programs load only from System32, and startup tasks are registered through the Task Scheduler API rather than a temporary file.
 
 ### v2.0.0: Kinetik
 

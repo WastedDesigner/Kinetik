@@ -1,3 +1,16 @@
+# Kinetik v2.0.1
+
+- **Security: elevated startup now runs a protected copy.** With **Run at startup** on as administrator, Kinetik starts elevated at sign-in without a UAC prompt. Until now that ran the exe from wherever you'd put it, usually a folder any program on your account can write to. Malware already running as you could have replaced it, or dropped a DLL next to it, to get admin rights at your next sign-in.
+  - Elevated startup now installs a copy to `C:\Program Files\Kinetik`, which only administrators can change, and runs that. Without admin rights, startup falls back to a normal, unelevated start.
+  - Existing elevated startup entries are moved over automatically the next time Kinetik runs as administrator. **Run Kinetik once as administrator after updating** (right-click → **Restart as administrator**).
+  - When you run a newer Kinetik as administrator, the installed copy is updated to match. Turning Run at startup off removes it.
+- **Security: DLLs and helper programs only load from Windows' System32 folder.** Kinetik no longer looks for `nvml.dll` (NVIDIA stats), Windows' own DLLs or Task Manager by name alone, which would have searched its own folder first. `nvml.dll` is loaded from System32, or from NVIDIA's admin-only install folder on older drivers.
+- **Security: startup tasks are registered directly through the Task Scheduler API.** No more `schtasks.exe` or temporary task file that another program could swap before Windows read it.
+- **Hardening:** no error log is written while running as administrator, and the desktop shortcut's icon file is never written through a redirected folder or an existing file.
+- The exe's product version now shows the right number in its file properties (v2.0.0 still said 1.4.1).
+
+---
+
 # Kinetik v2.0.0 (formerly PC Stats Bar)
 
 - **New name and logo: PC Stats Bar is now Kinetik.** The new logo is a three-bladed fan. The exe is now `Kinetik.exe`.
