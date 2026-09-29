@@ -38,9 +38,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("2.0.2.0")]
-[assembly: AssemblyFileVersion("2.0.2.0")]
-[assembly: AssemblyInformationalVersion("2.0.2")]
+[assembly: AssemblyVersion("2.0.1.0")]
+[assembly: AssemblyFileVersion("2.0.1.0")]
+[assembly: AssemblyInformationalVersion("2.0.1")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -4361,9 +4361,11 @@ class Slider : Control
 class Row : Panel
 {
     readonly IconFn icon; readonly Color iconColor; readonly string title, desc;
+    readonly Control right;
+    static readonly StringFormat Clip = new StringFormat(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter };
     public Row(IconFn icon, Color iconColor, string title, string desc, Control right, int width)
     {
-        this.icon = icon; this.iconColor = iconColor; this.title = title; this.desc = desc;
+        this.icon = icon; this.iconColor = iconColor; this.title = title; this.desc = desc; this.right = right;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
         Size = new Size(width, string.IsNullOrEmpty(desc) ? 48 : 58);
         Margin = new Padding(0, 0, 0, 4);
@@ -4373,6 +4375,8 @@ class Row : Panel
             right.Location = new Point(Width - right.Width - 16, (Height - right.Height) / 2);
             right.Anchor = AnchorStyles.Right;
             Controls.Add(right);
+            // Keeps a control whose size changes (e.g. a button whose text changes) right-aligned, and re-trims the text.
+            right.SizeChanged += (s, e) => { right.Location = new Point(Width - right.Width - 16, (Height - right.Height) / 2); Invalidate(); };
         }
     }
     protected override void OnPaint(PaintEventArgs e)
@@ -4384,8 +4388,10 @@ class Row : Panel
         var f = Theme.UI(10f); var sf = Theme.UI(8.5f);
         using (var tb = new SolidBrush(Theme.Text)) using (var sb = new SolidBrush(Theme.Sub))
         {
-            if (string.IsNullOrEmpty(desc)) g.DrawString(title, f, tb, x, (Height - f.GetHeight(g)) / 2);
-            else { g.DrawString(title, f, tb, x, 9); g.DrawString(desc, sf, sb, x, 31); }
+            // Text stops short of the control on the right, ending in "…" if it doesn't fit.
+            float w = Math.Max(10, (right != null ? right.Left - 12 : Width - 16) - x);
+            if (string.IsNullOrEmpty(desc)) g.DrawString(title, f, tb, new RectangleF(x, (Height - f.GetHeight(g)) / 2, w, f.GetHeight(g) + 2), Clip);
+            else { g.DrawString(title, f, tb, new RectangleF(x, 9, w, 22), Clip); g.DrawString(desc, sf, sb, new RectangleF(x, 31, w, 18), Clip); }
         }
     }
 }
@@ -5352,7 +5358,7 @@ class SettingsForm : Form
                 else upd.Text = "Up to date ✓";
             }, this);
         });
-        Add(Icons.Down, Theme.Accent, "Updates", "Checks GitHub for a newer release. Downloads open in your browser.", upd);
+        Add(Icons.Down, Theme.Accent, "Updates", "Looks for a newer version on GitHub", upd);
         Add(Icons.Heart, Theme.Accent, "© Akila Sella Hennedige", "Free software under the GNU General Public License v3", null);
     }
 

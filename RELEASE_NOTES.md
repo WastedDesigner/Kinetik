@@ -8,6 +8,9 @@
 - **Security: startup tasks are registered directly through the Task Scheduler API.** No more `schtasks.exe` or temporary task file that another program could swap before Windows read it.
 - **Hardening:** no error log is written while running as administrator, and the desktop shortcut's icon file is never written through a redirected folder or an existing file.
 - The exe's product version now shows the right number in its file properties (v2.0.0 still said 1.4.1).
+- **New: check for updates.** **Settings → About → Check for updates** asks GitHub for the latest version. If there's a newer one, the button opens its release page in your browser. Nothing is downloaded or run automatically.
+- **Hardening:** settings read from the registry are kept within safe limits, so a bad or tampered value can't crash Kinetik or make it draw an enormous window.
+- **Fix:** long descriptions in Settings no longer run underneath the button or switch beside them.
 
 ---
 

@@ -180,10 +180,11 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 
 ## Version history
 
-### v2.0.1: security fixes
+### v2.0.1: security fixes and update check
 
 - Elevated startup now runs a protected copy in `C:\Program Files\Kinetik`, so other programs can't swap the exe to gain admin rights. Run Kinetik once as administrator after updating to move an existing startup entry over.
 - Native DLLs and helper programs load only from System32, and startup tasks are registered through the Task Scheduler API rather than a temporary file.
+- New **Check for updates** button in Settings → About.
 
 ### v2.0.0: Kinetik
 
