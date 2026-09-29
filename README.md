@@ -184,7 +184,7 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 
 - **New name: PC Stats Bar is now Kinetik**, with a new logo. Your settings are carried over automatically the first time Kinetik runs. If you had **Run at startup** on, start Kinetik once as administrator (right-click → **Restart as administrator**) so it can replace the old startup entry.
 - **Animated icons** on the bar and the widget: fans spin with fan speed, arrows stream with throughput, thermometers fill up, bolts crackle, gauges swing and more, all driven by live readings. Turn them on or off separately for the bar and the widget, and pick 15, 30 or 60 fps.
-- **Tray icon:** the logo's ring spins faster the busier your CPU is (can be turned off), and you can pick from 10 backgrounds.
+- **Tray icon:** the fan logo spins faster the busier your CPU is (can be turned off), and you can pick from 11 backgrounds. Optional taskbar button and desktop shortcut.
 - **Fullscreen hiding is now per monitor:** a fullscreen game only hides the bar or widget on its own screen.
 
 ### v1.4.1: tray icon

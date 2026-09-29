@@ -1,6 +1,6 @@
 # Kinetik v2.0.0 (formerly PC Stats Bar)
 
-- **New name and logo: PC Stats Bar is now Kinetik.** The new logo is rising stat bars inside a spinning ring. The exe is now `Kinetik.exe`.
+- **New name and logo: PC Stats Bar is now Kinetik.** The new logo is a three-bladed fan. The exe is now `Kinetik.exe`.
   - Your settings are copied over automatically the first time Kinetik runs
   - If you had **Run at startup** on, start Kinetik once as administrator (right-click → **Restart as administrator**) so it can swap the old startup entry for the new one
 - **New: spinning fan tray icon.** The tray icon is a three-bladed fan that spins faster the busier your CPU is. Pick its background in **Settings → General → Icon background** (Kinetik orange by default, plus 10 more), or stop it spinning with **Spinning icon**.
