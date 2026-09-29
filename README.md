@@ -29,11 +29,11 @@ A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It
 
 ### Stats
 
-Each one can be turned on or off. There are 28 in total.
+Each one can be turned on or off. There are 29 in total.
 
 | Category | What it shows |
 |---|---|
-| Network | Upload speed, download speed, total speed (upload + download), ping to any website or IP address |
+| Network | Upload speed, download speed, total speed (upload + download), ping to any website or IP address, Wi-Fi signal strength |
 | CPU | Usage, per-core usage bars, clock speed (GHz), temperature\*, package power\* |
 | Memory | RAM usage %, RAM used / total (GB), committed memory % (includes the page file) |
 | GPU (NVIDIA, AMD, Intel) | Usage, temperature, clock speed (MHz), fan speed (% or RPM), VRAM used / total (GB), VRAM usage %, power draw. If you have more than one GPU, you can choose which one to show |
@@ -97,10 +97,10 @@ Everything about the widget is set on the **Widget** page in Settings:
 - Left-click opens Task Manager
 - Tray icon: click it for Settings, right-click it for the menu (even while the bar is hidden), hover for a CPU / RAM / GPU summary
 - Hovering shows details: CPU and GPU model, the ping address, the free-space drive and Bluetooth device names
-- Optional run at startup. When it's running as admin, it's set up as an elevated scheduled task, so there's no UAC prompt at login.
+- Optional run at startup. When it's running as admin, it's set up as an elevated scheduled task that runs a protected copy in `C:\Program Files\Kinetik`, so there's no UAC prompt at login.
 - Update interval from 0.5 to 5 seconds
 - Shift the bar left if it overlaps other taskbar icons
-- **About** tab with the version number and copyright
+- **About** tab with the version number, a **Check for updates** button and the copyright
 
 ### Light on resources
 
@@ -127,11 +127,11 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 |---|---|
 | **Stats** | Switch each stat on or off, grouped by Network, Processor, Memory, Graphics, Storage, System and Batteries. Also: the ping address, which GPU to show, which drive to measure free space on, and whether to show Bluetooth device names. |
 | **Arrange** | The order of everything on the bar. Drag rows, click an icon to change it or its colour, **+ Add divider**, remove dividers with ✕, and **Reset order**. Turn off **Show switched-off stats** to list only what's on your taskbar. |
-| **Appearance** | Font and size, one or two lines, spacing sliders (with **Reset spacing**), divider style and height, and the background pill's opacity and corner roundness. |
+| **Appearance** | Font and size, one or two lines, spacing sliders (with **Reset spacing**), divider style and height, animated icons and their frame rate, and the background pill's opacity and corner roundness. |
 | **Colours** | Match the taskbar theme, text and warning colours, a colour for each icon group, and the background colour. |
-| **Widget** | Turn the desktop widget on, and set its placement, lock, click-through and snapping, style, theme, colours, size, width, roundness, shadow, title, headings and graph history. Its **Contents** list works like the Arrange page. |
-| **General** | Update interval, shift left, left-click action, hide in fullscreen, tray icon, warning limits, run at startup, restart as administrator, and restore default settings. |
-| **About** | Version number and copyright. |
+| **Widget** | Turn the desktop widget on, and set its placement, lock, click-through and snapping, style, theme, colours, size, width, roundness, shadow, animated icons, title, headings and graph history. Its **Contents** list works like the Arrange page. |
+| **General** | Settings window background colour, update interval, shift left, left-click action, hide in fullscreen, tray icon (spinning, with a choice of backgrounds), taskbar button, desktop shortcut, warning limits, run at startup, restart as administrator, and restore default settings. |
+| **About** | Version number, **Check for updates** (opens the release page if there's a newer version) and copyright. |
 
 ### Screenshots
 
