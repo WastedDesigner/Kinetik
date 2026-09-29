@@ -1,3 +1,19 @@
+# PC Stats Bar v2.0.0
+
+- **New: animated icons** on the taskbar bar and the desktop widget. Every icon acts out what it shows, and moves faster or harder the busier its stat is:
+  - Fans spin with fan speed (with motion blur when fast), and the graphics-card icon's fan spins with GPU load
+  - Upload/download arrows stream in their direction; drive arrows flow in and out while the activity LED flickers
+  - Thermometers fill up and turn redder as things heat up, with heat shimmer when hot; flames flicker and throw sparks
+  - Power bolts crackle with little electric arcs; the CPU chip's pins light up in a chase and its core glows under load
+  - The gauge needle swings to the current load, RAM chips blink like LEDs, VRAM cells twinkle, core cells bounce like an equaliser
+  - Wi-Fi waves radiate, signal bars sweep, the globe turns, the clock ticks, the hourglass drains and flips, the pulse traces like a heart monitor, and ping beats like a heart
+  - A soft glow behind each icon brightens with activity, and turns orange-red past a warning limit
+- **Animation settings:** turn animations on or off separately for the bar (**Settings → Appearance → Animation**) and the widget (**Settings → Widget**), and pick a frame rate: 15, 30 or 60 fps.
+- **New: tray icon backgrounds.** Choose the tray icon's colour in **Settings → General → Tray icon background**: Violet to cyan (default), Ocean blue, Emerald, Sunset, Crimson, Hot pink, Graphite, Midnight, Light, or no background.
+- **Fix: fullscreen hiding is now per monitor.** With **Hide in fullscreen apps** on, only the bar or widget on the same screen as the fullscreen game or video hides. The one on your other monitor stays visible.
+
+---
+
 # PC Stats Bar v1.4.1
 
 - **New: tray icon.** PC Stats Bar now has an icon in the system tray, next to the clock.
