@@ -1,3 +1,9 @@
+# Kinetik v2.0.2
+
+- **Fix:** in **Settings → Widget**, the **Background colour** row's colour square and **Default** button were pushed up and cut off. Controls on the right of settings rows now stay centred once they've settled to their final size.
+
+---
+
 # Kinetik v2.0.1
 
 - **Security: elevated startup now runs a protected copy.** With **Run at startup** on as administrator, Kinetik starts elevated at sign-in without a UAC prompt. Until now that ran the exe from wherever you'd put it, usually a folder any program on your account can write to. Malware already running as you could have replaced it, or dropped a DLL next to it, to get admin rights at your next sign-in.

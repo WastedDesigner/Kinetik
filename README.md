@@ -180,6 +180,10 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 
 ## Version history
 
+### v2.0.2
+
+- Fixed the widget's Background colour setting being cut off in Settings.
+
 ### v2.0.1: security fixes and update check
 
 - Elevated startup now runs a protected copy in `C:\Program Files\Kinetik`, so other programs can't swap the exe to gain admin rights. Run Kinetik once as administrator after updating to move an existing startup entry over.

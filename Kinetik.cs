@@ -38,9 +38,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("2.0.1.0")]
-[assembly: AssemblyFileVersion("2.0.1.0")]
-[assembly: AssemblyInformationalVersion("2.0.1")]
+[assembly: AssemblyVersion("2.0.2.0")]
+[assembly: AssemblyFileVersion("2.0.2.0")]
+[assembly: AssemblyInformationalVersion("2.0.2")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -4372,11 +4372,13 @@ class Row : Panel
         BackColor = Theme.Bg;
         if (right != null)
         {
-            right.Location = new Point(Width - right.Width - 16, (Height - right.Height) / 2);
+            // Keeps a control whose size changes (an auto-sizing panel settling on adding, or a button whose text
+            // changes) right-aligned and centred, and re-trims the text beside it.
+            Action place = () => { right.Location = new Point(Width - right.Width - 16, (Height - right.Height) / 2); Invalidate(); };
+            right.SizeChanged += (s, e) => place();
             right.Anchor = AnchorStyles.Right;
             Controls.Add(right);
-            // Keeps a control whose size changes (e.g. a button whose text changes) right-aligned, and re-trims the text.
-            right.SizeChanged += (s, e) => { right.Location = new Point(Width - right.Width - 16, (Height - right.Height) / 2); Invalidate(); };
+            place();
         }
     }
     protected override void OnPaint(PaintEventArgs e)
