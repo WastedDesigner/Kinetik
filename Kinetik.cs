@@ -1,4 +1,4 @@
-﻿// PC Stats Bar: a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
+﻿// Kinetik (formerly PC Stats Bar): a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
 // Shows network speed and ping, CPU (usage, clock, temp, power, per-core), RAM and commit, GPU (usage, temp, clock,
 // fan, VRAM, power), disk activity / throughput / free space, processes, uptime, and battery levels of the PC and
 // connected Bluetooth devices. Every item can be reordered, given its own icon and colour, and split into groups
@@ -33,24 +33,24 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-[assembly: AssemblyTitle("PC Stats Bar")]
+[assembly: AssemblyTitle("Kinetik")]
 [assembly: AssemblyDescription("Taskbar overlay showing PC stats and device battery levels")]
-[assembly: AssemblyProduct("PC Stats Bar")]
+[assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("1.4.1.0")]
-[assembly: AssemblyFileVersion("1.4.1.0")]
+[assembly: AssemblyVersion("2.0.0.0")]
+[assembly: AssemblyFileVersion("2.0.0.0")]
 [assembly: AssemblyInformationalVersion("1.4.1")]
 
 // ======================================================================= Settings
 class Settings
 {
-    const string Key = @"Software\PCStatsBar";
+    public const string Key = @"Software\Kinetik", LegacyKey = @"Software\PCStatsBar";
     public const int CurrentVersion = 2;
     public int SettingsVersion = CurrentVersion;
 
     // What to show. Each id in StatIds is also the name of its on/off field.
-    public bool Up = true, Down = true, NetTotal = false, Ping = false;
+    public bool Up = true, Down = true, NetTotal = false, Ping = false, Wifi = false;
     public bool Cpu = true, CpuCores = false, CpuClock = true, CpuTemp = true, CpuPower = false;
     public bool Ram = true, RamGb = true, RamCommit = false;
     public bool Gpu = true, GpuTemp = true, GpuClock = false, GpuFan = false, GpuVram = false, GpuVramPct = false, GpuPower = false;
@@ -72,7 +72,7 @@ class Settings
     public int WidgetStyle = 0; // 0 bars, 1 graphs, 2 bars and graphs, 3 minimal
     public int WidgetTheme = 0; // 0 dark, 1 light, 2 match Windows
     public int WidgetLayer = 0; // 0 on the desktop (behind windows), 1 normal, 2 always on top
-    public bool WidgetLocked = false, WidgetClickThrough = false, WidgetSnap = true, WidgetHeadings = true, WidgetHwNames = true, WidgetShadow = true;
+    public bool WidgetLocked = false, WidgetClickThrough = false, WidgetSnap = true, WidgetHeadings = true, WidgetHwNames = true, WidgetShadow = true, WidgetAnimate = true, BarAnimate = true;
     public string WidgetTitle = "";
     public Color WidgetBg = Color.FromArgb(0, 0, 0, 0); // fully transparent = the theme's own background colour
 
@@ -96,16 +96,18 @@ class Settings
     // Behaviour
     public int Interval = 1000, Offset = 0;
     public bool ClickTaskMgr = true, HideFullscreen = true, TrayIcon = true;
+    public bool TrayAnimate = true, TaskbarButton = false;
+    public int AnimFps = 60, TrayStyle = 0, AppBackground = 0; // icon animation frame rate; tray icon background (see TrayIconArt.Styles)
 
     // Every stat that can appear on the bar, in default order. Dividers ("Sep1", "Sep2", ...) are added by the user.
-    public const string DefaultOrder = "Up,Down,NetTotal,Ping,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit," +
+    public const string DefaultOrder = "Up,Down,NetTotal,Ping,Wifi,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit," +
         "Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
     public static readonly string[] StatIds = DefaultOrder.Split(',');
 
     // The widget has its own order (grouped by hardware) and its own set of stats that are switched on.
     public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower," +
-        "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
-    public const string DefaultWidgetItems = "Cpu,CpuTemp,CpuClock,Gpu,GpuTemp,GpuVram,Ram,RamGb,Down,Up";
+        "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Wifi,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
+    public const string DefaultWidgetItems = "Cpu,CpuTemp,CpuClock,Gpu,GpuTemp,GpuVram,Ram,RamGb,Down,Up,Wifi";
     public static readonly string[] WidgetIds = DefaultWidgetOrder.Split(',');
 
     public static bool IsDivider(string id) { return id.Length > 3 && id.StartsWith("Sep") && id.Substring(3).All(char.IsDigit); }
@@ -296,6 +298,7 @@ class Snapshot
     public double GpuUtil, GpuTemp, VramUsed, VramTotal, GpuPower, GpuMhz, GpuFan = -1;
     public bool GpuFanRpm;
     public double FreeGb = -1, FreePct; public string FreeName = "";
+    public int Wifi = -1; public string WifiName = ""; // signal quality 0–100, -1 = not on Wi-Fi
     public int Processes = -1, Ping = -1; // Ping: -1 = no reply yet, -2 = timed out
     public double Uptime;
     public string CpuName = "", CpuTempStatus = "";
@@ -502,8 +505,9 @@ class Sampler
     volatile List<string> lhmGpus = new List<string>();
 
     double freeGb = -1, freePct; string freeName = "", freeFor; DateTime freeAt;
-    System.Threading.Timer pingTimer, batTimer;
-    volatile int pingMs = -1;
+    System.Threading.Timer pingTimer, batTimer, wifiTimer;
+    volatile int pingMs = -1, wifiPct = -1;
+    volatile string wifiName = "";
     int pinging, readingBatteries;
 
     public Sampler(Settings cfg, Action onSample) { this.cfg = cfg; this.onSample = onSample; }
@@ -595,6 +599,8 @@ class Sampler
         if (c.Wants("DiskFree")) { ReadFree(now); s.FreeGb = freeGb; s.FreePct = freePct; s.FreeName = freeName; }
         ManagePing();
         s.Ping = c.Wants("Ping") ? pingMs : -1;
+        ManageWifi();
+        if (c.Wants("Wifi")) { s.Wifi = wifiPct; s.WifiName = wifiName; }
         ManageBatteries();
         s.Uptime = GetTickCount64() / 1000.0;
         return s;
@@ -746,6 +752,12 @@ class Sampler
     {
         if (cfg.Wants("Ping") && pingTimer == null) pingTimer = new System.Threading.Timer(_ => DoPing(), null, 0, 2000);
         else if (!cfg.Wants("Ping") && pingTimer != null) { pingTimer.Dispose(); pingTimer = null; pingMs = -1; }
+    }
+
+    void ManageWifi()
+    {
+        if (cfg.Wants("Wifi") && wifiTimer == null) wifiTimer = new System.Threading.Timer(_ => { string n; wifiPct = WifiSignal.Read(out n); wifiName = n; }, null, 0, 2000);
+        else if (!cfg.Wants("Wifi") && wifiTimer != null) { wifiTimer.Dispose(); wifiTimer = null; wifiPct = -1; WifiSignal.Close(); }
     }
 
     void DoPing()
@@ -1387,6 +1399,7 @@ static class Stats
         { "Down", new[] { "Download speed", "Download", "DownColor", "DN" } },
         { "NetTotal", new[] { "Total network speed", "Up / down", "DownColor", "NET" } },
         { "Ping", new[] { "Ping", "Signal", "UpColor", "PING" } },
+        { "Wifi", new[] { "Wi-Fi signal strength", "Wi-Fi", "DownColor", "WIFI" } },
         { "Cpu", new[] { "CPU usage", "Chip", "CpuColor", "CPU" } },
         { "CpuCores", new[] { "CPU per-core bars", "Cores", "CpuColor", "CORE" } },
         { "CpuClock", new[] { "CPU clock speed", "Gauge", "CpuColor", "CLK" } },
@@ -1431,7 +1444,7 @@ static class Stats
 // ======================================================================= Program
 static class Program
 {
-    public const string AppName = "PCStatsBar";
+    public const string AppName = "Kinetik", LegacyName = "PCStatsBar";
     public static readonly bool IsAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     static readonly Dictionary<string, Assembly> loaded = new Dictionary<string, Assembly>();
 
@@ -1446,15 +1459,21 @@ static class Program
         GCSettings.LatencyMode = GCLatencyMode.Batch;
         AppDomain.CurrentDomain.AssemblyResolve += ResolveEmbedded;
         bool created;
+        MigrateLegacy();
         using (var mutex = new Mutex(true, AppName, out created))
         {
             // When relaunching (e.g. elevated), wait for the previous instance to exit.
-            if (!created && !(args.Contains("--restart") && Wait(mutex))) return;
+            if (!created && !args.Contains("--restart"))
+            {
+                try { EventWaitHandle.OpenExisting(AppName + ".Show").Set(); } catch { }
+                return;
+            }
+            if (!created && !Wait(mutex)) return;
             SetProcessDPIAware();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.ThreadException += (s, e) =>
-                File.AppendAllText(Path.Combine(Path.GetTempPath(), "PCStatsBar.log"), DateTime.Now + " " + e.Exception + Environment.NewLine);
+                File.AppendAllText(Path.Combine(Path.GetTempPath(), "Kinetik.log"), DateTime.Now + " " + e.Exception + Environment.NewLine);
             var bar = new StatsBar();
             int si = Array.IndexOf(args, "--settings");
             if (si >= 0)
@@ -1464,6 +1483,11 @@ static class Program
             }
             Application.Run(bar);
         }
+    }
+
+    public static void Log(Exception e)
+    {
+        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "Kinetik.log"), DateTime.Now + " " + e + Environment.NewLine); } catch { }
     }
 
     static bool Wait(Mutex m)
@@ -1539,6 +1563,31 @@ static class Program
 
     public static bool TaskExists() { return Run("schtasks.exe", "/Query /TN " + AppName) == 0; }
 
+    // One-time move from the old "PC Stats Bar" name: copies its settings, and swaps its startup entry for Kinetik's.
+    // Deleting the old elevated logon task needs admin, so that part waits until Kinetik runs as administrator.
+    public static void MigrateLegacy()
+    {
+        try
+        {
+            using (var old = Registry.CurrentUser.OpenSubKey(Settings.LegacyKey))
+                if (old != null && Registry.CurrentUser.OpenSubKey(Settings.Key) == null)
+                    using (var k = Registry.CurrentUser.CreateSubKey(Settings.Key))
+                        foreach (var n in old.GetValueNames()) k.SetValue(n, old.GetValue(n), old.GetValueKind(n));
+            using (var k = Registry.CurrentUser.CreateSubKey(Settings.Key))
+            {
+                if (Convert.ToInt32(k.GetValue("LegacyStartupMoved", 0)) == 1) return;
+                bool wanted = false;
+                using (var run = Registry.CurrentUser.CreateSubKey(RunKey))
+                    if (run.GetValue(LegacyName) != null) { run.DeleteValue(LegacyName, false); wanted = true; }
+                bool oldTask = Run("schtasks.exe", "/Query /TN " + LegacyName) == 0;
+                if (oldTask && IsAdmin) { Run("schtasks.exe", "/Delete /F /TN " + LegacyName); wanted = true; oldTask = false; }
+                if (wanted) SetStartup(true);
+                if (!oldTask) k.SetValue("LegacyStartupMoved", 1);
+            }
+        }
+        catch { }
+    }
+
     public static bool IsStartupEnabled()
     {
         using (var k = Registry.CurrentUser.OpenSubKey(RunKey))
@@ -1564,7 +1613,7 @@ static class Program
         var xml =
             "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
             "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n" +
-            "  <RegistrationInfo><Description>Starts PC Stats Bar when you sign in.</Description></RegistrationInfo>\r\n" +
+            "  <RegistrationInfo><Description>Starts Kinetik when you sign in.</Description></RegistrationInfo>\r\n" +
             "  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + user + "</UserId></LogonTrigger></Triggers>\r\n" +
             "  <Principals><Principal id=\"Author\"><UserId>" + user + "</UserId><LogonType>InteractiveToken</LogonType>" +
             "<RunLevel>" + (elevated ? "HighestAvailable" : "LeastPrivilege") + "</RunLevel></Principal></Principals>\r\n" +
@@ -1650,6 +1699,7 @@ class StatsBar : Form
 {
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
     [DllImport("user32.dll")] static extern IntPtr FindWindow(string c, string w);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] static extern IntPtr FindWindowEx(IntPtr p, IntPtr a, string c, string w);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);
@@ -1670,6 +1720,7 @@ class StatsBar : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         Cfg.Load();
+        Theme.Use(Cfg.AppBackground);
 
         menu.Renderer = new DarkMenuRenderer();
         menu.Items.Add("Settings…", null, (s, e) => OpenSettings(null));
@@ -1687,7 +1738,26 @@ class StatsBar : Form
         menu.Items.Add("Exit", null, (s, e) => Close());
 
         Sampler = new Sampler(Cfg, () => { try { BeginInvoke((Action)Render); } catch { } });
-        HandleCreated += (s, e) => { Sampler.Start(); TrimSoon(15000); };
+        HandleCreated += (s, e) =>
+        {
+            Sampler.Start(); TrimSoon(15000); ListenForShow();
+            if (File.Exists(Shortcuts.DesktopPath)) ThreadPool.QueueUserWorkItem(_ => Shortcuts.CreateDesktop(Cfg.TrayStyle)); // keeps its icon current
+        };
+        var animTimer = new System.Windows.Forms.Timer { Interval = 16 };
+        animTimer.Tick += (s, e) => { animTimer.Interval = 1000 / Math.Max(10, Cfg.AnimFps); AnimFrame(); };
+        animTimer.Start();
+    }
+
+    // Launching Kinetik again (e.g. from the desktop shortcut) signals this event, and the running copy opens Settings.
+    void ListenForShow()
+    {
+        var ev = new EventWaitHandle(false, EventResetMode.AutoReset, Program.AppName + ".Show");
+        var t = new Thread(() =>
+        {
+            while (ev.WaitOne())
+                try { BeginInvoke((Action)(() => OpenSettings(null))); } catch { return; }
+        }) { IsBackground = true };
+        t.Start();
     }
 
     // Trims memory once things have settled (a one-shot timer, so it never runs mid-interaction).
@@ -1713,22 +1783,56 @@ class StatsBar : Form
     {
         if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.Close(); // flushes unsaved settings
         if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; } // otherwise a dead icon lingers until hovered
+        if (taskButton != null) { taskButton.Dispose(); taskButton = null; }
         base.OnFormClosing(e);
     }
 
     // ---- Tray icon: click for Settings, right-click for the same menu as the bar.
     // Useful when the bar is hidden (fullscreen apps) or there's no room for it on the taskbar.
     NotifyIcon tray;
+    int trayStyle = -1, trayFrame;
+    double trayPhase; DateTime trayAt = DateTime.UtcNow;
+
+    // Turns the logo's ring in the tray, faster the busier the CPU is.
+    // ---- Optional taskbar button, so Kinetik shows as a running app. Clicking it opens Settings.
+    TaskbarButtonForm taskButton;
+
+    void SyncTaskbarButton()
+    {
+        if (Cfg.TaskbarButton && taskButton == null)
+        {
+            taskButton = new TaskbarButtonForm(this) { Icon = TrayIconArt.Frame(Cfg.TrayStyle, SystemInformation.IconSize.Width, 0) };
+            taskButton.Show();
+        }
+        else if (!Cfg.TaskbarButton && taskButton != null) { taskButton.Dispose(); taskButton = null; }
+        else if (taskButton != null && trayStyle != Cfg.TrayStyle) taskButton.Icon = TrayIconArt.Frame(Cfg.TrayStyle, SystemInformation.IconSize.Width, 0);
+    }
+
+    void SpinTray()
+    {
+        var now = DateTime.UtcNow;
+        double dt = Math.Min(0.2, (now - trayAt).TotalSeconds); trayAt = now;
+        if ((tray == null && taskButton == null) || !Cfg.TrayAnimate) return;
+        trayPhase += dt * (0.4 + Sampler.Snap.Cpu / 100 * 4); // thirds of a turn per second
+        int f = (int)(trayPhase * TrayIconArt.Frames) % TrayIconArt.Frames;
+        if (f == trayFrame) return;
+        trayFrame = f;
+        if (tray != null) tray.Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, f);
+        if (taskButton != null) taskButton.Icon = TrayIconArt.Frame(trayStyle, SystemInformation.IconSize.Width, f);
+    }
     string trayText;
 
     void SyncTray()
     {
+        if (tray != null && trayStyle != Cfg.TrayStyle)
+        {
+            trayStyle = Cfg.TrayStyle; trayFrame = 0;
+            tray.Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, 0);
+        }
         if (Cfg.TrayIcon && tray == null)
         {
-            Icon icon = null;
-            using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("icon.ico"))
-                if (st != null) icon = new Icon(st, SystemInformation.SmallIconSize);
-            tray = new NotifyIcon { Icon = icon ?? SystemIcons.Application, Text = "PC Stats Bar", ContextMenuStrip = menu };
+            trayStyle = Cfg.TrayStyle;
+            tray = new NotifyIcon { Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, 0), Text = "Kinetik", ContextMenuStrip = menu };
             tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) OpenSettings(null); };
             tray.Visible = true;
             trayText = null;
@@ -1744,7 +1848,7 @@ class StatsBar : Form
         if (Cfg.Wants("Cpu")) parts.Add("CPU " + s.Cpu.ToString("0") + "%");
         parts.Add("RAM " + s.RamLoad + "%");
         if (s.HasGpu) parts.Add("GPU " + s.GpuUtil.ToString("0") + "%");
-        var text = "PC Stats Bar\n" + string.Join(" · ", parts);
+        var text = "Kinetik\n" + string.Join(" · ", parts);
         if (text.Length > 63) text = text.Substring(0, 63);
         if (text != trayText) { trayText = text; tray.Text = text; }
     }
@@ -1783,6 +1887,7 @@ class StatsBar : Form
     class Seg
     {
         public IconFn Icon; public string Label; public Color IconColor; public float LabelW;
+        public string Id; public double Act; // what the icon's animation follows
         public List<Part> Parts = new List<Part>();
         public double[] Bars; public Color BarColor;
         public bool IsSep; public float Mark; // divider: size of the line / dot
@@ -1829,7 +1934,8 @@ class StatsBar : Form
             if (!c.IsOn(id)) continue;
             var info = Stats.Get(id, c);
             bool customIcon = c.IconOf(id) != "";
-            Func<Seg> seg = () => new Seg { Icon = info.Icon, Label = info.TextLabel ? info.Short : null, IconColor = info.Color };
+            double act = IconAnim.Activity(id, s);
+            Func<Seg> seg = () => new Seg { Icon = info.Icon, Label = info.TextLabel ? info.Short : null, IconColor = info.Color, Id = id, Act = act };
             Action<string, string, Color> add = (text, template, color) =>
             {
                 var sg = seg();
@@ -1844,6 +1950,7 @@ class StatsBar : Form
                 case "Ping":
                     add(s.Ping >= 0 ? s.Ping + " ms" : "-- ms", "888 ms", s.Ping == -2 || s.Ping >= c.WarnPing ? c.WarnColor : s.Ping < 0 ? dim : val);
                     break;
+                case "Wifi": if (s.Wifi >= 0) add(s.Wifi + "%", "100%", s.Wifi <= 25 ? c.WarnColor : val); break;
                 case "Cpu": add(s.Cpu.ToString("0") + "%", "100%", warn(s.Cpu, c.WarnCpu)); break;
                 case "CpuCores":
                     if (s.Cores.Length > 0) { var sg = seg(); sg.Bars = s.Cores; sg.BarColor = info.Color; segs.Add(sg); }
@@ -2088,7 +2195,9 @@ class StatsBar : Form
                 }
                 else if (seg.Icon != null)
                 {
-                    seg.Icon(g, new RectangleF(sx, cy + (rowH - icon) / 2, icon, icon), seg.IconColor);
+                    var ir = new RectangleF(sx, cy + (rowH - icon) / 2, icon, icon);
+                    if (Cfg.BarAnimate) anim.Draw(g, seg.Id, seg.Icon, ir, seg.IconColor, seg.Act, seg.IconColor == Cfg.WarnColor);
+                    else seg.Icon(g, ir, seg.IconColor);
                     sx += icon + L.IconGap;
                 }
                 if (seg.Bars != null)
@@ -2152,15 +2261,20 @@ class StatsBar : Form
     {
         int qs;
         bool fullscreen = Cfg.HideFullscreen && SHQueryUserNotificationState(out qs) == 0 && (qs == 2 || qs == 3 || qs == 4);
+        // Only hide what shares a monitor with the fullscreen app, so the other screens keep their stats.
+        Screen fsScreen = null;
+        if (fullscreen) { var fg = GetForegroundWindow(); if (fg != IntPtr.Zero) fsScreen = Screen.FromHandle(fg); }
+        IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
         SyncWidget();
-        if (widget != null) { if (fullscreen) widget.HideNow(); else widget.Render(force); }
+        if (widget != null) { if (fullscreen && (fsScreen == null || widget.IsOnScreen(fsScreen))) widget.HideNow(); else widget.Render(force); }
+        SyncTaskbarButton();
         SyncTray();
         UpdateTrayText(Sampler.Snap);
 
-        IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
         RECT tb;
         if (taskbar == IntPtr.Zero || !GetWindowRect(taskbar, out tb)) return;
-        if (fullscreen) { ShowWindow(Handle, 0); return; }
+        bool hideBar = fullscreen && (fsScreen == null || Screen.FromHandle(taskbar).DeviceName == fsScreen.DeviceName);
+        if (hideBar) { ShowWindow(Handle, 0); shownL = null; return; }
 
         TaskbarHeight = tb.B - tb.T;
         var L = Build(TaskbarHeight, LightTaskbar());
@@ -2171,7 +2285,7 @@ class StatsBar : Form
         else right = tb.R - (int)(TaskbarHeight * 5.5);
         int x = right - Cfg.Offset - L.Width, y = tb.T;
         // Most ticks change nothing visible (e.g. idle network), so skip the repaint entirely.
-        if (force || L.Key != lastKey || x != lastX || y != lastY)
+        if (force || shownL == null || L.Key != lastKey || x != lastX || y != lastY)
         {
             Push(L, TaskbarHeight, x, y);
             lastKey = L.Key; lastX = x; lastY = y;
@@ -2188,6 +2302,7 @@ class StatsBar : Form
         if (s.CpuTempStatus != "" && (Cfg.CpuTemp || Cfg.CpuPower)) sb.AppendLine("CPU temp: " + s.CpuTempStatus);
         if (s.HasGpu) sb.AppendLine("GPU: " + s.GpuName);
         if (Cfg.Ping) sb.AppendLine("Ping: " + Cfg.PingHost);
+        if (Cfg.Wifi && s.WifiName != "") sb.AppendLine("Wi-Fi: " + s.WifiName);
         if (Cfg.DiskFree && s.FreeName != "") sb.AppendLine("Free space: " + s.FreeName + " (" + s.FreePct.ToString("0") + "% free)");
         foreach (var d in Sampler.Devices) sb.AppendLine(d.Key + ": " + d.Value + "%");
         sb.Append("Left-click: Task Manager  ·  Right-click: Settings");
@@ -2203,6 +2318,18 @@ class StatsBar : Form
         var bmp = surface.Canvas(L.Width, height);
         using (var g = Graphics.FromImage(bmp)) PaintBar(g, L, height);
         surface.Push(Handle, x, y);
+        shownL = L; shownH = height;
+    }
+
+    // ---- Icon animation: the last layout is repainted every frame so the icons keep moving between samples.
+    readonly IconAnim anim = new IconAnim();
+    BarLayout shownL; int shownH;
+
+    void AnimFrame()
+    {
+        anim.Advance();
+        SpinTray();
+        if (Cfg.BarAnimate && shownL != null && IsHandleCreated && lastX != int.MinValue) Push(shownL, shownH, lastX, lastY);
     }
 
     // ---- Desktop widget: created and destroyed to match the settings.
@@ -2225,6 +2352,1011 @@ class StatsBar : Form
     public void NotifySettings(string page)
     {
         if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.RefreshIfShowing(page);
+    }
+}
+
+// ======================================================================= Wi-Fi signal
+// Signal quality of the connected Wi-Fi network, straight from Windows' Native Wifi API (no netsh, no polling a process).
+static class WifiSignal
+{
+    [DllImport("wlanapi.dll")] static extern int WlanOpenHandle(int ver, IntPtr res, out int negotiated, out IntPtr handle);
+    [DllImport("wlanapi.dll")] static extern int WlanCloseHandle(IntPtr handle, IntPtr res);
+    [DllImport("wlanapi.dll")] static extern int WlanEnumInterfaces(IntPtr handle, IntPtr res, out IntPtr list);
+    [DllImport("wlanapi.dll")] static extern int WlanQueryInterface(IntPtr handle, ref Guid iface, int opcode, IntPtr res, out int size, out IntPtr data, IntPtr type);
+    [DllImport("wlanapi.dll")] static extern void WlanFreeMemory(IntPtr p);
+
+    static IntPtr handle;
+    static readonly object gate = new object();
+
+    // Returns 0–100, or -1 when there's no connected Wi-Fi adapter.
+    public static int Read(out string ssid)
+    {
+        ssid = "";
+        lock (gate)
+        {
+            try
+            {
+                int ver;
+                if (handle == IntPtr.Zero && WlanOpenHandle(2, IntPtr.Zero, out ver, out handle) != 0) { handle = IntPtr.Zero; return -1; }
+                IntPtr list;
+                if (WlanEnumInterfaces(handle, IntPtr.Zero, out list) != 0) return -1;
+                try
+                {
+                    int n = Marshal.ReadInt32(list);
+                    for (int i = 0; i < n; i++)
+                    {
+                        IntPtr item = list + 8 + i * 532; // WLAN_INTERFACE_INFO: GUID, WCHAR[256] description, state
+                        if (Marshal.ReadInt32(item, 528) != 1) continue; // wlan_interface_state_connected
+                        var guid = (Guid)Marshal.PtrToStructure(item, typeof(Guid));
+                        int size; IntPtr data;
+                        if (WlanQueryInterface(handle, ref guid, 7, IntPtr.Zero, out size, out data, IntPtr.Zero) != 0) continue; // current connection
+                        try
+                        {
+                            // WLAN_CONNECTION_ATTRIBUTES: state, mode, WCHAR[256] profile, then the association attributes.
+                            int len = Math.Min(32, Marshal.ReadInt32(data, 520));
+                            var raw = new byte[len];
+                            Marshal.Copy(data + 524, raw, 0, len);
+                            ssid = Encoding.UTF8.GetString(raw);
+                            return Math.Max(0, Math.Min(100, Marshal.ReadInt32(data, 576)));
+                        }
+                        finally { WlanFreeMemory(data); }
+                    }
+                    return -1;
+                }
+                finally { WlanFreeMemory(list); }
+            }
+            catch { return -1; }
+        }
+    }
+
+    public static void Close()
+    {
+        lock (gate) { if (handle != IntPtr.Zero) { WlanCloseHandle(handle, IntPtr.Zero); handle = IntPtr.Zero; } }
+    }
+}
+
+// ======================================================================= Tray icon artwork
+// Kinetik's tray and taskbar icon: a three-bladed fan on a choice of backgrounds, drawn at the exact size needed.
+// It spins with CPU load; the blades repeat every 120°, so a handful of cached frames makes a seamless loop.
+static class TrayIconArt
+{
+    public const int Frames = 8;
+    static readonly Dictionary<string, Icon> cache = new Dictionary<string, Icon>();
+
+    // Name → top-left and bottom-right gradient colours; a transparent pair means no tile.
+    public static readonly KeyValuePair<string, Color[]>[] Styles =
+    {
+        S("Kinetik orange (default)", 255, 255, 106, 43, 255, 255, 140, 60),
+        S("Violet to cyan", 255, 108, 76, 255, 255, 0, 198, 255),
+        S("Ocean blue", 255, 30, 90, 230, 255, 0, 170, 255),
+        S("Emerald", 255, 0, 150, 90, 255, 60, 220, 140),
+        S("Sunset", 255, 255, 80, 60, 255, 255, 170, 40),
+        S("Crimson", 255, 170, 20, 50, 255, 255, 60, 90),
+        S("Hot pink", 255, 200, 40, 160, 255, 255, 110, 200),
+        S("Graphite", 255, 45, 45, 52, 255, 85, 85, 96),
+        S("Midnight", 255, 20, 22, 40, 255, 40, 50, 90),
+        S("Light", 255, 235, 235, 240, 255, 255, 255, 255),
+        S("No background", 0, 0, 0, 0, 0, 0, 0, 0),
+    };
+
+    static KeyValuePair<string, Color[]> S(string n, int a1, int r1, int g1, int b1, int a2, int r2, int g2, int b2)
+    {
+        return new KeyValuePair<string, Color[]>(n, new[] { Color.FromArgb(a1, r1, g1, b1), Color.FromArgb(a2, r2, g2, b2) });
+    }
+
+    // Cached, so a spinning icon never allocates new icon handles.
+    public static Icon Frame(int style, int size, int frame)
+    {
+        style = Math.Max(0, Math.Min(Styles.Length - 1, style));
+        var key = style + "|" + size + "|" + frame;
+        Icon ic;
+        if (!cache.TryGetValue(key, out ic))
+            using (var bmp = Draw(style, size, frame * Period / Frames))
+                cache[key] = ic = Icon.FromHandle(bmp.GetHicon());
+        return ic;
+    }
+
+    // The fan has three blades, so it looks the same every 120°.
+    public const float Period = 120f;
+
+    public static Bitmap Draw(int style, int size, float angle)
+    {
+        var st = Styles[style].Value;
+        bool none = st[0].A == 0, light = st[0].GetBrightness() > 0.8f;
+        int s = Math.Max(16, size);
+        var bmp = new Bitmap(s, s, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias; g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.Clear(Color.Transparent);
+            float m = Math.Max(0.5f, s * 0.03f), cx = s / 2f, cy = s / 2f;
+            if (!none)
+                using (var tile = Icons.Round(new RectangleF(m, m, s - 2 * m, s - 2 * m), s * 0.23f))
+                using (var grad = new LinearGradientBrush(new RectangleF(0, 0, s, s), st[0], st[1], 45f))
+                    g.FillPath(grad, tile);
+            // White blades on colour; dark on the light tile; orange with no tile, so it shows on light and dark taskbars.
+            Color blade = none ? Color.FromArgb(255, 106, 43) : light ? Color.FromArgb(40, 40, 50) : Color.White;
+            float k = none ? 1.2f : 1f;
+            using (var b = new SolidBrush(blade))
+            {
+                for (int q = 0; q < 3; q++)
+                    using (var path = new GraphicsPath())
+                    using (var mx = new Matrix())
+                    {
+                        path.AddEllipse(cx - s * 0.106f * k, cy - s * (0.1875f + 0.175f) * k, s * 0.212f * k, s * 0.35f * k);
+                        mx.RotateAt(angle + q * 120, new PointF(cx, cy));
+                        path.Transform(mx);
+                        g.FillPath(b, path);
+                    }
+                // Hub: a ring in the tile colour around a small dot.
+                float hr = s * 0.075f * k, dr = s * 0.037f * k;
+                Color hub = none ? Color.White : Mix(st[0], st[1]);
+                using (var hb = new SolidBrush(hub)) g.FillEllipse(hb, cx - hr, cy - hr, hr * 2, hr * 2);
+                g.FillEllipse(b, cx - dr, cy - dr, dr * 2, dr * 2);
+            }
+        }
+        return bmp;
+    }
+
+    static Color Mix(Color a, Color b) { return Color.FromArgb(255, (a.R + b.R) / 2, (a.G + b.G) / 2, (a.B + b.B) / 2); }
+}
+
+// ======================================================================= Taskbar button
+// An invisible window whose only job is to put a Kinetik button on the taskbar. Clicking it opens Settings;
+// "Close window" from its taskbar menu exits Kinetik, like any other app.
+class TaskbarButtonForm : Form
+{
+    readonly StatsBar bar;
+    bool closingApp;
+
+    public TaskbarButtonForm(StatsBar bar)
+    {
+        this.bar = bar;
+        Text = "Kinetik";
+        ShowInTaskbar = true;
+        FormBorderStyle = FormBorderStyle.None;
+        StartPosition = FormStartPosition.Manual;
+        Location = new Point(-32000, -32000);
+        Size = new Size(1, 1);
+        Opacity = 0;
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    protected override void WndProc(ref Message m)
+    {
+        // Clicking the button of the active window asks it to minimise; open Settings instead.
+        if (m.Msg == 0x112 && ((int)m.WParam & 0xFFF0) == 0xF020) { bar.OpenSettings(null); return; }
+        base.WndProc(ref m);
+    }
+
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        BeginInvoke((Action)(() => bar.OpenSettings(null)));
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (e.CloseReason == CloseReason.UserClosing && !closingApp)
+        {
+            e.Cancel = true;
+            closingApp = true;
+            bar.BeginInvoke((Action)(() => bar.Close()));
+            return;
+        }
+        base.OnFormClosing(e);
+    }
+}
+
+// ======================================================================= Shortcuts
+static class Shortcuts
+{
+    [DllImport("shell32.dll")] static extern void SHChangeNotify(int ev, int flags, IntPtr a, IntPtr b);
+
+    public static string DesktopPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kinetik.lnk"); } }
+
+    // A multi-size .ico of the fan logo in the chosen colour, for the shortcut (the exe's own icon is fixed at build time).
+    static string IconFile(int style)
+    {
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik");
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "icon-" + style + ".v2.ico");
+        if (File.Exists(path)) return path;
+        // Classic 32-bit bitmap entries for the small sizes (Explorer won't reliably show PNG ones), PNG for 256.
+        var sizes = new[] { 16, 24, 32, 48, 64, 128, 256 };
+        var data = sizes.Select(sz => { using (var b = TrayIconArt.Draw(style, sz, 0)) return sz >= 256 ? Png(b) : Dib(b); }).ToList();
+        using (var w = new BinaryWriter(File.Create(path)))
+        {
+            w.Write((ushort)0); w.Write((ushort)1); w.Write((ushort)sizes.Length);
+            int offset = 6 + 16 * sizes.Length;
+            for (int k = 0; k < sizes.Length; k++)
+            {
+                byte dim = (byte)(sizes[k] >= 256 ? 0 : sizes[k]);
+                w.Write(dim); w.Write(dim); w.Write((byte)0); w.Write((byte)0);
+                w.Write((ushort)1); w.Write((ushort)32); w.Write(data[k].Length); w.Write(offset);
+                offset += data[k].Length;
+            }
+            foreach (var e in data) w.Write(e);
+        }
+        return path;
+    }
+
+    static byte[] Png(Bitmap b) { using (var ms = new MemoryStream()) { b.Save(ms, ImageFormat.Png); return ms.ToArray(); } }
+
+    // An icon image in BMP form: header (double height for the mask), bottom-up BGRA pixels, then an all-clear AND mask.
+    static byte[] Dib(Bitmap b)
+    {
+        int n = b.Width, maskRow = ((n + 31) / 32) * 4;
+        using (var ms = new MemoryStream()) using (var w = new BinaryWriter(ms))
+        {
+            w.Write(40); w.Write(n); w.Write(n * 2); w.Write((ushort)1); w.Write((ushort)32);
+            w.Write(0); w.Write(n * n * 4 + maskRow * n); w.Write(0); w.Write(0); w.Write(0); w.Write(0);
+            for (int y = n - 1; y >= 0; y--)
+                for (int x = 0; x < n; x++) { var c = b.GetPixel(x, y); w.Write(c.B); w.Write(c.G); w.Write(c.R); w.Write(c.A); }
+            w.Write(new byte[maskRow * n]);
+            return ms.ToArray();
+        }
+    }
+
+    public static void CreateDesktop(int style)
+    {
+        try
+        {
+            var shellType = Type.GetTypeFromProgID("WScript.Shell");
+            object shell = Activator.CreateInstance(shellType);
+            object lnk = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { DesktopPath });
+            var t = lnk.GetType();
+            Action<string, object> set = (name, v) => t.InvokeMember(name, BindingFlags.SetProperty, null, lnk, new[] { v });
+            set("TargetPath", Application.ExecutablePath);
+            set("WorkingDirectory", Path.GetDirectoryName(Application.ExecutablePath));
+            set("Description", "Kinetik: live PC stats on your taskbar and desktop");
+            string ico;
+            try { ico = IconFile(style) + ",0"; } catch (Exception ex) { ico = Application.ExecutablePath + ",0"; Program.Log(ex); }
+            set("IconLocation", ico);
+            t.InvokeMember("Save", BindingFlags.InvokeMethod, null, lnk, null);
+            SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero); // SHCNE_ASSOCCHANGED: make Explorer redraw the icon
+            Marshal.FinalReleaseComObject(lnk); Marshal.FinalReleaseComObject(shell);
+        }
+        catch { }
+    }
+
+    public static void RemoveDesktop() { try { File.Delete(DesktopPath); } catch { } }
+}
+
+// ======================================================================= Icon animation
+// Brings icons to life on the bar and the widget. Each preset icon has its own animation that acts out
+// what it shows (a fan spins, a thermometer's mercury rises, a gauge's needle swings, disk LEDs flicker…),
+// driven by how busy its stat is. Each icon keeps its own phase, so a change of speed never makes it jump.
+class IconAnim
+{
+    readonly Dictionary<string, double> phase = new Dictionary<string, double>();
+    readonly Dictionary<string, double> shown = new Dictionary<string, double>(); // activity, eased per icon
+    readonly Dictionary<string, string> kinds = new Dictionary<string, string>();
+    readonly Stopwatch clock = Stopwatch.StartNew();
+    double last, dt, t;
+
+    public void Advance()
+    {
+        double now = clock.Elapsed.TotalSeconds;
+        dt = Math.Min(0.1, now - last); last = now; t = now;
+        foreach (var k in phase.Keys.ToList())
+        {
+            double a, p = phase[k];
+            shown.TryGetValue(k, out a);
+            double speed = Speed(kinds[k], a);
+            if (speed <= 0)
+            {
+                // An idle icon finishes its current cycle and comes to rest, rather than freezing mid-move.
+                double f = p - Math.Floor(p);
+                if (f < 0.001) continue;
+                phase[k] = f + 0.8 * dt >= 1 ? Math.Ceiling(p) : p + 0.8 * dt;
+                continue;
+            }
+            phase[k] = p + speed * dt;
+        }
+    }
+
+    static readonly Dictionary<IconFn, string> iconKinds = new Dictionary<IconFn, string>
+    {
+        { Icons.Fan, "fan" }, { Icons.Gear, "gear" }, { Icons.Up, "up" }, { Icons.Down, "down" }, { Icons.UpDown, "updown" },
+        { Icons.Chip, "chip" }, { Icons.Grid, "grid" }, { Icons.Gauge, "gauge" }, { Icons.Thermo, "thermo" }, { Icons.Flame, "flame" },
+        { Icons.Bolt, "bolt" }, { Icons.Plug, "plug" }, { Icons.Ram, "ram" }, { Icons.Vram, "vram" }, { Icons.Gpu, "gpu" },
+        { Icons.Disk, "disk" }, { Icons.DiskRead, "diskread" }, { Icons.DiskWrite, "diskwrite" }, { Icons.Signal, "signal" },
+        { Icons.Wifi, "wifi" }, { Icons.Globe, "globe" }, { Icons.Pie, "pie" }, { Icons.Clock, "clock" }, { Icons.Hourglass, "hourglass" },
+        { Icons.Pulse, "pulse" }, { Icons.Heart, "heart" }, { Icons.Monitor, "monitor" }, { Icons.List, "list" }, { Icons.Star, "star" },
+        { Icons.Dot, "dot" }, { Icons.Layers, "shine" }, { Icons.Stack, "stack" },
+    };
+
+    static string Kind(string id, IconFn icon)
+    {
+        string k;
+        if (icon != null && iconKinds.TryGetValue(icon, out k)) return k;
+        if (id == null || id == "DiskFree") return "shine";
+        if (id == "GpuFan") return "spinany";
+        if (id.EndsWith("Temp")) return "heat";
+        if (id.EndsWith("Power")) return "zap";
+        if (id == "Ping") return "heart";
+        return "shine";
+    }
+
+    // Cycles per second at a given activity level (0 = stand still).
+    static double Speed(string kind, double a)
+    {
+        switch (kind)
+        {
+            case "fan": case "spinany": case "gpu": return a <= 0.01 ? 0 : 0.2 + a * 3.6;
+            case "gear": return a <= 0.01 ? 0 : 0.08 + a * 0.9;
+            case "up": case "down": case "updown": case "diskread": case "diskwrite": return a <= 0.02 ? 0 : 0.4 + a * 2;
+            case "disk": return a <= 0.02 ? 0 : 0.5 + a * 2.5;
+            case "clock": return 1;
+            case "hourglass": return 0.18 + a * 0.35;
+            case "heart": return 0.8 + a * 0.9;
+            case "globe": return 0.12 + a * 0.6;
+            default: return 0.3 + a * 1.5;
+        }
+    }
+
+    static double Clamp(double v) { return double.IsNaN(v) ? 0 : Math.Max(0, Math.Min(1, v)); }
+    static double Rate(double bytes) { return Clamp(Math.Log10(Math.Max(0, bytes) / 1024 + 1) / 4.5); } // 1 KB/s ≈ 0.07, 30 MB/s ≈ 1
+    static double Noise(double x) { double v = Math.Sin(x * 12.9898 + 78.233) * 43758.5453; return v - Math.Floor(v); }
+    static float Ease(double f) { f = Clamp(f); return (float)(f * f * (3 - 2 * f)); }
+
+    public static double Activity(string id, Snapshot s)
+    {
+        switch (id)
+        {
+            case "Up": return Rate(s.Up);
+            case "Down": return Rate(s.Down);
+            case "NetTotal": return Rate(s.Up + s.Down);
+            case "DiskRead": return Rate(s.DiskRead);
+            case "DiskWrite": return Rate(s.DiskWrite);
+            case "Disk": return Clamp(s.Disk / 100);
+            case "Ping": return s.Ping >= 0 ? Clamp(1 - s.Ping / 250.0) : 0;
+            case "Wifi": return s.Wifi >= 0 ? Clamp(s.Wifi / 100.0) : 0;
+            case "Cpu": return Clamp(s.Cpu / 100);
+            case "CpuCores": return s.Cores.Length > 0 ? Clamp(s.Cores.Average() / 100) : 0;
+            case "CpuClock": return Clamp(s.CpuMhz / 5500);
+            case "CpuTemp": return Clamp((s.CpuTemp - 30) / 65);
+            case "CpuPower": return Clamp(s.CpuPower / 150);
+            case "Ram": return Clamp(s.RamLoad / 100.0);
+            case "RamGb": return s.RamTotal > 0 ? Clamp(s.RamUsed / s.RamTotal) : 0;
+            case "RamCommit": return Clamp(s.Commit / 100);
+            case "Gpu": return Clamp(s.GpuUtil / 100);
+            case "GpuTemp": return Clamp((s.GpuTemp - 30) / 60);
+            case "GpuClock": return Clamp(s.GpuMhz / 2800);
+            case "GpuFan": return s.GpuFan < 0 ? 0 : Clamp(s.GpuFanRpm ? s.GpuFan / 3200 : s.GpuFan / 100);
+            case "GpuVram": case "GpuVramPct": return s.VramTotal > 0 ? Clamp(s.VramUsed / s.VramTotal) : 0;
+            case "GpuPower": return Clamp(s.GpuPower / 350);
+            case "Processes": return Clamp(s.Processes / 600.0);
+            case "PcBattery": return SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online ? 0.6 : 0.1;
+            case "DiskFree": return 0.1;
+            default: return 0.15;
+        }
+    }
+
+    // The square redrawn each frame on the widget: the icon plus room for its glow and movement.
+    public static RectangleF Cell(RectangleF r)
+    {
+        float m = r.Width * 0.15f;
+        var c = r; c.Inflate(m, m);
+        return RectangleF.FromLTRB((float)Math.Floor(c.Left), (float)Math.Floor(c.Top), (float)Math.Ceiling(c.Right), (float)Math.Ceiling(c.Bottom));
+    }
+
+    static Pen P(Color c, float s) { return new Pen(c, Math.Max(1.3f, s / 9f)) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round }; }
+    static Color A(Color c, double alpha) { return Color.FromArgb((int)(c.A * Clamp(alpha)), c); }
+
+    static Color Mix(Color a, Color b, double f)
+    {
+        f = Clamp(f);
+        return Color.FromArgb(a.A, (int)(a.R + (b.R - a.R) * f), (int)(a.G + (b.G - a.G) * f), (int)(a.B + (b.B - a.B) * f));
+    }
+
+    static void Around(Graphics g, float cx, float cy, float angle, float scale)
+    {
+        g.TranslateTransform(cx, cy); g.RotateTransform(angle); g.ScaleTransform(scale, scale); g.TranslateTransform(-cx, -cy);
+    }
+
+    // A glint that sweeps across the icon: the icon redrawn brighter inside a slanted band.
+    static void Shine(Graphics g, IconFn icon, RectangleF r, Color col, double pos, double strength)
+    {
+        if (strength <= 0.02) return;
+        float s = r.Width, bx = r.X - s * 0.6f + (float)pos * s * 2.2f;
+        for (int i = 0; i < 3; i++)
+        {
+            float w = s * (0.36f - i * 0.12f), x = bx + (s * 0.36f - w) / 2;
+            using (var band = new GraphicsPath())
+            {
+                band.AddPolygon(new[] { new PointF(x + s * 0.3f, r.Y - 2), new PointF(x + s * 0.3f + w, r.Y - 2), new PointF(x + w - s * 0.3f, r.Bottom + 2), new PointF(x - s * 0.3f, r.Bottom + 2) });
+                var st = g.Save();
+                g.SetClip(band, CombineMode.Intersect);
+                icon(g, r, Mix(col, Color.White, strength * (0.3 + 0.25 * i)));
+                g.Restore(st);
+            }
+        }
+    }
+
+    public void Draw(Graphics g, string id, IconFn icon, RectangleF r, Color col, double act, bool warn)
+    {
+        string key = (id ?? "") + "|" + r.X.ToString("0") + "," + r.Y.ToString("0");
+        string kind = Kind(id, icon);
+        kinds[key] = kind;
+        double a;
+        if (!shown.TryGetValue(key, out a)) a = act;
+        a += (act - a) * Math.Min(1, dt * 4); // ease towards the latest reading
+        shown[key] = a;
+        double p;
+        if (!phase.TryGetValue(key, out p)) phase[key] = p = 0;
+
+        float s = r.Width, cx = r.X + s / 2, cy = r.Y + s / 2;
+        double frac = p - Math.Floor(p), wave = Math.Sin(p * 2 * Math.PI);
+        Color hot = warn ? Color.OrangeRed : col;
+
+        // Soft glow behind the icon that grows with activity.
+        int glowA = (int)(a * 75 * (0.75 + 0.25 * wave));
+        if (glowA > 3)
+            using (var path = new GraphicsPath())
+            {
+                float gr = s * 0.65f;
+                path.AddEllipse(cx - gr, cy - gr, gr * 2, gr * 2);
+                using (var pb = new PathGradientBrush(path) { CenterColor = Color.FromArgb(glowA, hot), SurroundColors = new[] { Color.FromArgb(0, hot) } })
+                    g.FillPath(pb, path);
+            }
+
+        var state = g.Save();
+        try { Paint(g, kind, id, icon, r, col, a, p, frac, wave, s, cx, cy); }
+        finally { g.Restore(state); }
+    }
+
+    void Paint(Graphics g, string kind, string id, IconFn icon, RectangleF r, Color col, double a, double p, double frac, double wave, float s, float cx, float cy)
+    {
+        switch (kind)
+        {
+            case "fan":
+            case "spinany":
+            {
+                // Spinning blades; at speed, fading ghost copies trail behind them like motion blur.
+                double speed = Speed(kind, a);
+                int ghosts = speed > 0.8 ? 3 : speed > 0.3 ? 1 : 0;
+                for (int k = ghosts; k >= 1; k--)
+                {
+                    var st = g.Save();
+                    Around(g, cx, cy, (float)(frac * 360 - k * speed * 7), 1);
+                    icon(g, r, A(col, 0.28 / k));
+                    g.Restore(st);
+                }
+                Around(g, cx, cy, (float)(frac * 360), 1);
+                icon(g, r, col);
+                break;
+            }
+            case "gear":
+                Around(g, cx, cy, (float)(frac * 45), 1); // eight teeth, so 45° is one full step
+                icon(g, r, col);
+                Shine(g, icon, r, col, (p * 0.4) % 1.6 - 0.3, a * 0.6);
+                break;
+
+            case "up":
+            case "down":
+            {
+                // The arrow streams in its direction, with speed streaks and a seamless following copy.
+                bool down = kind == "down";
+                float off = (float)(frac * s) * (down ? 1 : -1);
+                var st = g.Save();
+                g.SetClip(r, CombineMode.Intersect);
+                g.TranslateTransform(0, off); icon(g, r, col);
+                g.TranslateTransform(0, down ? -s : s); icon(g, r, col);
+                g.Restore(st);
+                Streaks(g, r, col, a, p, down);
+                break;
+            }
+            case "updown":
+            {
+                // Left arrow flows up, right arrow flows down.
+                float w = s * 0.18f, t0 = r.Y + s * 0.12f, b0 = r.Bottom - s * 0.12f, x1 = r.X + s * 0.3f, x2 = r.X + s * 0.7f, off = (float)(frac * s);
+                using (var pen = P(col, s * 1.1f))
+                {
+                    var st = g.Save();
+                    g.SetClip(r, CombineMode.Intersect);
+                    for (int k = 0; k < 2; k++)
+                    {
+                        float o = -off + k * s;
+                        g.DrawLine(pen, x1, t0 + o, x1, b0 + o); g.DrawLines(pen, new[] { new PointF(x1 - w, t0 + w + o), new PointF(x1, t0 + o), new PointF(x1 + w, t0 + w + o) });
+                        o = off - k * s;
+                        g.DrawLine(pen, x2, t0 + o, x2, b0 + o); g.DrawLines(pen, new[] { new PointF(x2 - w, b0 - w + o), new PointF(x2, b0 + o), new PointF(x2 + w, b0 - w + o) });
+                    }
+                    g.Restore(st);
+                }
+                break;
+            }
+
+            case "chip":
+            {
+                // Pins light up in a chase around the package; the die glows with load.
+                icon(g, r, col);
+                float i = s * 0.22f;
+                var body = new RectangleF(r.X + i, r.Y + i, s - 2 * i, s - 2 * i);
+                var pins = new List<PointF[]>();
+                for (int k = 1; k <= 3; k++) pins.Add(new[] { new PointF(body.X + body.Width * k / 4f, r.Y + s * 0.06f), new PointF(body.X + body.Width * k / 4f, body.Y) });
+                for (int k = 1; k <= 3; k++) pins.Add(new[] { new PointF(body.Right, body.Y + body.Height * k / 4f), new PointF(r.Right - s * 0.06f, body.Y + body.Height * k / 4f) });
+                for (int k = 3; k >= 1; k--) pins.Add(new[] { new PointF(body.X + body.Width * k / 4f, body.Bottom), new PointF(body.X + body.Width * k / 4f, r.Bottom - s * 0.06f) });
+                for (int k = 3; k >= 1; k--) pins.Add(new[] { new PointF(r.X + s * 0.06f, body.Y + body.Height * k / 4f), new PointF(body.X, body.Y + body.Height * k / 4f) });
+                double head = frac * pins.Count;
+                for (int k = 0; k < pins.Count; k++)
+                {
+                    double d = (head - k + pins.Count) % pins.Count; // how far behind the chase head this pin is
+                    double lit = d < 4 ? (1 - d / 4) * (0.35 + 0.65 * a) : 0;
+                    if (lit < 0.05) continue;
+                    using (var pen = P(Mix(col, Color.White, lit * 0.8), s)) g.DrawLine(pen, pins[k][0], pins[k][1]);
+                }
+                using (var b = new SolidBrush(Mix(col, Color.White, a * (0.35 + 0.35 * wave))))
+                {
+                    float grow = (float)(a * 0.08 * (1 + wave)) * body.Width;
+                    g.FillRectangle(b, body.X + body.Width * 0.3f - grow / 2, body.Y + body.Height * 0.3f - grow / 2, body.Width * 0.4f + grow, body.Height * 0.4f + grow);
+                }
+                break;
+            }
+            case "grid":
+            {
+                // Four cores, each filling and draining on its own like a tiny equaliser.
+                float cell = s * 0.36f, gap = s * 0.12f, o = (s - cell * 2 - gap) / 2;
+                for (int i = 0; i < 2; i++)
+                    for (int j = 0; j < 2; j++)
+                    {
+                        int n = i * 2 + j;
+                        var cr = new RectangleF(r.X + o + i * (cell + gap), r.Y + o + j * (cell + gap), cell, cell);
+                        double lvl = Clamp(0.15 + a * (0.55 + 0.45 * Math.Sin(t * (2.2 + n * 0.9 + a * 4) + n * 1.9)));
+                        using (var path = Icons.Round(cr, s * 0.06f))
+                        {
+                            using (var b = new SolidBrush(A(col, 0.3))) g.FillPath(b, path);
+                            var st = g.Save();
+                            g.SetClip(new RectangleF(cr.X, cr.Bottom - cr.Height * (float)lvl, cr.Width, cr.Height * (float)lvl), CombineMode.Intersect);
+                            using (var b = new SolidBrush(Mix(col, Color.White, lvl > 0.85 ? 0.3 : 0))) g.FillPath(b, path);
+                            g.Restore(st);
+                        }
+                    }
+                break;
+            }
+            case "gauge":
+            {
+                // The needle swings to the current load, with a little tremble when it's working hard.
+                float gy = r.Y + s * 0.6f, rad = s * 0.42f;
+                double v = Clamp(a + Math.Sin(t * 11) * 0.025 * a + Math.Sin(t * 1.3) * 0.02);
+                float ang = (float)(160 + 220 * v);
+                using (var dim = P(A(col, 0.35), s)) g.DrawArc(dim, cx - rad, gy - rad, rad * 2, rad * 2, 160, 220);
+                using (var pen = P(col, s)) if (v > 0.01) g.DrawArc(pen, cx - rad, gy - rad, rad * 2, rad * 2, 160, 220 * (float)v);
+                double ar = ang * Math.PI / 180;
+                using (var pen = P(Mix(col, Color.White, 0.3), s)) g.DrawLine(pen, cx, gy, cx + (float)Math.Cos(ar) * rad * 0.78f, gy + (float)Math.Sin(ar) * rad * 0.78f);
+                float d = s * 0.18f;
+                using (var b = new SolidBrush(col)) g.FillEllipse(b, cx - d / 2, gy - d / 2, d, d);
+                break;
+            }
+            case "thermo":
+            {
+                // Mercury rises with the temperature and turns hotter; heat waves shimmer off it when it runs hot.
+                float br = s * 0.17f, by = r.Bottom - s * 0.22f;
+                double lvl = Clamp(0.2 + a * 0.75 + Math.Sin(t * 2.6) * 0.03);
+                Color merc = Mix(col, Color.OrangeRed, a * 0.7);
+                using (var pen = P(col, s))
+                using (var stem = Icons.Round(new RectangleF(cx - s * 0.1f, r.Y + s * 0.06f, s * 0.2f, s * 0.62f), s * 0.1f))
+                    g.DrawPath(pen, stem);
+                float top = by - (by - (r.Y + s * 0.14f)) * (float)lvl;
+                using (var b = new SolidBrush(merc))
+                {
+                    g.FillEllipse(b, cx - br, by - br, br * 2, br * 2);
+                    g.FillRectangle(b, cx - s * 0.045f, top, s * 0.09f, by - top);
+                }
+                if (a > 0.35)
+                    using (var pen = new Pen(A(merc, (a - 0.35) * 1.5), Math.Max(1f, s / 14f)))
+                        for (int k = 0; k < 2; k++)
+                        {
+                            double life = (t * (0.6 + a) + k * 0.5) % 1;
+                            float x = cx + s * (k == 0 ? -0.3f : 0.3f), y = r.Bottom - (float)life * s;
+                            pen.Color = A(merc, (a - 0.35) * 1.5 * Math.Sin(life * Math.PI));
+                            var pts = new PointF[5];
+                            for (int q = 0; q < 5; q++) pts[q] = new PointF(x + (float)Math.Sin(q * 1.6 + t * 6) * s * 0.05f, y - q * s * 0.07f);
+                            g.DrawCurve(pen, pts);
+                        }
+                break;
+            }
+            case "flame":
+            case "heat":
+            {
+                // Uneven flicker that's stronger and quicker the hotter it runs, with sparks rising off the top.
+                double fl = Math.Sin(t * (6 + a * 10)) * 0.5 + Math.Sin(t * (13.7 + a * 7)) * 0.3 + Math.Sin(t * 2.3) * 0.2;
+                float sy = 1 + (float)(fl * 0.08 * (0.3 + a)), sx = 1 - (float)(fl * 0.035 * (0.3 + a));
+                var st = g.Save();
+                g.TranslateTransform(cx, r.Bottom); g.ScaleTransform(sx, sy); g.RotateTransform((float)(Math.Sin(t * 3.1) * 3 * a)); g.TranslateTransform(-cx, -r.Bottom);
+                icon(g, r, Mix(col, Color.OrangeRed, a * 0.5 * (0.6 + 0.4 * fl)));
+                g.Restore(st);
+                int sparks = (int)(a * 5);
+                for (int k = 0; k < sparks; k++)
+                {
+                    double life = (t * (0.7 + a * 0.8) + k / (double)Math.Max(1, sparks)) % 1;
+                    double seed = Math.Floor(t * (0.7 + a * 0.8) + k / (double)Math.Max(1, sparks)) + k * 17;
+                    float x = cx + (float)((Noise(seed) - 0.5) * s * 0.6 + Math.Sin(life * 6 + k) * s * 0.05), y = r.Y + s * 0.4f - (float)life * s * 0.6f;
+                    float d = s * 0.09f * (float)(1 - life);
+                    using (var b = new SolidBrush(A(Mix(Color.Orange, Color.Yellow, Noise(seed + 3)), 1 - life))) g.FillEllipse(b, x - d / 2, y - d / 2, d, d);
+                }
+                break;
+            }
+            case "bolt":
+            case "zap":
+            case "plug":
+            {
+                // Crackles: the icon flashes bright and jolts, and jagged little arcs jump off it, more often under load.
+                double n = Math.Sin(t * 23.1) * Math.Sin(t * 7.3 + 1) * Math.Sin(t * (3 + a * 9));
+                bool crack = n > 0.5 - a * 0.45;
+                float sc = crack ? 1.07f : 1f;
+                var st = g.Save();
+                Around(g, cx, cy, 0, sc);
+                if (crack) g.TranslateTransform((float)(Math.Sin(t * 91) * s * 0.03), 0);
+                icon(g, r, crack ? Mix(col, Color.White, 0.5) : col);
+                g.Restore(st);
+                if (a > 0.08)
+                {
+                    double slot = Math.Floor(t * 14);
+                    int arcs = (int)(1 + a * 3);
+                    using (var pen = new Pen(A(Mix(col, Color.White, 0.6), 0.9), Math.Max(1f, s / 16f)) { LineJoin = LineJoin.Round })
+                        for (int k = 0; k < arcs; k++)
+                        {
+                            if (Noise(slot * 3.1 + k * 7.7) > 0.25 + a * 0.6) continue;
+                            double ang = Noise(slot + k * 13.3) * Math.PI * 2;
+                            float ox = kind == "plug" ? cx : cx + (float)Math.Cos(ang) * s * 0.18f, oy = kind == "plug" ? r.Y + s * 0.08f : cy + (float)Math.Sin(ang) * s * 0.18f;
+                            var pts = new PointF[4];
+                            for (int q = 0; q < 4; q++)
+                            {
+                                float len = s * (0.1f + q * 0.12f);
+                                double jag = ang + (Noise(slot * 5 + k * 3 + q) - 0.5) * 1.2;
+                                pts[q] = new PointF(ox + (float)Math.Cos(jag) * len, oy + (float)Math.Sin(jag) * len);
+                            }
+                            g.DrawLines(pen, pts);
+                        }
+                }
+                break;
+            }
+
+            case "ram":
+            {
+                // Memory chips blink like activity LEDs, running along the stick.
+                icon(g, r, col);
+                var body = new RectangleF(r.X + s * 0.05f, r.Y + s * 0.25f, s * 0.9f, s * 0.42f);
+                for (int k = 0; k < 3; k++)
+                {
+                    double d = (frac * 3 - k + 3) % 3;
+                    double lit = Clamp(1 - d / 1.5) * (0.3 + 0.7 * a);
+                    if (lit < 0.05) continue;
+                    using (var b = new SolidBrush(Mix(col, Color.White, lit * 0.8)))
+                        g.FillRectangle(b, body.X + body.Width * (0.12f + k * 0.29f), body.Y + body.Height * 0.28f, body.Width * 0.18f, body.Height * 0.44f);
+                }
+                Shine(g, icon, r, col, (p * 0.35) % 1.6 - 0.3, 0.25 + a * 0.3);
+                break;
+            }
+            case "vram":
+            {
+                // Memory cells twinkle at random, busier as more of it fills up.
+                float d = s * 0.13f;
+                var body = new RectangleF(r.X + s * 0.12f, r.Y + s * 0.12f, s * 0.76f, s * 0.76f);
+                using (var pen = P(col, s)) using (var path = Icons.Round(body, s * 0.1f)) g.DrawPath(pen, path);
+                double slot = Math.Floor(t * (2 + a * 8));
+                for (int i = 0; i < 3; i++)
+                    for (int j = 0; j < 3; j++)
+                    {
+                        bool on = Noise(slot * 1.7 + i * 3 + j * 11) < 0.25 + a * 0.65;
+                        using (var b = new SolidBrush(on ? Mix(col, Color.White, 0.2 + 0.4 * a) : A(col, 0.35)))
+                            g.FillRectangle(b, body.X + body.Width * (0.17f + i * 0.27f), body.Y + body.Height * (0.17f + j * 0.27f), d, d);
+                    }
+                break;
+            }
+            case "gpu":
+            {
+                // The card's own fan spins with GPU load, with motion-blur ghosts at speed.
+                icon(g, r, col);
+                var body = new RectangleF(r.X + s * 0.14f, r.Y + s * 0.2f, s * 0.8f, s * 0.5f);
+                float fr = body.Height * 0.3f, fx = body.X + body.Width * 0.62f, fy = body.Y + body.Height / 2;
+                double speed = Speed(kind, a);
+                for (int gh = speed > 0.8 ? 2 : 0; gh >= 0; gh--)
+                    using (var pen = new Pen(A(col, gh == 0 ? 1 : 0.3 / gh), Math.Max(1f, s / 13f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                        for (int k = 0; k < 3; k++)
+                        {
+                            double ang = (frac * 360 - gh * speed * 9 + k * 120) * Math.PI / 180;
+                            g.DrawLine(pen, fx, fy, fx + (float)Math.Cos(ang) * fr * 0.85f, fy + (float)Math.Sin(ang) * fr * 0.85f);
+                        }
+                break;
+            }
+
+            case "disk":
+            {
+                // The activity LED flickers with disk use, and a glint runs along the drive.
+                icon(g, r, col);
+                var body = new RectangleF(r.X + s * 0.08f, r.Y + s * 0.25f, s * 0.84f, s * 0.5f);
+                Led(g, body.Right - body.Width * 0.22f, body.Y + body.Height / 2, s * 0.12f, col, a);
+                Shine(g, icon, r, col, (p * 0.3) % 1.6 - 0.3, a * 0.5);
+                break;
+            }
+            case "diskread":
+            case "diskwrite":
+            {
+                // Drive with a blinking LED, while the arrow streams out of (read) or into (write) it.
+                bool read = kind == "diskread";
+                var body = new RectangleF(r.X + s * 0.08f, r.Y + s * 0.6f, s * 0.84f, s * 0.32f);
+                using (var pen = P(col, s)) using (var path = Icons.Round(body, s * 0.08f)) g.DrawPath(pen, path);
+                Led(g, body.Right - body.Width * 0.2f, body.Y + body.Height / 2, s * 0.1f, col, a);
+                float t0 = r.Y + s * 0.04f, bt = r.Y + s * 0.46f, w = s * 0.18f, span = bt - t0 + s * 0.12f;
+                var st = g.Save();
+                g.SetClip(RectangleF.FromLTRB(r.X, r.Y - 1, r.Right, body.Y - s * 0.04f), CombineMode.Intersect);
+                using (var pen = P(col, s))
+                    for (int k = 0; k < 2; k++)
+                    {
+                        float o = (float)(frac * span) * (read ? -1 : 1) + (read ? k * span : -k * span);
+                        g.DrawLine(pen, cx, t0 + o, cx, bt + o);
+                        if (read) g.DrawLines(pen, new[] { new PointF(cx - w, t0 + w + o), new PointF(cx, t0 + o), new PointF(cx + w, t0 + w + o) });
+                        else g.DrawLines(pen, new[] { new PointF(cx - w, bt - w + o), new PointF(cx, bt + o), new PointF(cx + w, bt - w + o) });
+                    }
+                g.Restore(st);
+                break;
+            }
+
+            case "signal":
+            {
+                // Bars light up one after another, and more of them stay lit the better the signal.
+                float w = s * 0.18f;
+                double level = a * 4;
+                for (int k = 0; k < 4; k++)
+                {
+                    float h = s * (0.25f + k * 0.2f);
+                    double sweep = Clamp(1 - Math.Abs(frac * 5 - k - 0.5));
+                    double lit = Math.Max(k < Math.Ceiling(level) ? 0.85 : 0.3, sweep);
+                    using (var b = new SolidBrush(Mix(A(col, lit), Color.White, sweep * 0.35)))
+                        g.FillRectangle(b, r.X + s * 0.06f + k * s * 0.24f, r.Bottom - s * 0.1f - h, w, h);
+                }
+                break;
+            }
+            case "wifi":
+            {
+                // Waves radiate outward from the dot. On the Wi-Fi stat, arcs past the signal strength stay dark.
+                float wy = r.Bottom - s * 0.16f;
+                for (int k = 1; k <= 3; k++)
+                {
+                    bool reach = id != "Wifi" || a * 3 >= k - 0.5;
+                    double lit = reach ? 0.3 + 0.7 * Clamp(1 - Math.Abs(frac * 4 - k)) : 0.15;
+                    using (var pen = P(Mix(A(col, lit), Color.White, (lit - 0.3) * 0.3), s))
+                    {
+                        float rad = s * 0.23f * k;
+                        g.DrawArc(pen, cx - rad, wy - rad, rad * 2, rad * 2, 225, 90);
+                    }
+                }
+                float d = s * 0.16f * (float)(1 + 0.25 * Clamp(1 - frac * 4));
+                using (var b = new SolidBrush(col)) g.FillEllipse(b, cx - d / 2, wy - d / 2, d, d);
+                break;
+            }
+            case "globe":
+            {
+                // A turning globe: meridians slide round, bright on the near side and faint on the far side.
+                float rad = s * 0.42f;
+                using (var pen = P(col, s))
+                {
+                    g.DrawEllipse(pen, cx - rad, cy - rad, rad * 2, rad * 2);
+                    g.DrawLine(pen, cx - rad, cy, cx + rad, cy);
+                }
+                for (int m = 0; m < 3; m++)
+                {
+                    double th = (frac + m / 3.0) * Math.PI;
+                    float hw = (float)Math.Abs(Math.Cos(th)) * rad;
+                    bool near = Math.Sin(th) > 0;
+                    if (hw < 0.6f) continue;
+                    using (var pen = new Pen(A(col, near ? 1 : 0.3), Math.Max(1f, s / (near ? 9f : 14f))))
+                        g.DrawArc(pen, cx - hw, cy - rad, hw * 2, rad * 2, Math.Cos(th) > 0 ? -90 : 90, 180);
+                }
+                break;
+            }
+            case "pie":
+            {
+                // The slice grows to the current level and rotates slowly.
+                using (var pen = P(col, s)) g.DrawEllipse(pen, r.X + s * 0.08f, r.Y + s * 0.08f, s * 0.84f, s * 0.84f);
+                float sweep = (float)(40 + 300 * a + 12 * wave);
+                using (var b = new SolidBrush(col)) g.FillPie(b, r.X + s * 0.2f, r.Y + s * 0.2f, s * 0.6f, s * 0.6f, (float)(-90 + p * 36), sweep);
+                break;
+            }
+            case "clock":
+            {
+                // A ticking second hand that snaps from mark to mark, with a slowly turning hour hand.
+                using (var pen = P(col, s))
+                {
+                    g.DrawEllipse(pen, r.X + s * 0.08f, r.Y + s * 0.08f, s * 0.84f, s * 0.84f);
+                    double h = (t / 20) * 2 * Math.PI - Math.PI / 2;
+                    g.DrawLine(pen, cx, cy, cx + (float)Math.Cos(h) * s * 0.18f, cy + (float)Math.Sin(h) * s * 0.18f);
+                }
+                double step = Math.Floor(p) + Ease(frac * 5);
+                double sa = step / 12 * 2 * Math.PI - Math.PI / 2;
+                using (var pen = new Pen(Mix(col, Color.White, 0.35), Math.Max(1f, s / 13f)) { EndCap = LineCap.Round })
+                    g.DrawLine(pen, cx, cy, cx + (float)Math.Cos(sa) * s * 0.32f, cy + (float)Math.Sin(sa) * s * 0.32f);
+                float d = s * 0.12f;
+                using (var b = new SolidBrush(col)) g.FillEllipse(b, cx - d / 2, cy - d / 2, d, d);
+                break;
+            }
+            case "hourglass":
+            {
+                // Sand drains from top to bottom, then the glass flips over.
+                double drain = Clamp(frac / 0.82), flip = Clamp((frac - 0.82) / 0.18);
+                Around(g, cx, cy, Ease(flip) * 180, 1);
+                float t0 = r.Y + s * 0.1f, bt = r.Bottom - s * 0.1f, l = r.X + s * 0.24f, rr = r.Right - s * 0.24f;
+                using (var pen = P(col, s)) using (var b = new SolidBrush(col))
+                {
+                    g.DrawLine(pen, l - s * 0.06f, t0, rr + s * 0.06f, t0);
+                    g.DrawLine(pen, l - s * 0.06f, bt, rr + s * 0.06f, bt);
+                    g.DrawLines(pen, new[] { new PointF(l, t0), new PointF(cx - s * 0.05f, cy), new PointF(l, bt) });
+                    g.DrawLines(pen, new[] { new PointF(rr, t0), new PointF(cx + s * 0.05f, cy), new PointF(rr, bt) });
+                    float topAmt = (float)(1 - drain), botAmt = (float)drain, half = cy - t0 - s * 0.06f;
+                    if (topAmt > 0.02f)
+                    {
+                        float sh = half * topAmt, sw = (rr - l - s * 0.1f) / 2 * topAmt;
+                        g.FillPolygon(b, new[] { new PointF(cx, cy - s * 0.04f), new PointF(cx - sw, cy - s * 0.04f - sh), new PointF(cx + sw, cy - s * 0.04f - sh) });
+                    }
+                    if (botAmt > 0.02f)
+                    {
+                        float sh = half * botAmt, sw = (rr - l - s * 0.16f) / 2;
+                        g.FillPolygon(b, new[] { new PointF(cx, bt - sh), new PointF(cx - sw, bt - s * 0.02f), new PointF(cx + sw, bt - s * 0.02f) });
+                    }
+                    if (drain < 1 && flip == 0)
+                        using (var thin = new Pen(col, Math.Max(1f, s / 18f)) { DashPattern = new[] { 1.5f, 1.5f }, DashOffset = (float)(-t * 12) })
+                            g.DrawLine(thin, cx, cy, cx, bt - half * botAmt);
+                }
+                break;
+            }
+            case "pulse":
+            {
+                // A heart-monitor trace: a bright head sweeps across leaving a fading line behind it.
+                var pts = new[] {
+                    new PointF(r.X + s * 0.04f, cy), new PointF(r.X + s * 0.28f, cy), new PointF(r.X + s * 0.4f, r.Y + s * 0.18f),
+                    new PointF(r.X + s * 0.56f, r.Y + s * 0.82f), new PointF(r.X + s * 0.68f, cy), new PointF(r.Right - s * 0.04f, cy) };
+                using (var pen = P(A(col, 0.25), s)) g.DrawLines(pen, pts);
+                float hx = r.X + (float)(frac * 1.3 - 0.1) * s;
+                for (int k = 0; k < 4; k++)
+                {
+                    var st = g.Save();
+                    g.SetClip(RectangleF.FromLTRB(hx - s * (0.5f - k * 0.12f), r.Y - 2, hx, r.Bottom + 2), CombineMode.Intersect);
+                    using (var pen = P(A(col, 0.35 + k * 0.2), s)) g.DrawLines(pen, pts);
+                    g.Restore(st);
+                }
+                break;
+            }
+            case "heart":
+            {
+                // Lub-dub: two quick thumps then a rest, each thump sending out a fading ring.
+                double b1 = Math.Exp(-Math.Pow((frac - 0.1) / 0.05, 2)), b2 = 0.6 * Math.Exp(-Math.Pow((frac - 0.28) / 0.05, 2));
+                float sc = 1 + (float)((b1 + b2) * 0.16 * (0.5 + a));
+                double ring = Clamp((frac - 0.1) / 0.6);
+                if (ring > 0 && ring < 1)
+                    using (var pen = new Pen(A(col, (1 - ring) * 0.6), Math.Max(1f, s / 14f)))
+                    {
+                        float rr = s * (0.3f + (float)ring * 0.4f);
+                        g.DrawEllipse(pen, cx - rr, cy - rr, rr * 2, rr * 2);
+                    }
+                Around(g, cx, cy, 0, sc);
+                icon(g, r, Mix(col, Color.White, (b1 + b2) * 0.3));
+                break;
+            }
+            case "monitor":
+            {
+                // A scanline rolls down the screen, which flickers faintly with activity.
+                icon(g, r, col);
+                var body = new RectangleF(r.X + s * 0.06f, r.Y + s * 0.12f, s * 0.88f, s * 0.56f);
+                var inner = RectangleF.Inflate(body, -s * 0.08f, -s * 0.08f);
+                using (var b = new SolidBrush(A(col, 0.12 + a * 0.2 * (0.7 + 0.3 * Math.Sin(t * 17))))) g.FillRectangle(b, inner);
+                float ly = inner.Y + inner.Height * (float)frac;
+                using (var pen = new Pen(A(Mix(col, Color.White, 0.5), 0.8), Math.Max(1f, s / 16f))) g.DrawLine(pen, inner.X, ly, inner.Right, ly);
+                break;
+            }
+            case "list":
+            {
+                // Lines write themselves in one after another, then clear and start again.
+                float d = s * 0.14f;
+                using (var pen = P(col, s)) using (var b = new SolidBrush(col))
+                    for (int k = 0; k < 3; k++)
+                    {
+                        float y = r.Y + s * (0.22f + k * 0.28f);
+                        double grow = Clamp(frac * 4 - k), fade = frac > 0.9 ? (1 - frac) * 10 : 1;
+                        b.Color = A(col, 0.35 + 0.65 * Clamp(grow * 3) * fade);
+                        g.FillEllipse(b, r.X + s * 0.08f, y - d / 2, d, d);
+                        float x0 = r.X + s * 0.36f, x1 = r.Right - s * 0.06f;
+                        using (var dim = P(A(col, 0.25), s)) g.DrawLine(dim, x0, y, x1, y);
+                        pen.Color = A(col, fade);
+                        if (grow > 0.02) g.DrawLine(pen, x0, y, x0 + (x1 - x0) * Ease(grow), y);
+                    }
+                break;
+            }
+            case "star":
+            {
+                // Slowly turns and twinkles, throwing off little sparkles.
+                float sc = 1 + (float)(0.06 * wave);
+                var st = g.Save();
+                Around(g, cx, cy, (float)(Math.Sin(p * Math.PI) * 12), sc);
+                icon(g, r, Mix(col, Color.White, 0.25 * Clamp(wave)));
+                g.Restore(st);
+                for (int k = 0; k < 2; k++)
+                {
+                    double life = (frac * 2 + k * 0.5) % 1;
+                    float sx = r.X + s * (k == 0 ? 0.1f : 0.9f), sy = r.Y + s * (k == 0 ? 0.15f : 0.8f), len = s * 0.12f * (float)Math.Sin(life * Math.PI);
+                    using (var pen = new Pen(A(Mix(col, Color.White, 0.5), Math.Sin(life * Math.PI)), Math.Max(1f, s / 18f)))
+                    {
+                        g.DrawLine(pen, sx - len, sy, sx + len, sy);
+                        g.DrawLine(pen, sx, sy - len, sx, sy + len);
+                    }
+                }
+                break;
+            }
+            case "dot":
+            {
+                // A sonar ping: rings ripple out from the dot.
+                for (int k = 0; k < 2; k++)
+                {
+                    double life = (frac + k * 0.5) % 1;
+                    float rr = s * (0.22f + 0.28f * (float)life);
+                    using (var pen = new Pen(A(col, (1 - life) * 0.7), Math.Max(1f, s / 14f))) g.DrawEllipse(pen, cx - rr, cy - rr, rr * 2, rr * 2);
+                }
+                Around(g, cx, cy, 0, 1 + (float)(0.1 * wave));
+                icon(g, r, col);
+                break;
+            }
+            case "stack":
+            {
+                // The filled layer steps down through the stack.
+                int lit = (int)Math.Floor(frac * 3) % 3;
+                double f = frac * 3 - Math.Floor(frac * 3);
+                using (var pen = P(col, s))
+                    for (int k = 0; k < 3; k++)
+                        using (var path = Icons.Round(new RectangleF(r.X + s * 0.1f, r.Y + s * (0.12f + k * 0.28f), s * 0.8f, s * 0.2f), s * 0.06f))
+                        {
+                            double on = k == lit ? Math.Sin(f * Math.PI) : 0;
+                            g.DrawPath(pen, path);
+                            using (var b = new SolidBrush(A(col, 0.25 + 0.75 * Math.Max(on, k == 0 ? 0.6 : 0)))) g.FillPath(b, path);
+                        }
+                break;
+            }
+            default: // "shine": anything else breathes gently and catches a glint of light as it passes
+            {
+                var st = g.Save();
+                Around(g, cx, cy, 0, 1 + (float)(wave * (0.02 + a * 0.05)));
+                icon(g, r, col);
+                g.Restore(st);
+                Shine(g, icon, r, col, (p * 0.45) % 1.6 - 0.3, 0.3 + a * 0.4);
+                break;
+            }
+        }
+    }
+
+    // A drive activity light: flickers on at random, more often the busier the disk.
+    void Led(Graphics g, float x, float y, float d, Color col, double a)
+    {
+        bool on = a > 0.02 && Noise(Math.Floor(t * (6 + a * 20))) < 0.3 + 0.65 * a;
+        if (on)
+            using (var path = new GraphicsPath())
+            {
+                float gr = d * 1.8f;
+                path.AddEllipse(x - gr, y - gr, gr * 2, gr * 2);
+                using (var pb = new PathGradientBrush(path) { CenterColor = Color.FromArgb(160, Mix(col, Color.White, 0.5)), SurroundColors = new[] { Color.FromArgb(0, col) } })
+                    g.FillPath(pb, path);
+            }
+        float dd = on ? d * 1.2f : d;
+        using (var b = new SolidBrush(on ? Mix(col, Color.White, 0.7) : A(col, 0.5))) g.FillEllipse(b, x - dd / 2, y - dd / 2, dd, dd);
+    }
+
+    // Speed streaks beside a flowing arrow, moving faster than the arrow itself.
+    void Streaks(Graphics g, RectangleF r, Color col, double a, double p, bool down)
+    {
+        if (a < 0.1) return;
+        float s = r.Width;
+        using (var pen = new Pen(A(col, 0.2 + a * 0.4), Math.Max(1f, s / 16f)) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+            for (int k = 0; k < 2; k++)
+            {
+                double life = (p * 1.7 + k * 0.5) % 1;
+                float x = r.X + s * (k == 0 ? 0.12f : 0.88f), len = s * (0.15f + 0.2f * (float)a);
+                float y = down ? r.Y + (float)life * (s + len) - len : r.Bottom - (float)life * (s + len);
+                var st = g.Save();
+                g.SetClip(r, CombineMode.Intersect);
+                g.DrawLine(pen, x, y, x, y + len);
+                g.Restore(st);
+            }
     }
 }
 
@@ -2259,6 +3391,7 @@ class WidgetForm : Form
         public double Frac = double.NaN, GraphValue = double.NaN, GraphMax, GraphFloor = 1;
         public Hist Hist;
         public double[] Cores;
+        public double Act; // 0-1 activity level that drives the icon animation
     }
 
     readonly StatsBar bar;
@@ -2270,6 +3403,10 @@ class WidgetForm : Form
     readonly SolidBrush brush = new SolidBrush(Color.White);
     Snapshot lastSnap;
     int winW, winH, margin;
+    readonly IconAnim anim = new IconAnim();
+    readonly List<KeyValuePair<Item, RectangleF>> animCells = new List<KeyValuePair<Item, RectangleF>>();
+    readonly System.Windows.Forms.Timer animTimer = new System.Windows.Forms.Timer { Interval = 16 };
+    Color cardFill;
     bool dragging, clickThrough;
     Point grab;
     float u = 1, fontU;
@@ -2300,7 +3437,34 @@ class WidgetForm : Form
         menu.Items.Add(lockItem);
         menu.Items.Add("Hide widget", null, (s, e) => bar.SetWidget(false));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("PC Stats Bar settings…", null, (s, e) => bar.OpenSettings(null));
+        menu.Items.Add("Kinetik settings…", null, (s, e) => bar.OpenSettings(null));
+        animTimer.Tick += (s, e) => { animTimer.Interval = 1000 / Math.Max(10, c.AnimFps); AnimFrame(); };
+        animTimer.Start();
+    }
+
+    // Redraws just the icon squares for the next animation frame, then re-pushes the window.
+    void AnimFrame()
+    {
+        anim.Advance();
+        if (!c.WidgetAnimate || animCells.Count == 0 || !IsHandleCreated || !Visible || dragging) return;
+        var bmp = surface.Canvas(winW, winH);
+        using (var g = Graphics.FromImage(bmp))
+        using (var fill = new SolidBrush(cardFill))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            foreach (var cell in animCells)
+            {
+                var r = IconAnim.Cell(cell.Value);
+                g.SetClip(r);
+                g.CompositingMode = CompositingMode.SourceCopy;
+                g.FillRectangle(fill, r);
+                g.CompositingMode = CompositingMode.SourceOver;
+                var it = cell.Key;
+                anim.Draw(g, it.Id, it.Icon, cell.Value, it.Color, it.Act, it.Warn);
+            }
+        }
+        surface.Push(Handle, c.WidgetX, c.WidgetY);
     }
 
     bool ClickThroughWanted { get { return c.WidgetLocked && c.WidgetClickThrough; } }
@@ -2333,11 +3497,16 @@ class WidgetForm : Form
     protected override void Dispose(bool disposing)
     {
         surface.Dispose();
-        if (disposing) { DisposeFonts(); brush.Dispose(); menu.Dispose(); }
+        if (disposing) { animTimer.Dispose(); DisposeFonts(); brush.Dispose(); menu.Dispose(); }
         base.Dispose(disposing);
     }
 
     public void HideNow() { if (IsHandleCreated) ShowWindow(Handle, 0); }
+
+    public bool IsOnScreen(Screen s)
+    {
+        return Screen.FromRectangle(new Rectangle(c.WidgetX + margin, c.WidgetY + margin, Math.Max(1, winW - margin * 2), Math.Max(1, winH - margin * 2))).DeviceName == s.DeviceName;
+    }
 
     // ---- dragging, snapping and the menu
     protected override void OnMouseDown(MouseEventArgs e)
@@ -2435,7 +3604,7 @@ class WidgetForm : Form
     // ---- what to show
     static string Group(string id)
     {
-        if (id == "Up" || id == "Down" || id == "NetTotal" || id == "Ping") return "Network";
+        if (id == "Up" || id == "Down" || id == "NetTotal" || id == "Ping" || id == "Wifi") return "Network";
         if (id.StartsWith("Cpu")) return "Processor";
         if (id.StartsWith("Ram")) return "Memory";
         if (id.StartsWith("Gpu")) return "Graphics";
@@ -2494,6 +3663,9 @@ class WidgetForm : Form
             case "Ping":
                 if (s.Ping >= 0) { r = Graph(row("Ping", s.Ping + " ms"), s.Ping, 0, 20); r.Warn = s.Ping >= c.WarnPing; }
                 else { r = row("Ping", s.Ping == -2 ? "timeout" : "-- ms"); r.Warn = s.Ping == -2; r.Dim = s.Ping == -1; }
+                break;
+            case "Wifi":
+                if (s.Wifi >= 0) { r = Graph(row(s.WifiName != "" ? "Wi-Fi (" + s.WifiName + ")" : "Wi-Fi signal", s.Wifi + "%"), s.Wifi, 100, 1); r.Frac = s.Wifi / 100.0; r.Warn = s.Wifi <= 25; }
                 break;
             case "Cpu": Pct(row("CPU usage", s.Cpu.ToString("0") + "%"), s.Cpu, c.WarnCpu); break;
             case "CpuCores":
@@ -2591,6 +3763,7 @@ class WidgetForm : Form
             var rows = new List<Item>();
             AddStat(rows, id, s);
             if (rows.Count == 0) continue;
+            foreach (var rw in rows) rw.Act = IconAnim.Activity(id, s);
             var g = Group(id);
             if (c.WidgetHeadings && g != group)
             {
@@ -2694,6 +3867,8 @@ class WidgetForm : Form
                 r.Offset(0, 2 * u);
                 Theme.FillRound(g, r, rad + k * 1.6f * u, Color.FromArgb(Math.Max(1, 7 * alpha / 255), 0, 0, 0));
             }
+        cardFill = Color.FromArgb(Math.Max(1, alpha), bg);
+        animCells.Clear();
         Theme.FillRound(g, card, rad, Color.FromArgb(Math.Max(1, alpha), bg)); // alpha ≥ 1 so the whole card still catches clicks
         if (alpha > 0) Theme.StrokeRound(g, card, rad, line, 1);
 
@@ -2748,7 +3923,9 @@ class WidgetForm : Form
         }
         else if (it.Icon != null)
         {
-            it.Icon(g, new RectangleF(x0, y + (lineH - isz) / 2, isz, isz), it.Color);
+            var ir = new RectangleF(x0, y + (lineH - isz) / 2, isz, isz);
+            if (c.WidgetAnimate) { anim.Draw(g, it.Id, it.Icon, ir, it.Color, it.Act, it.Warn); animCells.Add(new KeyValuePair<Item, RectangleF>(it, ir)); }
+            else it.Icon(g, ir, it.Color);
             lx += isz + 9 * u;
         }
 
@@ -2815,8 +3992,30 @@ class WidgetForm : Form
 // ======================================================================= Settings UI
 static class Theme
 {
-    public static readonly Color Bg = Color.FromArgb(28, 28, 32), Nav = Color.FromArgb(22, 22, 26), Card = Color.FromArgb(38, 38, 44);
-    public static readonly Color CardHover = Color.FromArgb(46, 46, 53), Border = Color.FromArgb(56, 56, 64);
+    public static Color Bg = Color.FromArgb(28, 28, 32), Nav = Color.FromArgb(22, 22, 26), Card = Color.FromArgb(38, 38, 44);
+    public static Color CardHover = Color.FromArgb(46, 46, 53), Border = Color.FromArgb(56, 56, 64);
+
+    // Background colour choices for the settings window: name → page background. Nav, cards and borders are derived from it.
+    public static readonly KeyValuePair<string, Color>[] Backgrounds =
+    {
+        new KeyValuePair<string, Color>("Charcoal (default)", Color.FromArgb(28, 28, 32)),
+        new KeyValuePair<string, Color>("Pure black", Color.FromArgb(8, 8, 10)),
+        new KeyValuePair<string, Color>("Slate", Color.FromArgb(30, 36, 44)),
+        new KeyValuePair<string, Color>("Midnight blue", Color.FromArgb(18, 24, 44)),
+        new KeyValuePair<string, Color>("Deep violet", Color.FromArgb(32, 22, 50)),
+        new KeyValuePair<string, Color>("Forest", Color.FromArgb(18, 34, 28)),
+        new KeyValuePair<string, Color>("Wine", Color.FromArgb(42, 18, 26)),
+        new KeyValuePair<string, Color>("Espresso", Color.FromArgb(38, 28, 22)),
+    };
+
+    public static void Use(int background)
+    {
+        var b = Backgrounds[Math.Max(0, Math.Min(Backgrounds.Length - 1, background))].Value;
+        Func<int, Color> lift = k => Color.FromArgb(Math.Min(255, b.R + k), Math.Min(255, b.G + k), Math.Min(255, b.B + k));
+        Bg = b;
+        Nav = Color.FromArgb(Math.Max(0, b.R - 6), Math.Max(0, b.G - 6), Math.Max(0, b.B - 6));
+        Card = lift(10); CardHover = lift(18); Border = lift(28);
+    }
     public static readonly Color Text = Color.FromArgb(236, 236, 240), Sub = Color.FromArgb(150, 150, 162), Accent = Color.FromArgb(76, 194, 255);
     public static readonly Color WarnText = Color.FromArgb(255, 110, 110);
     static readonly Dictionary<string, Font> fonts = new Dictionary<string, Font>();
@@ -3528,7 +4727,8 @@ class SettingsForm : Form
     public SettingsForm(StatsBar bar)
     {
         this.bar = bar; c = bar.Cfg;
-        Text = "PC Stats Bar";
+        Text = "Kinetik";
+        Icon = TrayIconArt.Frame(c.TrayStyle, SystemInformation.IconSize.Width, 0);
         ClientSize = new Size(800, 640);
         MinimumSize = new Size(760, 480);
         StartPosition = FormStartPosition.CenterScreen;
@@ -3545,7 +4745,7 @@ class SettingsForm : Form
         top.Controls.Add(frame);
 
         // Navigation
-        var brand = new Label { Text = "PC Stats Bar", Font = Theme.UI(13f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Height = 64, Dock = DockStyle.Top, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
+        var brand = new Label { Text = "Kinetik", Font = Theme.UI(13f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Height = 64, Dock = DockStyle.Top, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var version = new Label { Text = "v" + VersionText, Font = Theme.UI(8.5f), ForeColor = Theme.Sub, AutoSize = false, Height = 36, Dock = DockStyle.Bottom, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var navList = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(10, 0, 10, 0), BackColor = Theme.Nav };
         foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "Widget", "General", "About" }) navList.Controls.Add(NavItem(p));
@@ -3735,6 +4935,7 @@ class SettingsForm : Form
         Header("Network");
         Stat("Up"); Stat("Down");
         Stat("NetTotal", "Upload and download added together");
+        Stat("Wifi", "Signal strength of the Wi-Fi network you're connected to");
         Stat("Ping", "Round-trip time to the address below");
         var host = new TextBox { Text = c.PingHost, Width = 170, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Font = Theme.UI(9.5f) };
         Action commit = () => { var v = host.Text.Trim(); if (v != "" && v != c.PingHost) { c.PingHost = v; Apply(); } };
@@ -3819,7 +5020,7 @@ class SettingsForm : Form
         addBtn.Margin = new Padding(0, 0, 8, 0);
         var resetBtn = Btn("Reset order", (s, e) =>
         {
-            if (MessageBox.Show(this, "Put every stat back in its original order and remove all dividers?", "PC Stats Bar", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Put every stat back in its original order and remove all dividers?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.Order = Settings.DefaultOrder;
             Apply(); RefreshPage();
         });
@@ -3910,6 +5111,12 @@ class SettingsForm : Form
         Add(Icons.Divider, Theme.Accent, "Style", "Add dividers on the Arrange page", Combo(new[] { "Line", "Dotted line", "Dot", "Blank space" }, c.DividerStyle, i => { c.DividerStyle = i; Apply(); }, 150));
         SliderRow(Icons.Divider, Theme.Accent, "Divider height", "DividerHeight", 20, 160, "%");
 
+        Header("Animation");
+        Switch(Icons.Fan, Theme.Accent, "Animated icons", "BarAnimate", "Icons move with activity: fans spin, arrows flow, temps rise");
+        var rates = new[] { 15, 30, 60 };
+        Add(Icons.Gauge, Theme.Accent, "Animation frame rate", "Smoother looks nicer; lower uses less CPU. Shared with the widget.",
+            Combo(new[] { "15 fps (lightest)", "30 fps", "60 fps (smoothest)" }, Math.Max(0, Array.IndexOf(rates, c.AnimFps)), i => { c.AnimFps = rates[i]; Apply(); }, 170));
+
         Header("Background");
         Switch(Icons.Palette, Theme.Accent, "Background pill", "Pill", "Rounded, see-through backdrop behind the stats");
         SliderRow(Icons.Palette, Theme.Accent, "Background opacity", "PillOpacity", 0, 100, "%");
@@ -3971,7 +5178,7 @@ class SettingsForm : Form
         logo.Image = LoadLogo(128);
         logo.Disposed += (s, e) => { if (logo.Image != null) logo.Image.Dispose(); };
         list.Controls.Add(logo);
-        list.Controls.Add(new Label { Text = "PC Stats Bar", Font = Theme.UI(16f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 0, 0, 0) });
+        list.Controls.Add(new Label { Text = "Kinetik", Font = Theme.UI(16f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 0, 0, 0) });
         Hint("A lightweight stats overlay for the Windows taskbar.", 28);
         Add(Icons.Info, Theme.Accent, "Version", null, new Label { Text = VersionText, AutoSize = false, Size = new Size(120, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Text, BackColor = Theme.Card, Font = Theme.UI(10f) });
         Add(Icons.Heart, Theme.Accent, "© Akila Sella Hennedige", "Free software under the GNU General Public License v3", null);
@@ -4011,6 +5218,10 @@ class SettingsForm : Form
         SliderRow(Icons.Spacing, Theme.Accent, "Width", "WidgetWidth", 200, 520, " px");
         SliderRow(Icons.Palette, Theme.Accent, "Corner roundness", "WidgetRound", 0, 200, "%");
         Switch(Icons.Layers, Theme.Accent, "Shadow", "WidgetShadow");
+        Switch(Icons.Fan, Theme.Accent, "Animated icons", "WidgetAnimate", "Icons move with activity: fans spin, arrows flow, temps flicker");
+        var rates = new[] { 15, 30, 60 };
+        Add(Icons.Gauge, Theme.Accent, "Animation frame rate", "Smoother looks nicer; lower uses less CPU. Shared with the widget.",
+            Combo(new[] { "15 fps (lightest)", "30 fps", "60 fps (smoothest)" }, Math.Max(0, Array.IndexOf(rates, c.AnimFps)), i => { c.AnimFps = rates[i]; Apply(); }, 170));
         var title = new TextBox { Text = c.WidgetTitle, Width = 170, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Font = Theme.UI(9.5f) };
         Action commit = () => { var v = title.Text.Trim(); if (v != c.WidgetTitle) { c.WidgetTitle = v; Apply(); } };
         title.Leave += (s, e) => commit();
@@ -4039,7 +5250,7 @@ class SettingsForm : Form
         addBtn.Margin = new Padding(0, 0, 8, 0);
         var resetBtn = Btn("Reset contents", (s, e) =>
         {
-            if (MessageBox.Show(this, "Put the widget's stats back to the default selection and order, and remove its dividers?", "PC Stats Bar", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Put the widget's stats back to the default selection and order, and remove its dividers?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.WidgetOrder = Settings.DefaultWidgetOrder;
             c.WidgetItems = Settings.DefaultWidgetItems;
             Apply(); RefreshPage();
@@ -4062,6 +5273,16 @@ class SettingsForm : Form
 
     void BuildGeneral()
     {
+        Header("Settings window");
+        Add(Icons.Palette, Theme.Accent, "Background colour", "The colour of this settings window",
+            Combo(Theme.Backgrounds.Select(x => x.Key).ToArray(), Math.Max(0, Math.Min(Theme.Backgrounds.Length - 1, c.AppBackground)), i =>
+            {
+                if (i == c.AppBackground) return;
+                c.AppBackground = i; c.Save(); Theme.Use(i);
+                // Controls take their colours when they're built, so reopen the window on this page.
+                BeginInvoke((Action)(() => { var b = bar; Close(); b.OpenSettings("General"); }));
+            }, 170));
+
         Header("Behaviour");
         var intervals = new[] { 500, 1000, 2000, 3000, 5000 };
         Add(Icons.Gauge, Theme.Accent, "Update interval", "Slower updates use less CPU",
@@ -4072,6 +5293,18 @@ class SettingsForm : Form
         Switch(Icons.Chip, Theme.Accent, "Left-click opens Task Manager", "ClickTaskMgr");
         Switch(Icons.Monitor, Theme.Accent, "Hide in fullscreen apps", "HideFullscreen", "Games, videos and presentations");
         Switch(Icons.Grid, Theme.Accent, "Show tray icon", "TrayIcon", "Click it for Settings, right-click for the menu");
+        Switch(Icons.Fan, Theme.Accent, "Spinning icon", "TrayAnimate", "The fan logo in the tray and taskbar spins faster the busier your CPU is");
+        Switch(Icons.Monitor, Theme.Accent, "Show on the taskbar", "TaskbarButton", "A taskbar button like other running apps. Click it for Settings.");
+        var lnk = new Toggle { On = File.Exists(Shortcuts.DesktopPath) };
+        lnk.Changed += (s, e) => { if (lnk.On) Shortcuts.CreateDesktop(c.TrayStyle); else Shortcuts.RemoveDesktop(); lnk.On = File.Exists(Shortcuts.DesktopPath); };
+        Add(Icons.Star, Theme.Accent, "Desktop shortcut", "Opens Kinetik, or its Settings if it's already running", lnk);
+        Add(Icons.Palette, Theme.Accent, "Icon background", "For the tray icon and the taskbar button",
+            Combo(TrayIconArt.Styles.Select(x => x.Key).ToArray(), Math.Max(0, Math.Min(TrayIconArt.Styles.Length - 1, c.TrayStyle)), i =>
+            {
+                c.TrayStyle = i; Apply();
+                Icon = TrayIconArt.Frame(i, SystemInformation.IconSize.Width, 0);
+                if (File.Exists(Shortcuts.DesktopPath)) Shortcuts.CreateDesktop(i); // so the shortcut's icon matches too
+            }, 170));
 
         Header("Warnings");
         Hint("Values switch to the warning colour past these limits.", 30);
@@ -4096,7 +5329,7 @@ class SettingsForm : Form
         Header("Reset");
         Add(Icons.Gear, Theme.Sub, "Restore default settings", "Every option, including the order and custom icons", Btn("Reset", (s, e) =>
         {
-            if (MessageBox.Show(this, "Reset every setting to its default?", "PC Stats Bar", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Reset every setting to its default?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.ResetToDefaults(); Apply(); RefreshPage();
         }));
     }

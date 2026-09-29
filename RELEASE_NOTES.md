@@ -1,3 +1,27 @@
+# Kinetik v2.0.0 (formerly PC Stats Bar)
+
+- **New name and logo: PC Stats Bar is now Kinetik.** The new logo is rising stat bars inside a spinning ring. The exe is now `Kinetik.exe`.
+  - Your settings are copied over automatically the first time Kinetik runs
+  - If you had **Run at startup** on, start Kinetik once as administrator (right-click → **Restart as administrator**) so it can swap the old startup entry for the new one
+- **New: spinning fan tray icon.** The tray icon is a three-bladed fan that spins faster the busier your CPU is. Pick its background in **Settings → General → Icon background** (Kinetik orange by default, plus 10 more), or stop it spinning with **Spinning icon**.
+- **New: show on the taskbar.** Turn on **Settings → General → Show on the taskbar** to get a taskbar button like other running apps, with the same spinning fan. Click it for Settings; "Close window" exits Kinetik.
+- **New: desktop shortcut.** Turn on **Settings → General → Desktop shortcut** to add a Kinetik shortcut to your desktop. Opening it while Kinetik is already running brings up Settings.
+- **New stat: Wi-Fi signal strength**, on the bar and the widget. Shows the signal quality of the network you're connected to (the widget also shows its name), turns the warning colour at 25% or below, and on the animated Wi-Fi icon only as many waves light up as your signal reaches. It's on in the widget by default; turn it on for the bar in **Settings → Stats → Network**.
+- **New: settings window background colours.** Pick from Charcoal (default), Pure black, Slate, Midnight blue, Deep violet, Forest, Wine or Espresso in **Settings → General → Background colour**.
+- **New: animated icons** on the taskbar bar and the desktop widget. Every icon acts out what it shows, and moves faster or harder the busier its stat is:
+  - Fans spin with fan speed (with motion blur when fast), and the graphics-card icon's fan spins with GPU load
+  - Upload/download arrows stream in their direction; drive arrows flow in and out while the activity LED flickers
+  - Thermometers fill up and turn redder as things heat up, with heat shimmer when hot; flames flicker and throw sparks
+  - Power bolts crackle with little electric arcs; the CPU chip's pins light up in a chase and its core glows under load
+  - The gauge needle swings to the current load, RAM chips blink like LEDs, VRAM cells twinkle, core cells bounce like an equaliser
+  - Wi-Fi waves radiate, signal bars sweep, the globe turns, the clock ticks, the hourglass drains and flips, the pulse traces like a heart monitor, and ping beats like a heart
+  - A soft glow behind each icon brightens with activity, and turns orange-red past a warning limit
+- **Animation settings:** turn animations on or off separately for the bar (**Settings → Appearance → Animation**) and the widget (**Settings → Widget**), and pick a frame rate: 15, 30 or 60 fps.
+- **New: tray icon backgrounds.** Choose the tray icon's colour in **Settings → General → Tray icon background**: Violet to cyan (default), Ocean blue, Emerald, Sunset, Crimson, Hot pink, Graphite, Midnight, Light, or no background.
+- **Fix: fullscreen hiding is now per monitor.** With **Hide in fullscreen apps** on, only the bar or widget on the same screen as the fullscreen game or video hides. The one on your other monitor stays visible.
+
+---
+
 # PC Stats Bar v1.4.1
 
 - **New: tray icon.** PC Stats Bar now has an icon in the system tray, next to the clock.
