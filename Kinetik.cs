@@ -38,9 +38,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("2.0.1.0")]
-[assembly: AssemblyFileVersion("2.0.1.0")]
-[assembly: AssemblyInformationalVersion("2.0.1")]
+[assembly: AssemblyVersion("2.0.2.0")]
+[assembly: AssemblyFileVersion("2.0.2.0")]
+[assembly: AssemblyInformationalVersion("2.0.2")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -218,6 +218,25 @@ class Settings
         return "Segoe UI";
     }
 
+    // Keeps every number within what the app can handle, so a bad or tampered registry value can't crash it
+    // (e.g. a zero timer interval) or make it allocate a huge window.
+    void Sanitize()
+    {
+        Func<int, int, int, int> cl = (v, lo, hi) => Math.Max(lo, Math.Min(hi, v));
+        Interval = cl(Interval, 250, 60000); Offset = cl(Offset, 0, 10000); AnimFps = cl(AnimFps, 10, 120);
+        WidgetWidth = cl(WidgetWidth, 120, 2000); WidgetScale = cl(WidgetScale, 30, 400); WidgetOpacity = cl(WidgetOpacity, 0, 100);
+        WidgetRound = cl(WidgetRound, 0, 400); WidgetGraphSecs = cl(WidgetGraphSecs, 10, 600);
+        WidgetStyle = cl(WidgetStyle, 0, 3); WidgetTheme = cl(WidgetTheme, 0, 2); WidgetLayer = cl(WidgetLayer, 0, 2);
+        PillOpacity = cl(PillOpacity, 0, 100); PillRound = cl(PillRound, 0, 400);
+        GapStats = cl(GapStats, 0, 400); GapIcon = cl(GapIcon, 0, 400); EdgePad = cl(EdgePad, 0, 400);
+        IconScale = cl(IconScale, 20, 400); RowGap = cl(RowGap, 0, 50);
+        DividerStyle = cl(DividerStyle, 0, 3); DividerHeight = cl(DividerHeight, 10, 400);
+        TrayStyle = cl(TrayStyle, 0, TrayIconArt.Styles.Length - 1); AppBackground = cl(AppBackground, 0, Theme.Backgrounds.Length - 1);
+        if (float.IsNaN(FontSize) || FontSize < 0 || FontSize > 72) FontSize = 0;
+        if (string.IsNullOrWhiteSpace(FontName) || FontName.Length > 100) FontName = DefaultFont();
+        if (string.IsNullOrWhiteSpace(PingHost) || PingHost.Length > 253) PingHost = "1.1.1.1";
+    }
+
     IEnumerable<FieldInfo> Fields() { return GetType().GetFields(BindingFlags.Public | BindingFlags.Instance); }
 
     public void Load()
@@ -239,6 +258,7 @@ class Settings
                 }
                 catch { }
             }
+            Sanitize();
             if (Convert.ToInt32(k.GetValue("SettingsVersion", 1)) < 2)
             {
                 // v1.0 had three fixed dividers with on/off switches; keep only the ones that were switched on.
@@ -2499,6 +2519,54 @@ static class WifiSignal
     public static void Close()
     {
         lock (gate) { if (handle != IntPtr.Zero) { WlanCloseHandle(handle, IntPtr.Zero); handle = IntPtr.Zero; } }
+    }
+}
+
+// ======================================================================= Updates
+// Asks GitHub for the latest release's version number. Nothing is downloaded or run automatically: a newer version
+// opens the release page in the browser, where the user downloads it themselves.
+static class Updates
+{
+    const string Api = "https://api.github.com/repos/WastedDesigner/Kinetik/releases/latest";
+    const string Page = "https://github.com/WastedDesigner/Kinetik/releases/latest";
+
+    // done(latest, error) runs on the UI thread of `owner`.
+    public static void Check(Action<Version, string> done, Control owner)
+    {
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            Version v = null; string err = null;
+            try
+            {
+                System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+                var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(Api);
+                req.UserAgent = "Kinetik/" + Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
+                req.Accept = "application/vnd.github+json";
+                req.Timeout = req.ReadWriteTimeout = 10000;
+                req.AllowAutoRedirect = true;
+                string body;
+                using (var resp = req.GetResponse())
+                using (var st = resp.GetResponseStream())
+                using (var ms = new MemoryStream())
+                {
+                    var buf = new byte[8192]; int n;
+                    while ((n = st.Read(buf, 0, buf.Length)) > 0) { ms.Write(buf, 0, n); if (ms.Length > 1 << 20) throw new IOException("Response too large"); }
+                    body = Encoding.UTF8.GetString(ms.ToArray());
+                }
+                var m = Regex.Match(body, "\"tag_name\"\\s*:\\s*\"v?(\\d+(?:\\.\\d+){1,3})\"");
+                if (!m.Success) throw new FormatException("No version in response");
+                v = new Version(m.Groups[1].Value);
+            }
+            catch (Exception e) { err = e.Message; }
+            try { owner.BeginInvoke((Action)(() => done(v, err))); } catch { }
+        });
+    }
+
+    // Opened through Explorer so the browser starts as the normal user, even when Kinetik runs as administrator.
+    public static void OpenReleasePage()
+    {
+        try { Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "\"" + Page + "\"")); }
+        catch { }
     }
 }
 
@@ -5269,6 +5337,22 @@ class SettingsForm : Form
         list.Controls.Add(new Label { Text = "Kinetik", Font = Theme.UI(16f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 0, 0, 0) });
         Hint("A lightweight stats overlay for the Windows taskbar.", 28);
         Add(Icons.Info, Theme.Accent, "Version", null, new Label { Text = VersionText, AutoSize = false, Size = new Size(120, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Text, BackColor = Theme.Card, Font = Theme.UI(10f) });
+        Button upd = null;
+        string newer = null;
+        upd = Btn("Check for updates", (s, e) =>
+        {
+            if (newer != null) { Updates.OpenReleasePage(); return; }
+            upd.Text = "Checking…"; upd.Enabled = false;
+            Updates.Check((latest, error) =>
+            {
+                if (upd.IsDisposed) return;
+                upd.Enabled = true;
+                if (error != null) upd.Text = "Couldn't check. Try again";
+                else if (latest > Assembly.GetExecutingAssembly().GetName().Version) { newer = latest.ToString(3); upd.Text = "Get version " + newer; }
+                else upd.Text = "Up to date ✓";
+            }, this);
+        });
+        Add(Icons.Down, Theme.Accent, "Updates", "Checks GitHub for a newer release. Downloads open in your browser.", upd);
         Add(Icons.Heart, Theme.Accent, "© Akila Sella Hennedige", "Free software under the GNU General Public License v3", null);
     }
 
