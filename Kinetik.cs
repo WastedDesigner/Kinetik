@@ -1,4 +1,4 @@
-﻿// PC Stats Bar: a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
+﻿// Kinetik (formerly PC Stats Bar): a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
 // Shows network speed and ping, CPU (usage, clock, temp, power, per-core), RAM and commit, GPU (usage, temp, clock,
 // fan, VRAM, power), disk activity / throughput / free space, processes, uptime, and battery levels of the PC and
 // connected Bluetooth devices. Every item can be reordered, given its own icon and colour, and split into groups
@@ -33,9 +33,9 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-[assembly: AssemblyTitle("PC Stats Bar")]
+[assembly: AssemblyTitle("Kinetik")]
 [assembly: AssemblyDescription("Taskbar overlay showing PC stats and device battery levels")]
-[assembly: AssemblyProduct("PC Stats Bar")]
+[assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
 [assembly: AssemblyVersion("2.0.0.0")]
@@ -45,7 +45,7 @@ using Microsoft.Win32;
 // ======================================================================= Settings
 class Settings
 {
-    const string Key = @"Software\PCStatsBar";
+    public const string Key = @"Software\Kinetik", LegacyKey = @"Software\PCStatsBar";
     public const int CurrentVersion = 2;
     public int SettingsVersion = CurrentVersion;
 
@@ -96,6 +96,7 @@ class Settings
     // Behaviour
     public int Interval = 1000, Offset = 0;
     public bool ClickTaskMgr = true, HideFullscreen = true, TrayIcon = true;
+    public bool TrayAnimate = true;
     public int AnimFps = 60, TrayStyle = 0; // icon animation frame rate; tray icon background (see TrayIconArt.Styles)
 
     // Every stat that can appear on the bar, in default order. Dividers ("Sep1", "Sep2", ...) are added by the user.
@@ -1432,7 +1433,7 @@ static class Stats
 // ======================================================================= Program
 static class Program
 {
-    public const string AppName = "PCStatsBar";
+    public const string AppName = "Kinetik", LegacyName = "PCStatsBar";
     public static readonly bool IsAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
     static readonly Dictionary<string, Assembly> loaded = new Dictionary<string, Assembly>();
 
@@ -1447,6 +1448,7 @@ static class Program
         GCSettings.LatencyMode = GCLatencyMode.Batch;
         AppDomain.CurrentDomain.AssemblyResolve += ResolveEmbedded;
         bool created;
+        MigrateLegacy();
         using (var mutex = new Mutex(true, AppName, out created))
         {
             // When relaunching (e.g. elevated), wait for the previous instance to exit.
@@ -1455,7 +1457,7 @@ static class Program
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.ThreadException += (s, e) =>
-                File.AppendAllText(Path.Combine(Path.GetTempPath(), "PCStatsBar.log"), DateTime.Now + " " + e.Exception + Environment.NewLine);
+                File.AppendAllText(Path.Combine(Path.GetTempPath(), "Kinetik.log"), DateTime.Now + " " + e.Exception + Environment.NewLine);
             var bar = new StatsBar();
             int si = Array.IndexOf(args, "--settings");
             if (si >= 0)
@@ -1540,6 +1542,31 @@ static class Program
 
     public static bool TaskExists() { return Run("schtasks.exe", "/Query /TN " + AppName) == 0; }
 
+    // One-time move from the old "PC Stats Bar" name: copies its settings, and swaps its startup entry for Kinetik's.
+    // Deleting the old elevated logon task needs admin, so that part waits until Kinetik runs as administrator.
+    public static void MigrateLegacy()
+    {
+        try
+        {
+            using (var old = Registry.CurrentUser.OpenSubKey(Settings.LegacyKey))
+                if (old != null && Registry.CurrentUser.OpenSubKey(Settings.Key) == null)
+                    using (var k = Registry.CurrentUser.CreateSubKey(Settings.Key))
+                        foreach (var n in old.GetValueNames()) k.SetValue(n, old.GetValue(n), old.GetValueKind(n));
+            using (var k = Registry.CurrentUser.CreateSubKey(Settings.Key))
+            {
+                if (Convert.ToInt32(k.GetValue("LegacyStartupMoved", 0)) == 1) return;
+                bool wanted = false;
+                using (var run = Registry.CurrentUser.CreateSubKey(RunKey))
+                    if (run.GetValue(LegacyName) != null) { run.DeleteValue(LegacyName, false); wanted = true; }
+                bool oldTask = Run("schtasks.exe", "/Query /TN " + LegacyName) == 0;
+                if (oldTask && IsAdmin) { Run("schtasks.exe", "/Delete /F /TN " + LegacyName); wanted = true; oldTask = false; }
+                if (wanted) SetStartup(true);
+                if (!oldTask) k.SetValue("LegacyStartupMoved", 1);
+            }
+        }
+        catch { }
+    }
+
     public static bool IsStartupEnabled()
     {
         using (var k = Registry.CurrentUser.OpenSubKey(RunKey))
@@ -1565,7 +1592,7 @@ static class Program
         var xml =
             "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
             "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n" +
-            "  <RegistrationInfo><Description>Starts PC Stats Bar when you sign in.</Description></RegistrationInfo>\r\n" +
+            "  <RegistrationInfo><Description>Starts Kinetik when you sign in.</Description></RegistrationInfo>\r\n" +
             "  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + user + "</UserId></LogonTrigger></Triggers>\r\n" +
             "  <Principals><Principal id=\"Author\"><UserId>" + user + "</UserId><LogonType>InteractiveToken</LogonType>" +
             "<RunLevel>" + (elevated ? "HighestAvailable" : "LeastPrivilege") + "</RunLevel></Principal></Principals>\r\n" +
@@ -1724,22 +1751,34 @@ class StatsBar : Form
     // ---- Tray icon: click for Settings, right-click for the same menu as the bar.
     // Useful when the bar is hidden (fullscreen apps) or there's no room for it on the taskbar.
     NotifyIcon tray;
-    int trayStyle = -1;
+    int trayStyle = -1, trayFrame;
+    double trayPhase; DateTime trayAt = DateTime.UtcNow;
+
+    // Turns the logo's ring in the tray, faster the busier the CPU is.
+    void SpinTray()
+    {
+        var now = DateTime.UtcNow;
+        double dt = Math.Min(0.2, (now - trayAt).TotalSeconds); trayAt = now;
+        if (tray == null || !Cfg.TrayAnimate) return;
+        trayPhase += dt * (0.15 + Sampler.Snap.Cpu / 100 * 1.6); // quarter-turns per second; the ring repeats every 90°
+        int f = (int)(trayPhase * TrayIconArt.Frames) % TrayIconArt.Frames;
+        if (f == trayFrame) return;
+        trayFrame = f;
+        tray.Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, f);
+    }
     string trayText;
 
     void SyncTray()
     {
         if (tray != null && trayStyle != Cfg.TrayStyle)
         {
-            var old = tray.Icon;
-            tray.Icon = TrayIconArt.Make(Cfg.TrayStyle, SystemInformation.SmallIconSize.Width);
-            trayStyle = Cfg.TrayStyle;
-            TrayIconArt.Free(old);
+            trayStyle = Cfg.TrayStyle; trayFrame = 0;
+            tray.Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, 0);
         }
         if (Cfg.TrayIcon && tray == null)
         {
             trayStyle = Cfg.TrayStyle;
-            tray = new NotifyIcon { Icon = TrayIconArt.Make(trayStyle, SystemInformation.SmallIconSize.Width), Text = "PC Stats Bar", ContextMenuStrip = menu };
+            tray = new NotifyIcon { Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, 0), Text = "Kinetik", ContextMenuStrip = menu };
             tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) OpenSettings(null); };
             tray.Visible = true;
             trayText = null;
@@ -1755,7 +1794,7 @@ class StatsBar : Form
         if (Cfg.Wants("Cpu")) parts.Add("CPU " + s.Cpu.ToString("0") + "%");
         parts.Add("RAM " + s.RamLoad + "%");
         if (s.HasGpu) parts.Add("GPU " + s.GpuUtil.ToString("0") + "%");
-        var text = "PC Stats Bar\n" + string.Join(" · ", parts);
+        var text = "Kinetik\n" + string.Join(" · ", parts);
         if (text.Length > 63) text = text.Substring(0, 63);
         if (text != trayText) { trayText = text; tray.Text = text; }
     }
@@ -2232,6 +2271,7 @@ class StatsBar : Form
     void AnimFrame()
     {
         anim.Advance();
+        SpinTray();
         if (Cfg.BarAnimate && shownL != null && IsHandleCreated && lastX != int.MinValue) Push(shownL, shownH, lastX, lastY);
     }
 
@@ -2259,12 +2299,14 @@ class StatsBar : Form
 }
 
 // ======================================================================= Tray icon artwork
-// The app's logo (rising bars on a taskbar line) drawn on a choice of backgrounds, at the tray's exact size.
+// The Kinetik logo (rising bars inside a broken spin ring) on a choice of backgrounds, drawn at the tray's exact
+// size. The ring can turn: it repeats every 90°, so a handful of cached frames makes a seamless loop.
 static class TrayIconArt
 {
-    [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr h);
+    public const int Frames = 6;
+    static readonly Dictionary<string, Icon> cache = new Dictionary<string, Icon>();
 
-    // Name → top-left and bottom-right gradient colours; a transparent pair means bars only.
+    // Name → top-left and bottom-right gradient colours; a transparent pair means no tile.
     public static readonly KeyValuePair<string, Color[]>[] Styles =
     {
         S("Violet to cyan (default)", 255, 108, 76, 255, 255, 0, 198, 255),
@@ -2284,54 +2326,58 @@ static class TrayIconArt
         return new KeyValuePair<string, Color[]>(n, new[] { Color.FromArgb(a1, r1, g1, b1), Color.FromArgb(a2, r2, g2, b2) });
     }
 
-    public static Icon Make(int style, int size)
+    // Cached, so a spinning tray icon never allocates new icon handles.
+    public static Icon Frame(int style, int size, int frame)
     {
-        var st = Styles[Math.Max(0, Math.Min(Styles.Length - 1, style))].Value;
-        bool none = st[0].A == 0, light = st[0].GetBrightness() > 0.8f;
-        int s = Math.Max(16, size);
-        using (var bmp = new Bitmap(s, s, PixelFormat.Format32bppArgb))
-        {
-            using (var g = Graphics.FromImage(bmp))
-            {
-                g.SmoothingMode = SmoothingMode.AntiAlias; g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                g.Clear(Color.Transparent);
-                float m = Math.Max(0.5f, s * 0.03f);
-                var tileR = new RectangleF(m, m, s - 2 * m, s - 2 * m);
-                if (!none)
-                    using (var tile = Icons.Round(tileR, s * 0.23f))
-                    using (var grad = new LinearGradientBrush(new RectangleF(0, 0, s, s), st[0], st[1], 45f))
-                    using (var hl = new LinearGradientBrush(new RectangleF(0, 0, s, s), Color.FromArgb(70, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f))
-                    {
-                        g.FillPath(grad, tile);
-                        g.FillPath(hl, tile);
-                    }
-                // Bars go dark on a light tile, white everywhere else; with no tile they fill more of the square.
-                Color main = light ? Color.FromArgb(40, 40, 50) : Color.White;
-                float k = none ? 1.18f : 1f, cx = s / 2f;
-                float bw = s * 0.14f * k, gap = s * 0.075f * k, x0 = cx - (3 * bw + 2 * gap) / 2, baseY = s * (none ? 0.74f : 0.70f);
-                float[] hs = { 0.20f, 0.33f, 0.46f };
-                using (var solid = new SolidBrush(main)) using (var soft = new SolidBrush(Color.FromArgb(none ? 220 : 185, main)))
-                {
-                    for (int i = 0; i < 3; i++)
-                    {
-                        float h = s * hs[i] * k, x = x0 + i * (bw + gap);
-                        using (var bar = Icons.Round(new RectangleF(x, baseY - h, bw, h), bw * 0.35f)) g.FillPath(i == 2 ? solid : soft, bar);
-                    }
-                    float lw = s * 0.6f * k;
-                    using (var line = Icons.Round(new RectangleF(cx - lw / 2, baseY + s * 0.06f, lw, Math.Max(1, s * 0.07f)), s * 0.035f)) g.FillPath(solid, line);
-                }
-            }
-            IntPtr h2 = bmp.GetHicon();
-            return Icon.FromHandle(h2);
-        }
+        style = Math.Max(0, Math.Min(Styles.Length - 1, style));
+        var key = style + "|" + size + "|" + frame;
+        Icon ic;
+        if (!cache.TryGetValue(key, out ic))
+            using (var bmp = Draw(style, size, frame * 90f / Frames))
+                cache[key] = ic = Icon.FromHandle(bmp.GetHicon());
+        return ic;
     }
 
-    public static void Free(Icon icon)
+    public static Bitmap Draw(int style, int size, float angle)
     {
-        if (icon == null) return;
-        IntPtr h = icon.Handle;
-        icon.Dispose();
-        DestroyIcon(h);
+        var st = Styles[style].Value;
+        bool none = st[0].A == 0, light = st[0].GetBrightness() > 0.8f;
+        int s = Math.Max(16, size);
+        var bmp = new Bitmap(s, s, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias; g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.Clear(Color.Transparent);
+            float m = Math.Max(0.5f, s * 0.03f), cx = s / 2f, cy = s / 2f;
+            if (!none)
+                using (var tile = Icons.Round(new RectangleF(m, m, s - 2 * m, s - 2 * m), s * 0.23f))
+                using (var grad = new LinearGradientBrush(new RectangleF(0, 0, s, s), st[0], st[1], 45f))
+                using (var hl = new LinearGradientBrush(new RectangleF(0, 0, s, s), Color.FromArgb(70, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f))
+                {
+                    g.FillPath(grad, tile);
+                    g.FillPath(hl, tile);
+                }
+            // White on colour; dark on the light tile, or on nothing (where it has to show on light and dark taskbars alike).
+            Color main = light ? Color.FromArgb(40, 40, 50) : Color.White;
+            Color accent = none ? Color.FromArgb(0, 198, 255) : light ? Color.FromArgb(108, 76, 255) : Color.FromArgb(215, 255, 255, 255);
+            float k = none ? 1.14f : 1f;
+
+            // Broken ring: four arcs with gaps, which is what makes the turn visible.
+            float rad = s * 0.36f * k, w = Math.Max(1.2f, s * 0.07f);
+            using (var pen = new Pen(none ? accent : main, w) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                for (int q = 0; q < 4; q++) g.DrawArc(pen, cx - rad, cy - rad, rad * 2, rad * 2, angle + q * 90 + 14, 62);
+
+            // Rising bars, the tallest in full white.
+            float bw = s * 0.11f * k, gap = s * 0.055f * k, x0 = cx - (3 * bw + 2 * gap) / 2, baseY = cy + s * 0.17f * k;
+            float[] hs = { 0.16f, 0.25f, 0.34f };
+            using (var solid = new SolidBrush(main)) using (var soft = new SolidBrush(accent))
+                for (int i = 0; i < 3; i++)
+                {
+                    float h = s * hs[i] * k, x = x0 + i * (bw + gap);
+                    using (var bar = Icons.Round(new RectangleF(x, baseY - h, bw, h), bw * 0.4f)) g.FillPath(i == 2 ? solid : soft, bar);
+                }
+        }
+        return bmp;
     }
 }
 
@@ -3146,7 +3192,7 @@ class WidgetForm : Form
         menu.Items.Add(lockItem);
         menu.Items.Add("Hide widget", null, (s, e) => bar.SetWidget(false));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("PC Stats Bar settings…", null, (s, e) => bar.OpenSettings(null));
+        menu.Items.Add("Kinetik settings…", null, (s, e) => bar.OpenSettings(null));
         animTimer.Tick += (s, e) => { animTimer.Interval = 1000 / Math.Max(10, c.AnimFps); AnimFrame(); };
         animTimer.Start();
     }
@@ -4411,7 +4457,7 @@ class SettingsForm : Form
     public SettingsForm(StatsBar bar)
     {
         this.bar = bar; c = bar.Cfg;
-        Text = "PC Stats Bar";
+        Text = "Kinetik";
         ClientSize = new Size(800, 640);
         MinimumSize = new Size(760, 480);
         StartPosition = FormStartPosition.CenterScreen;
@@ -4428,7 +4474,7 @@ class SettingsForm : Form
         top.Controls.Add(frame);
 
         // Navigation
-        var brand = new Label { Text = "PC Stats Bar", Font = Theme.UI(13f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Height = 64, Dock = DockStyle.Top, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
+        var brand = new Label { Text = "Kinetik", Font = Theme.UI(13f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Height = 64, Dock = DockStyle.Top, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var version = new Label { Text = "v" + VersionText, Font = Theme.UI(8.5f), ForeColor = Theme.Sub, AutoSize = false, Height = 36, Dock = DockStyle.Bottom, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var navList = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(10, 0, 10, 0), BackColor = Theme.Nav };
         foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "Widget", "General", "About" }) navList.Controls.Add(NavItem(p));
@@ -4702,7 +4748,7 @@ class SettingsForm : Form
         addBtn.Margin = new Padding(0, 0, 8, 0);
         var resetBtn = Btn("Reset order", (s, e) =>
         {
-            if (MessageBox.Show(this, "Put every stat back in its original order and remove all dividers?", "PC Stats Bar", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Put every stat back in its original order and remove all dividers?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.Order = Settings.DefaultOrder;
             Apply(); RefreshPage();
         });
@@ -4860,7 +4906,7 @@ class SettingsForm : Form
         logo.Image = LoadLogo(128);
         logo.Disposed += (s, e) => { if (logo.Image != null) logo.Image.Dispose(); };
         list.Controls.Add(logo);
-        list.Controls.Add(new Label { Text = "PC Stats Bar", Font = Theme.UI(16f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 0, 0, 0) });
+        list.Controls.Add(new Label { Text = "Kinetik", Font = Theme.UI(16f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 0, 0, 0) });
         Hint("A lightweight stats overlay for the Windows taskbar.", 28);
         Add(Icons.Info, Theme.Accent, "Version", null, new Label { Text = VersionText, AutoSize = false, Size = new Size(120, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Text, BackColor = Theme.Card, Font = Theme.UI(10f) });
         Add(Icons.Heart, Theme.Accent, "© Akila Sella Hennedige", "Free software under the GNU General Public License v3", null);
@@ -4932,7 +4978,7 @@ class SettingsForm : Form
         addBtn.Margin = new Padding(0, 0, 8, 0);
         var resetBtn = Btn("Reset contents", (s, e) =>
         {
-            if (MessageBox.Show(this, "Put the widget's stats back to the default selection and order, and remove its dividers?", "PC Stats Bar", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Put the widget's stats back to the default selection and order, and remove its dividers?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.WidgetOrder = Settings.DefaultWidgetOrder;
             c.WidgetItems = Settings.DefaultWidgetItems;
             Apply(); RefreshPage();
@@ -4965,6 +5011,7 @@ class SettingsForm : Form
         Switch(Icons.Chip, Theme.Accent, "Left-click opens Task Manager", "ClickTaskMgr");
         Switch(Icons.Monitor, Theme.Accent, "Hide in fullscreen apps", "HideFullscreen", "Games, videos and presentations");
         Switch(Icons.Grid, Theme.Accent, "Show tray icon", "TrayIcon", "Click it for Settings, right-click for the menu");
+        Switch(Icons.Fan, Theme.Accent, "Spinning tray icon", "TrayAnimate", "The logo's ring turns faster the busier your CPU is");
         Add(Icons.Palette, Theme.Accent, "Tray icon background", null,
             Combo(TrayIconArt.Styles.Select(x => x.Key).ToArray(), Math.Max(0, Math.Min(TrayIconArt.Styles.Length - 1, c.TrayStyle)), i => { c.TrayStyle = i; Apply(); }, 170));
 
@@ -4991,7 +5038,7 @@ class SettingsForm : Form
         Header("Reset");
         Add(Icons.Gear, Theme.Sub, "Restore default settings", "Every option, including the order and custom icons", Btn("Reset", (s, e) =>
         {
-            if (MessageBox.Show(this, "Reset every setting to its default?", "PC Stats Bar", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Reset every setting to its default?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.ResetToDefaults(); Apply(); RefreshPage();
         }));
     }

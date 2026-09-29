@@ -1,4 +1,4 @@
-# Generates icon.ico (16–256 px) for PC Stats Bar: a gradient tile with rising stat bars on a taskbar line.
+# Generates icon.ico (16–256 px) for Kinetik: a gradient tile with rising stat bars inside a broken spin ring.
 # Run: powershell -ExecutionPolicy Bypass -File make-icon.ps1
 Add-Type -AssemblyName System.Drawing
 
@@ -24,20 +24,22 @@ function Draw([int]$s) {
     $hl = New-Object System.Drawing.Drawing2D.LinearGradientBrush $rect, ([System.Drawing.Color]::FromArgb(70, 255, 255, 255)), ([System.Drawing.Color]::FromArgb(0, 255, 255, 255)), 90
     $g.FillPath($hl, $tile)
 
-    # Rising bars
+    # Broken spin ring: four arcs with gaps
+    $cx = $s / 2; $rad = $s * 0.36; $pw = [Math]::Max(1.2, $s * 0.07)
+    $pen = New-Object System.Drawing.Pen ([System.Drawing.Color]::White), $pw
+    $pen.StartCap = 'Round'; $pen.EndCap = 'Round'
+    for ($q = 0; $q -lt 4; $q++) { $g.DrawArc($pen, $cx - $rad, $cx - $rad, $rad * 2, $rad * 2, $q * 90 + 14, 62) }
+
+    # Rising bars, the tallest in full white
     $white = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
-    $soft = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(185, 255, 255, 255))
-    $base = $s * 0.70; $bw = $s * 0.14; $gap = $s * 0.075; $x0 = ($s - (3 * $bw + 2 * $gap)) / 2
-    $heights = 0.20, 0.33, 0.46
+    $soft = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(215, 255, 255, 255))
+    $bw = $s * 0.11; $gap = $s * 0.055; $x0 = $cx - (3 * $bw + 2 * $gap) / 2; $base = $cx + $s * 0.17
+    $heights = 0.16, 0.25, 0.34
     for ($i = 0; $i -lt 3; $i++) {
         $h = $s * $heights[$i]; $x = $x0 + $i * ($bw + $gap)
-        $bar = RoundRect $x ($base - $h) $bw $h ($bw * 0.35)
+        $bar = RoundRect $x ($base - $h) $bw $h ($bw * 0.4)
         if ($i -eq 2) { $g.FillPath($white, $bar) } else { $g.FillPath($soft, $bar) }
     }
-
-    # Taskbar line
-    $line = RoundRect ($s * 0.2) ($s * 0.76) ($s * 0.6) ([Math]::Max(1, $s * 0.07)) ($s * 0.035)
-    $g.FillPath($white, $line)
 
     $g.Dispose(); return $bmp
 }

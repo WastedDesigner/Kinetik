@@ -1,10 +1,12 @@
-# PC Stats Bar
+# Kinetik
+
+*Formerly PC Stats Bar.*
 
 A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It sits just left of the system tray and shows live hardware stats, each with its own icon and colour. Every stat can be switched on or off, reordered, restyled and grouped with dividers.
 
 > **About this project:** I originally made this for my own personal use and decided to share it in case anyone else finds it useful. If you run into a bug or have an idea for a feature, please [open an issue](../../issues). I'll do my best to look into it and implement what I can.
 
-![PC Stats Bar on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
+![Kinetik on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
 
 **Latest version: v1.4.1.** [Download it from Releases](../../releases/latest).
 
@@ -68,7 +70,7 @@ And with text labels instead of icons and dot-style dividers:
 
 <img src="screenshots/widget.png" alt="The desktop widget in the Bars and graphs style" align="right" width="300">
 
-Alongside the taskbar bar, PC Stats Bar can show a floating panel on your desktop, similar to LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or in **Settings → Widget**.
+Alongside the taskbar bar, Kinetik can show a floating panel on your desktop, similar to LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or in **Settings → Widget**.
 
 - **Grouped and labelled:** stats sit under headings (Processor, Graphics, Memory, Network, Storage, System, Battery), with your CPU and GPU model names next to them
 - **Bars and graphs:** each stat can have a coloured usage bar and a scrolling history graph. CPU cores get a per-thread bar chart.
@@ -109,11 +111,11 @@ Everything about the widget is set on the **Widget** page in Settings:
 
 ## Download and use
 
-1. Download `PCStatsBar.exe` from the [Releases](../../releases/latest) page.
+1. Download `Kinetik.exe` from the [Releases](../../releases/latest) page.
 2. Run it. The bar appears on your taskbar next to the tray icons.
 3. **Right-click** the bar and choose **Settings…** to customise it, or **Arrange stats…** to go straight to the order and icons.
 
-It's a single portable exe with no installer. Settings are saved in the registry at `HKCU\Software\PCStatsBar`.
+It's a single portable exe with no installer. Settings are saved in the registry at `HKCU\Software\Kinetik`.
 
 **Updating:** right-click the bar, choose **Exit**, replace the exe with the new one and run it again. Your settings carry over.
 
@@ -149,11 +151,11 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 - **Sliders:** click one first, then use the mouse wheel or ← / → keys for fine adjustments
 - **Text labels instead of icons:** open the icon picker and choose **Text** for a compact, icon-free look
 - **Grouping:** add dividers, then pick a divider style on the Appearance page. **Blank space** gives gaps without lines.
-- **Command line:** `PCStatsBar.exe --settings Arrange` opens Settings on a specific page (Stats, Arrange, Appearance, Colours, Widget, General or About)
+- **Command line:** `Kinetik.exe --settings Arrange` opens Settings on a specific page (Stats, Arrange, Appearance, Colours, Widget, General or About)
 
 ## CPU temperature
 
-Windows doesn't provide CPU temperatures to normal apps, so PC Stats Bar reads them through [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)'s library, which is built into the exe. This requires:
+Windows doesn't provide CPU temperatures to normal apps, so Kinetik reads them through [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)'s library, which is built into the exe. This requires:
 
 - **Administrator rights:** right-click the bar and choose **Restart as administrator**. To have it start elevated automatically, turn on **Run at startup** while it's running as admin.
 - **The PawnIO driver:** it's installed along with the LibreHardwareMonitor app, or you can get it from [pawnio.eu](https://pawnio.eu).
@@ -177,6 +179,13 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v2.0.0: Kinetik
+
+- **New name: PC Stats Bar is now Kinetik**, with a new logo. Your settings are carried over automatically the first time Kinetik runs. If you had **Run at startup** on, start Kinetik once as administrator (right-click → **Restart as administrator**) so it can replace the old startup entry.
+- **Animated icons** on the bar and the widget: fans spin with fan speed, arrows stream with throughput, thermometers fill up, bolts crackle, gauges swing and more, all driven by live readings. Turn them on or off separately for the bar and the widget, and pick 15, 30 or 60 fps.
+- **Tray icon:** the logo's ring spins faster the busier your CPU is (can be turned off), and you can pick from 10 backgrounds.
+- **Fullscreen hiding is now per monitor:** a fullscreen game only hides the bar or widget on its own screen.
 
 ### v1.4.1: tray icon
 - **New: tray icon.** PC Stats Bar now has an icon in the system tray, next to the clock.
@@ -278,7 +287,7 @@ No Visual Studio or SDK needed. It compiles with the .NET Framework compiler tha
    build.bat
    ```
 
-   This produces a single `PCStatsBar.exe`, with every DLL in `lib\` and the app icon embedded inside it.
+   This produces a single `Kinetik.exe`, with every DLL in `lib\` and the app icon embedded inside it.
 
 ## Feedback
 
