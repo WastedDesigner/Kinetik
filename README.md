@@ -68,7 +68,7 @@ And with text labels instead of icons and dot-style dividers:
 
 ## Desktop widget
 
-<img src="screenshots/widget.png" alt="The desktop widget in the Bars and graphs style" align="right" width="300">
+<img src="screenshots/widget.png" alt="The desktop widget in the Bars style" align="right" width="300">
 
 Alongside the taskbar bar, Kinetik can show a floating panel on your desktop, similar to LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or in **Settings → Widget**.
 
