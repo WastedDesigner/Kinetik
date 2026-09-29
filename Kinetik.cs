@@ -1485,6 +1485,11 @@ static class Program
         }
     }
 
+    public static void Log(Exception e)
+    {
+        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "Kinetik.log"), DateTime.Now + " " + e + Environment.NewLine); } catch { }
+    }
+
     static bool Wait(Mutex m)
     {
         try { return m.WaitOne(15000); } catch (AbandonedMutexException) { return true; }
@@ -1733,7 +1738,11 @@ class StatsBar : Form
         menu.Items.Add("Exit", null, (s, e) => Close());
 
         Sampler = new Sampler(Cfg, () => { try { BeginInvoke((Action)Render); } catch { } });
-        HandleCreated += (s, e) => { Sampler.Start(); TrimSoon(15000); ListenForShow(); };
+        HandleCreated += (s, e) =>
+        {
+            Sampler.Start(); TrimSoon(15000); ListenForShow();
+            if (File.Exists(Shortcuts.DesktopPath)) ThreadPool.QueueUserWorkItem(_ => Shortcuts.CreateDesktop(Cfg.TrayStyle)); // keeps its icon current
+        };
         var animTimer = new System.Windows.Forms.Timer { Interval = 16 };
         animTimer.Tick += (s, e) => { animTimer.Interval = 1000 / Math.Max(10, Cfg.AnimFps); AnimFrame(); };
         animTimer.Start();
@@ -2543,6 +2552,8 @@ class TaskbarButtonForm : Form
 // ======================================================================= Shortcuts
 static class Shortcuts
 {
+    [DllImport("shell32.dll")] static extern void SHChangeNotify(int ev, int flags, IntPtr a, IntPtr b);
+
     public static string DesktopPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kinetik.lnk"); } }
 
     // A multi-size .ico of the fan logo in the chosen colour, for the shortcut (the exe's own icon is fixed at build time).
@@ -2550,10 +2561,11 @@ static class Shortcuts
     {
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik");
         Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, "icon-" + style + ".ico");
+        var path = Path.Combine(dir, "icon-" + style + ".v2.ico");
         if (File.Exists(path)) return path;
+        // Classic 32-bit bitmap entries for the small sizes (Explorer won't reliably show PNG ones), PNG for 256.
         var sizes = new[] { 16, 24, 32, 48, 64, 128, 256 };
-        var pngs = sizes.Select(sz => { using (var b = TrayIconArt.Draw(style, sz, 0)) using (var ms = new MemoryStream()) { b.Save(ms, ImageFormat.Png); return ms.ToArray(); } }).ToList();
+        var data = sizes.Select(sz => { using (var b = TrayIconArt.Draw(style, sz, 0)) return sz >= 256 ? Png(b) : Dib(b); }).ToList();
         using (var w = new BinaryWriter(File.Create(path)))
         {
             w.Write((ushort)0); w.Write((ushort)1); w.Write((ushort)sizes.Length);
@@ -2562,12 +2574,29 @@ static class Shortcuts
             {
                 byte dim = (byte)(sizes[k] >= 256 ? 0 : sizes[k]);
                 w.Write(dim); w.Write(dim); w.Write((byte)0); w.Write((byte)0);
-                w.Write((ushort)1); w.Write((ushort)32); w.Write(pngs[k].Length); w.Write(offset);
-                offset += pngs[k].Length;
+                w.Write((ushort)1); w.Write((ushort)32); w.Write(data[k].Length); w.Write(offset);
+                offset += data[k].Length;
             }
-            foreach (var png in pngs) w.Write(png);
+            foreach (var e in data) w.Write(e);
         }
         return path;
+    }
+
+    static byte[] Png(Bitmap b) { using (var ms = new MemoryStream()) { b.Save(ms, ImageFormat.Png); return ms.ToArray(); } }
+
+    // An icon image in BMP form: header (double height for the mask), bottom-up BGRA pixels, then an all-clear AND mask.
+    static byte[] Dib(Bitmap b)
+    {
+        int n = b.Width, maskRow = ((n + 31) / 32) * 4;
+        using (var ms = new MemoryStream()) using (var w = new BinaryWriter(ms))
+        {
+            w.Write(40); w.Write(n); w.Write(n * 2); w.Write((ushort)1); w.Write((ushort)32);
+            w.Write(0); w.Write(n * n * 4 + maskRow * n); w.Write(0); w.Write(0); w.Write(0); w.Write(0);
+            for (int y = n - 1; y >= 0; y--)
+                for (int x = 0; x < n; x++) { var c = b.GetPixel(x, y); w.Write(c.B); w.Write(c.G); w.Write(c.R); w.Write(c.A); }
+            w.Write(new byte[maskRow * n]);
+            return ms.ToArray();
+        }
     }
 
     public static void CreateDesktop(int style)
@@ -2583,9 +2612,10 @@ static class Shortcuts
             set("WorkingDirectory", Path.GetDirectoryName(Application.ExecutablePath));
             set("Description", "Kinetik: live PC stats on your taskbar and desktop");
             string ico;
-            try { ico = IconFile(style) + ",0"; } catch { ico = Application.ExecutablePath + ",0"; }
+            try { ico = IconFile(style) + ",0"; } catch (Exception ex) { ico = Application.ExecutablePath + ",0"; Program.Log(ex); }
             set("IconLocation", ico);
             t.InvokeMember("Save", BindingFlags.InvokeMethod, null, lnk, null);
+            SHChangeNotify(0x08000000, 0, IntPtr.Zero, IntPtr.Zero); // SHCNE_ASSOCCHANGED: make Explorer redraw the icon
             Marshal.FinalReleaseComObject(lnk); Marshal.FinalReleaseComObject(shell);
         }
         catch { }
