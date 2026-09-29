@@ -96,7 +96,7 @@ class Settings
     // Behaviour
     public int Interval = 1000, Offset = 0;
     public bool ClickTaskMgr = true, HideFullscreen = true, TrayIcon = true;
-    public bool TrayAnimate = true;
+    public bool TrayAnimate = true, TaskbarButton = false;
     public int AnimFps = 60, TrayStyle = 0, AppBackground = 0; // icon animation frame rate; tray icon background (see TrayIconArt.Styles)
 
     // Every stat that can appear on the bar, in default order. Dividers ("Sep1", "Sep2", ...) are added by the user.
@@ -107,7 +107,7 @@ class Settings
     // The widget has its own order (grouped by hardware) and its own set of stats that are switched on.
     public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower," +
         "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Wifi,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
-    public const string DefaultWidgetItems = "Cpu,CpuTemp,CpuClock,Gpu,GpuTemp,GpuVram,Ram,RamGb,Down,Up";
+    public const string DefaultWidgetItems = "Cpu,CpuTemp,CpuClock,Gpu,GpuTemp,GpuVram,Ram,RamGb,Down,Up,Wifi";
     public static readonly string[] WidgetIds = DefaultWidgetOrder.Split(',');
 
     public static bool IsDivider(string id) { return id.Length > 3 && id.StartsWith("Sep") && id.Substring(3).All(char.IsDigit); }
@@ -1463,7 +1463,12 @@ static class Program
         using (var mutex = new Mutex(true, AppName, out created))
         {
             // When relaunching (e.g. elevated), wait for the previous instance to exit.
-            if (!created && !(args.Contains("--restart") && Wait(mutex))) return;
+            if (!created && !args.Contains("--restart"))
+            {
+                try { EventWaitHandle.OpenExisting(AppName + ".Show").Set(); } catch { }
+                return;
+            }
+            if (!created && !Wait(mutex)) return;
             SetProcessDPIAware();
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -1728,10 +1733,22 @@ class StatsBar : Form
         menu.Items.Add("Exit", null, (s, e) => Close());
 
         Sampler = new Sampler(Cfg, () => { try { BeginInvoke((Action)Render); } catch { } });
-        HandleCreated += (s, e) => { Sampler.Start(); TrimSoon(15000); };
+        HandleCreated += (s, e) => { Sampler.Start(); TrimSoon(15000); ListenForShow(); };
         var animTimer = new System.Windows.Forms.Timer { Interval = 16 };
         animTimer.Tick += (s, e) => { animTimer.Interval = 1000 / Math.Max(10, Cfg.AnimFps); AnimFrame(); };
         animTimer.Start();
+    }
+
+    // Launching Kinetik again (e.g. from the desktop shortcut) signals this event, and the running copy opens Settings.
+    void ListenForShow()
+    {
+        var ev = new EventWaitHandle(false, EventResetMode.AutoReset, Program.AppName + ".Show");
+        var t = new Thread(() =>
+        {
+            while (ev.WaitOne())
+                try { BeginInvoke((Action)(() => OpenSettings(null))); } catch { return; }
+        }) { IsBackground = true };
+        t.Start();
     }
 
     // Trims memory once things have settled (a one-shot timer, so it never runs mid-interaction).
@@ -1757,6 +1774,7 @@ class StatsBar : Form
     {
         if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.Close(); // flushes unsaved settings
         if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; } // otherwise a dead icon lingers until hovered
+        if (taskButton != null) { taskButton.Dispose(); taskButton = null; }
         base.OnFormClosing(e);
     }
 
@@ -1767,16 +1785,31 @@ class StatsBar : Form
     double trayPhase; DateTime trayAt = DateTime.UtcNow;
 
     // Turns the logo's ring in the tray, faster the busier the CPU is.
+    // ---- Optional taskbar button, so Kinetik shows as a running app. Clicking it opens Settings.
+    TaskbarButtonForm taskButton;
+
+    void SyncTaskbarButton()
+    {
+        if (Cfg.TaskbarButton && taskButton == null)
+        {
+            taskButton = new TaskbarButtonForm(this) { Icon = TrayIconArt.Frame(Cfg.TrayStyle, SystemInformation.IconSize.Width, 0) };
+            taskButton.Show();
+        }
+        else if (!Cfg.TaskbarButton && taskButton != null) { taskButton.Dispose(); taskButton = null; }
+        else if (taskButton != null && trayStyle != Cfg.TrayStyle) taskButton.Icon = TrayIconArt.Frame(Cfg.TrayStyle, SystemInformation.IconSize.Width, 0);
+    }
+
     void SpinTray()
     {
         var now = DateTime.UtcNow;
         double dt = Math.Min(0.2, (now - trayAt).TotalSeconds); trayAt = now;
-        if (tray == null || !Cfg.TrayAnimate) return;
-        trayPhase += dt * (0.15 + Sampler.Snap.Cpu / 100 * 1.6); // quarter-turns per second; the ring repeats every 90°
+        if ((tray == null && taskButton == null) || !Cfg.TrayAnimate) return;
+        trayPhase += dt * (0.4 + Sampler.Snap.Cpu / 100 * 4); // thirds of a turn per second
         int f = (int)(trayPhase * TrayIconArt.Frames) % TrayIconArt.Frames;
         if (f == trayFrame) return;
         trayFrame = f;
-        tray.Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, f);
+        if (tray != null) tray.Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, f);
+        if (taskButton != null) taskButton.Icon = TrayIconArt.Frame(trayStyle, SystemInformation.IconSize.Width, f);
     }
     string trayText;
 
@@ -2225,6 +2258,7 @@ class StatsBar : Form
         IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
         SyncWidget();
         if (widget != null) { if (fullscreen && (fsScreen == null || widget.IsOnScreen(fsScreen))) widget.HideNow(); else widget.Render(force); }
+        SyncTaskbarButton();
         SyncTray();
         UpdateTrayText(Sampler.Snap);
 
@@ -2373,17 +2407,18 @@ static class WifiSignal
 }
 
 // ======================================================================= Tray icon artwork
-// The Kinetik logo (rising bars inside a broken spin ring) on a choice of backgrounds, drawn at the tray's exact
-// size. The ring can turn: it repeats every 90°, so a handful of cached frames makes a seamless loop.
+// Kinetik's tray and taskbar icon: a three-bladed fan on a choice of backgrounds, drawn at the exact size needed.
+// It spins with CPU load; the blades repeat every 120°, so a handful of cached frames makes a seamless loop.
 static class TrayIconArt
 {
-    public const int Frames = 6;
+    public const int Frames = 8;
     static readonly Dictionary<string, Icon> cache = new Dictionary<string, Icon>();
 
     // Name → top-left and bottom-right gradient colours; a transparent pair means no tile.
     public static readonly KeyValuePair<string, Color[]>[] Styles =
     {
-        S("Violet to cyan (default)", 255, 108, 76, 255, 255, 0, 198, 255),
+        S("Kinetik orange (default)", 255, 255, 106, 43, 255, 255, 140, 60),
+        S("Violet to cyan", 255, 108, 76, 255, 255, 0, 198, 255),
         S("Ocean blue", 255, 30, 90, 230, 255, 0, 170, 255),
         S("Emerald", 255, 0, 150, 90, 255, 60, 220, 140),
         S("Sunset", 255, 255, 80, 60, 255, 255, 170, 40),
@@ -2400,17 +2435,20 @@ static class TrayIconArt
         return new KeyValuePair<string, Color[]>(n, new[] { Color.FromArgb(a1, r1, g1, b1), Color.FromArgb(a2, r2, g2, b2) });
     }
 
-    // Cached, so a spinning tray icon never allocates new icon handles.
+    // Cached, so a spinning icon never allocates new icon handles.
     public static Icon Frame(int style, int size, int frame)
     {
         style = Math.Max(0, Math.Min(Styles.Length - 1, style));
         var key = style + "|" + size + "|" + frame;
         Icon ic;
         if (!cache.TryGetValue(key, out ic))
-            using (var bmp = Draw(style, size, frame * 90f / Frames))
+            using (var bmp = Draw(style, size, frame * Period / Frames))
                 cache[key] = ic = Icon.FromHandle(bmp.GetHicon());
         return ic;
     }
+
+    // The fan has three blades, so it looks the same every 120°.
+    public const float Period = 120f;
 
     public static Bitmap Draw(int style, int size, float angle)
     {
@@ -2426,33 +2464,107 @@ static class TrayIconArt
             if (!none)
                 using (var tile = Icons.Round(new RectangleF(m, m, s - 2 * m, s - 2 * m), s * 0.23f))
                 using (var grad = new LinearGradientBrush(new RectangleF(0, 0, s, s), st[0], st[1], 45f))
-                using (var hl = new LinearGradientBrush(new RectangleF(0, 0, s, s), Color.FromArgb(70, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f))
-                {
                     g.FillPath(grad, tile);
-                    g.FillPath(hl, tile);
-                }
-            // White on colour; dark on the light tile, or on nothing (where it has to show on light and dark taskbars alike).
-            Color main = light ? Color.FromArgb(40, 40, 50) : Color.White;
-            Color accent = none ? Color.FromArgb(0, 198, 255) : light ? Color.FromArgb(108, 76, 255) : Color.FromArgb(215, 255, 255, 255);
-            float k = none ? 1.14f : 1f;
-
-            // Broken ring: four arcs with gaps, which is what makes the turn visible.
-            float rad = s * 0.36f * k, w = Math.Max(1.2f, s * 0.07f);
-            using (var pen = new Pen(none ? accent : main, w) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                for (int q = 0; q < 4; q++) g.DrawArc(pen, cx - rad, cy - rad, rad * 2, rad * 2, angle + q * 90 + 14, 62);
-
-            // Rising bars, the tallest in full white.
-            float bw = s * 0.11f * k, gap = s * 0.055f * k, x0 = cx - (3 * bw + 2 * gap) / 2, baseY = cy + s * 0.17f * k;
-            float[] hs = { 0.16f, 0.25f, 0.34f };
-            using (var solid = new SolidBrush(main)) using (var soft = new SolidBrush(accent))
-                for (int i = 0; i < 3; i++)
-                {
-                    float h = s * hs[i] * k, x = x0 + i * (bw + gap);
-                    using (var bar = Icons.Round(new RectangleF(x, baseY - h, bw, h), bw * 0.4f)) g.FillPath(i == 2 ? solid : soft, bar);
-                }
+            // White blades on colour; dark on the light tile; orange with no tile, so it shows on light and dark taskbars.
+            Color blade = none ? Color.FromArgb(255, 106, 43) : light ? Color.FromArgb(40, 40, 50) : Color.White;
+            float k = none ? 1.2f : 1f;
+            using (var b = new SolidBrush(blade))
+            {
+                for (int q = 0; q < 3; q++)
+                    using (var path = new GraphicsPath())
+                    using (var mx = new Matrix())
+                    {
+                        path.AddEllipse(cx - s * 0.106f * k, cy - s * (0.1875f + 0.175f) * k, s * 0.212f * k, s * 0.35f * k);
+                        mx.RotateAt(angle + q * 120, new PointF(cx, cy));
+                        path.Transform(mx);
+                        g.FillPath(b, path);
+                    }
+                // Hub: a ring in the tile colour around a small dot.
+                float hr = s * 0.075f * k, dr = s * 0.037f * k;
+                Color hub = none ? Color.White : Mix(st[0], st[1]);
+                using (var hb = new SolidBrush(hub)) g.FillEllipse(hb, cx - hr, cy - hr, hr * 2, hr * 2);
+                g.FillEllipse(b, cx - dr, cy - dr, dr * 2, dr * 2);
+            }
         }
         return bmp;
     }
+
+    static Color Mix(Color a, Color b) { return Color.FromArgb(255, (a.R + b.R) / 2, (a.G + b.G) / 2, (a.B + b.B) / 2); }
+}
+
+// ======================================================================= Taskbar button
+// An invisible window whose only job is to put a Kinetik button on the taskbar. Clicking it opens Settings;
+// "Close window" from its taskbar menu exits Kinetik, like any other app.
+class TaskbarButtonForm : Form
+{
+    readonly StatsBar bar;
+    bool closingApp;
+
+    public TaskbarButtonForm(StatsBar bar)
+    {
+        this.bar = bar;
+        Text = "Kinetik";
+        ShowInTaskbar = true;
+        FormBorderStyle = FormBorderStyle.None;
+        StartPosition = FormStartPosition.Manual;
+        Location = new Point(-32000, -32000);
+        Size = new Size(1, 1);
+        Opacity = 0;
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    protected override void WndProc(ref Message m)
+    {
+        // Clicking the button of the active window asks it to minimise; open Settings instead.
+        if (m.Msg == 0x112 && ((int)m.WParam & 0xFFF0) == 0xF020) { bar.OpenSettings(null); return; }
+        base.WndProc(ref m);
+    }
+
+    protected override void OnActivated(EventArgs e)
+    {
+        base.OnActivated(e);
+        BeginInvoke((Action)(() => bar.OpenSettings(null)));
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (e.CloseReason == CloseReason.UserClosing && !closingApp)
+        {
+            e.Cancel = true;
+            closingApp = true;
+            bar.BeginInvoke((Action)(() => bar.Close()));
+            return;
+        }
+        base.OnFormClosing(e);
+    }
+}
+
+// ======================================================================= Shortcuts
+static class Shortcuts
+{
+    public static string DesktopPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kinetik.lnk"); } }
+
+    public static void CreateDesktop()
+    {
+        try
+        {
+            var shellType = Type.GetTypeFromProgID("WScript.Shell");
+            object shell = Activator.CreateInstance(shellType);
+            object lnk = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { DesktopPath });
+            var t = lnk.GetType();
+            Action<string, object> set = (name, v) => t.InvokeMember(name, BindingFlags.SetProperty, null, lnk, new[] { v });
+            set("TargetPath", Application.ExecutablePath);
+            set("WorkingDirectory", Path.GetDirectoryName(Application.ExecutablePath));
+            set("Description", "Kinetik: live PC stats on your taskbar and desktop");
+            set("IconLocation", Application.ExecutablePath + ",0");
+            t.InvokeMember("Save", BindingFlags.InvokeMethod, null, lnk, null);
+            Marshal.FinalReleaseComObject(lnk); Marshal.FinalReleaseComObject(shell);
+        }
+        catch { }
+    }
+
+    public static void RemoveDesktop() { try { File.Delete(DesktopPath); } catch { } }
 }
 
 // ======================================================================= Icon animation
@@ -5123,8 +5235,12 @@ class SettingsForm : Form
         Switch(Icons.Chip, Theme.Accent, "Left-click opens Task Manager", "ClickTaskMgr");
         Switch(Icons.Monitor, Theme.Accent, "Hide in fullscreen apps", "HideFullscreen", "Games, videos and presentations");
         Switch(Icons.Grid, Theme.Accent, "Show tray icon", "TrayIcon", "Click it for Settings, right-click for the menu");
-        Switch(Icons.Fan, Theme.Accent, "Spinning tray icon", "TrayAnimate", "The logo's ring turns faster the busier your CPU is");
-        Add(Icons.Palette, Theme.Accent, "Tray icon background", null,
+        Switch(Icons.Fan, Theme.Accent, "Spinning icon", "TrayAnimate", "The fan logo in the tray and taskbar spins faster the busier your CPU is");
+        Switch(Icons.Monitor, Theme.Accent, "Show on the taskbar", "TaskbarButton", "A taskbar button like other running apps. Click it for Settings.");
+        var lnk = new Toggle { On = File.Exists(Shortcuts.DesktopPath) };
+        lnk.Changed += (s, e) => { if (lnk.On) Shortcuts.CreateDesktop(); else Shortcuts.RemoveDesktop(); lnk.On = File.Exists(Shortcuts.DesktopPath); };
+        Add(Icons.Star, Theme.Accent, "Desktop shortcut", "Opens Kinetik, or its Settings if it's already running", lnk);
+        Add(Icons.Palette, Theme.Accent, "Icon background", "For the tray icon and the taskbar button",
             Combo(TrayIconArt.Styles.Select(x => x.Key).ToArray(), Math.Max(0, Math.Min(TrayIconArt.Styles.Length - 1, c.TrayStyle)), i => { c.TrayStyle = i; Apply(); }, 170));
 
         Header("Warnings");
