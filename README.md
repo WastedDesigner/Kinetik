@@ -1,19 +1,18 @@
 # Kinetik
 
-*Formerly PC Stats Bar.*
-
 A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It sits just left of the system tray and shows live hardware stats, each with its own icon and colour. Every stat can be switched on or off, reordered, restyled and grouped with dividers.
 
 > **About this project:** I originally made this for my own personal use and decided to share it in case anyone else finds it useful. If you run into a bug or have an idea for a feature, please [open an issue](../../issues). I'll do my best to look into it and implement what I can.
 
 ![Kinetik on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
 
-**Latest version: v1.4.1.** [Download it from Releases](../../releases/latest).
+**Latest version: v2.0.3.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 
 - [Features](#features)
 - [Desktop widget](#desktop-widget)
+- [Game overlay](#game-overlay)
 - [Download and use](#download-and-use)
 - [Settings guide](#settings-guide)
 - [Tips and shortcuts](#tips-and-shortcuts)
@@ -29,7 +28,7 @@ A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It
 
 ### Stats
 
-Each one can be turned on or off. There are 29 in total.
+Each one can be turned on or off. There are 30 in total.
 
 | Category | What it shows |
 |---|---|
@@ -37,11 +36,12 @@ Each one can be turned on or off. There are 29 in total.
 | CPU | Usage, per-core usage bars, clock speed (GHz), temperature\*, package power\* |
 | Memory | RAM usage %, RAM used / total (GB), committed memory % (includes the page file) |
 | GPU (NVIDIA, AMD, Intel) | Usage, temperature, clock speed (MHz), fan speed (% or RPM), VRAM used / total (GB), VRAM usage %, power draw. If you have more than one GPU, you can choose which one to show |
+| Gaming | Frame rate (FPS) of the game or app in front\* (DirectX, OpenGL and Vulkan) |
 | Storage | Disk activity %, read speed, write speed, free space on any drive |
 | System | Running processes, uptime |
 | Batteries | Laptop battery % (with a + while charging), laptop battery time left, and Bluetooth headphones, mice, keyboards and controllers (each with an icon for its device type) |
 
-\* CPU temperature and power need the app to run as administrator ([see below](#cpu-temperature)).
+\* CPU temperature and FPS need the app to run as administrator ([see below](#cpu-temperature)). CPU power also works without admin on most PCs.
 
 ### Customisation
 
@@ -109,6 +109,20 @@ Everything about the widget is set on the **Widget** page in Settings:
 - Sensors, performance counters, the Bluetooth battery scan and ping only run while their stats are switched on. The LibreHardwareMonitor sensor library only loads when a stat needs it, and unloads after a minute when nothing does.
 - Hands unused memory back to Windows after startup and after closing Settings
 
+## Game overlay
+
+A slim strip that stays on top of your game so you can watch your stats while you play, for example:
+
+`FPS 144   CPU 38%   TEMP 71°C   GPU 97%   GTMP 68°C   RAM 52%`
+
+Turn it on from the bar's right-click menu (**Game overlay**), in **Settings → Overlay**, or with **Ctrl+Shift+F10**, which also works from inside a game.
+
+- **FPS counter:** shows the frame rate of whichever app is in front. It counts the frames Windows' graphics system reports, the same way PresentMon does, so it works with DirectX 9–12, OpenGL and Vulkan games without hooking into them. It needs Kinetik to run as administrator.
+- **Its own contents:** choose which stats to show and drag them into any order, with optional dividers. The FPS counter can also go on the bar or the widget.
+- **Your look:** text labels (`CPU`, `GPU`, `FPS`…) or icons, size, and background opacity. Text has a soft shadow so it stays readable over bright scenes.
+- **Moving it:** drag it anywhere. It snaps to the screen's edges and top centre. **Lock position** makes it click-through, so your clicks go to the game. Unlock it from the bar's right-click menu.
+- **Works in:** borderless and windowed games. Exclusive fullscreen owns the whole display, so no overlay can draw over it. Switch the game to borderless (often called "fullscreen windowed") to see it.
+
 ## Download and use
 
 1. Download `Kinetik.exe` from the [Releases](../../releases/latest) page.
@@ -129,6 +143,7 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 | **Arrange** | The order of everything on the bar. Drag rows, click an icon to change it or its colour, **+ Add divider**, remove dividers with ✕, and **Reset order**. Turn off **Show switched-off stats** to list only what's on your taskbar. |
 | **Appearance** | Font and size, one or two lines, spacing sliders (with **Reset spacing**), divider style and height, animated icons and their frame rate, and the background pill's opacity and corner roundness. |
 | **Colours** | Match the taskbar theme, text and warning colours, a colour for each icon group, and the background colour. |
+| **Overlay** | Turn the game overlay on, the Ctrl+Shift+F10 hotkey, lock (click-through), position, text labels or icons, size, background opacity, and its own **Contents** list. |
 | **Widget** | Turn the desktop widget on, and set its placement, lock, click-through and snapping, style, theme, colours, size, width, roundness, shadow, animated icons, title, headings and graph history. Its **Contents** list works like the Arrange page. |
 | **General** | Settings window background colour, update interval, shift left, left-click action, hide in fullscreen, tray icon (spinning, with a choice of backgrounds), taskbar button, desktop shortcut, warning limits, run at startup, restart as administrator, and restore default settings. |
 | **About** | Version number, **Check for updates** (opens the release page if there's a newer version) and copyright. |
@@ -145,20 +160,30 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 ## Tips and shortcuts
 
 - **Tray icon:** click for Settings, right-click for the same menu as the bar. If it's hidden under the **^** arrow, drag it onto the taskbar.
-- **Right-click menu:** Settings…, Arrange stats…, Desktop widget, Unlock desktop widget (when it's locked), Refresh batteries now, Restart as administrator, Exit
+- **Right-click menu:** Settings…, Arrange stats…, Desktop widget, Unlock desktop widget (when it's locked), Game overlay, Unlock game overlay (when it's locked), Refresh batteries now, Restart as administrator, Exit
 - **Widget:** drag to move it, and right-click it for Widget settings, Lock position and Hide widget. If it's locked and click-through, unlock it from the bar's right-click menu.
+- **Game overlay:** **Ctrl+Shift+F10** shows or hides it, even in a game. Right-click it (while unlocked) for Overlay settings, Lock position and Hide overlay.
 - **Arrange page keys:** ↑ / ↓ select a row, **Alt+↑ / Alt+↓** (or Ctrl) move it, **Space** switches it on or off, **Delete** removes a divider
 - **Sliders:** click one first, then use the mouse wheel or ← / → keys for fine adjustments
 - **Text labels instead of icons:** open the icon picker and choose **Text** for a compact, icon-free look
 - **Grouping:** add dividers, then pick a divider style on the Appearance page. **Blank space** gives gaps without lines.
-- **Command line:** `Kinetik.exe --settings Arrange` opens Settings on a specific page (Stats, Arrange, Appearance, Colours, Widget, General or About)
+- **Command line:** `Kinetik.exe --settings Arrange` opens Settings on a specific page (Stats, Arrange, Appearance, Colours, Widget, Overlay, General or About)
 
 ## CPU temperature
 
 Windows doesn't provide CPU temperatures to normal apps, so Kinetik reads them through [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)'s library, which is built into the exe. This requires:
 
 - **Administrator rights:** right-click the bar and choose **Restart as administrator**. To have it start elevated automatically, turn on **Run at startup** while it's running as admin.
-- **The PawnIO driver:** it's installed along with the LibreHardwareMonitor app, or you can get it from [pawnio.eu](https://pawnio.eu).
+- **The PawnIO driver:** it's installed along with the LibreHardwareMonitor app, or you can get it from [pawnio.eu](https://pawnio.eu). If it's missing, **Settings → General** says so and has a **Get PawnIO** button. Restart Kinetik after installing it.
+
+Without these, Kinetik falls back to what Windows provides itself:
+
+- **CPU power** comes from Windows' built-in power meter, which works without admin rights or a driver on most PCs.
+- **CPU temperature** comes from the ACPI thermal zone on PCs that report a believable one, which most laptops do. It's approximate, and the bar's tooltip says so. Desktops usually report a fixed dummy value, which is ignored.
+
+Hover over the bar to see what's missing if the temperature shows `--°C`.
+
+The **FPS counter** also needs administrator rights, because it reads Windows' graphics event tracing.
 
 ## Requirements
 
@@ -176,9 +201,17 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - GPU fan speed shows 0% when the card's fans have stopped at idle, which many cards do.
 - Batteries of devices on proprietary USB dongles (Razer HyperSpeed, Logitech Lightspeed, SteelSeries, etc.) are only visible to their vendor apps, so they aren't shown. The same devices connected over Bluetooth do work.
 - The widget's "On the desktop" placement keeps it behind your windows, but Windows' Show desktop (Win+D) may hide it. If it does, choose **Always on top** instead.
+- The game overlay can't appear over games in exclusive fullscreen. Use borderless or windowed mode.
+- The FPS counter measures the app in front, so it shows `--` on the desktop or in apps that aren't drawing new frames.
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v2.0.3: game overlay and FPS counter
+
+- **New game overlay:** a slim, always-on-top strip of stats for gaming, with its own contents, text labels or icons, click-through lock, and a **Ctrl+Shift+F10** hotkey.
+- **New FPS counter** for DirectX, OpenGL and Vulkan games, on the overlay, the bar or the widget (needs admin).
+- **Fixed CPU power and temperature missing on some laptops:** they now fall back to Windows' own power meter and ACPI thermal zones, and Settings says when the PawnIO driver is missing.
 
 ### v2.0.2
 

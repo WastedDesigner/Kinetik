@@ -1,8 +1,9 @@
-﻿// Kinetik (formerly PC Stats Bar): a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
+﻿// Kinetik: a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
 // Shows network speed and ping, CPU (usage, clock, temp, power, per-core), RAM and commit, GPU (usage, temp, clock,
 // fan, VRAM, power), disk activity / throughput / free space, processes, uptime, and battery levels of the PC and
 // connected Bluetooth devices. Every item can be reordered, given its own icon and colour, and split into groups
 // with dividers. CPU temperature/power come from LibreHardwareMonitorLib (embedded in the exe) and need admin rights.
+// Also a desktop widget, and a game overlay strip with an FPS counter (read from Windows' graphics ETW events).
 // Right-click the bar for Settings. Build: build.bat (uses the .NET Framework compiler built into Windows).
 //
 // Copyright (C) 2026 Akila Sella Hennedige
@@ -38,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("2.0.2.0")]
-[assembly: AssemblyFileVersion("2.0.2.0")]
-[assembly: AssemblyInformationalVersion("2.0.2")]
+[assembly: AssemblyVersion("2.0.3.0")]
+[assembly: AssemblyFileVersion("2.0.3.0")]
+[assembly: AssemblyInformationalVersion("2.0.3")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -56,7 +57,7 @@ class Settings
     public bool Up = true, Down = true, NetTotal = false, Ping = false, Wifi = false;
     public bool Cpu = true, CpuCores = false, CpuClock = true, CpuTemp = true, CpuPower = false;
     public bool Ram = true, RamGb = true, RamCommit = false;
-    public bool Gpu = true, GpuTemp = true, GpuClock = false, GpuFan = false, GpuVram = false, GpuVramPct = false, GpuPower = false;
+    public bool Gpu = true, GpuTemp = true, GpuClock = false, GpuFan = false, GpuVram = false, GpuVramPct = false, GpuPower = false, Fps = false;
     public bool Disk = false, DiskRead = false, DiskWrite = false, DiskFree = false;
     public bool Processes = false, Uptime = false;
     public bool PcBattery = true, BatTime = false, Batteries = true, DeviceNames = false;
@@ -78,6 +79,12 @@ class Settings
     public bool WidgetLocked = false, WidgetClickThrough = false, WidgetSnap = true, WidgetHeadings = true, WidgetHwNames = true, WidgetShadow = true, WidgetAnimate = true, BarAnimate = true;
     public string WidgetTitle = "";
     public Color WidgetBg = Color.FromArgb(0, 0, 0, 0); // fully transparent = the theme's own background colour
+
+    // Game overlay: a slim always-on-top strip with its own stats, for use while gaming
+    public bool OverlayShow = false, OverlayLocked = false, OverlayHotkey = true, OverlayText = true;
+    public string OverlayOrder = DefaultOverlayOrder, OverlayItems = DefaultOverlayItems;
+    public int OverlayX = int.MinValue, OverlayY = int.MinValue; // int.MinValue = top-left corner of the main screen
+    public int OverlayScale = 100, OverlayOpacity = 60;
 
     // Appearance
     public string FontName = DefaultFont();
@@ -104,19 +111,26 @@ class Settings
 
     // Every stat that can appear on the bar, in default order. Dividers ("Sep1", "Sep2", ...) are added by the user.
     public const string DefaultOrder = "Up,Down,NetTotal,Ping,Wifi,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit," +
-        "Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
+        "Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Fps,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
     public static readonly string[] StatIds = DefaultOrder.Split(',');
 
     // The widget has its own order (grouped by hardware) and its own set of stats that are switched on.
-    public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower," +
+    public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Fps," +
         "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Wifi,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
     public const string DefaultWidgetItems = "Cpu,CpuTemp,CpuClock,Gpu,GpuTemp,GpuVram,Ram,RamGb,Down,Up,Wifi";
     public static readonly string[] WidgetIds = DefaultWidgetOrder.Split(',');
+
+    // The game overlay likewise has its own order and selection, with the frame rate first.
+    public const string DefaultOverlayOrder = "Fps,Cpu,CpuTemp,CpuPower,CpuClock,CpuCores,Gpu,GpuTemp,GpuPower,GpuClock,GpuFan,GpuVram,GpuVramPct," +
+        "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Wifi,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
+    public const string DefaultOverlayItems = "Fps,Cpu,CpuTemp,Gpu,GpuTemp,Ram";
+    public static readonly string[] OverlayIds = DefaultOverlayOrder.Split(',');
 
     public static bool IsDivider(string id) { return id.Length > 3 && id.StartsWith("Sep") && id.Substring(3).All(char.IsDigit); }
 
     public List<string> OrderList() { return Merge(Order, StatIds); }
     public List<string> WidgetOrderList() { return Merge(WidgetOrder, WidgetIds); }
+    public List<string> OverlayOrderList() { return Merge(OverlayOrder, OverlayIds); }
 
     static List<string> Merge(string saved, string[] defaults)
     {
@@ -133,7 +147,7 @@ class Settings
 
     public string NewDividerId()
     {
-        var used = OrderList().Concat(WidgetOrderList()).ToList(); // unique across both, so per-divider colours don't clash
+        var used = OrderList().Concat(WidgetOrderList()).Concat(OverlayOrderList()).ToList(); // unique across both, so per-divider colours don't clash
         int n = 1;
         while (used.Contains("Sep" + n)) n++;
         return "Sep" + n;
@@ -152,25 +166,30 @@ class Settings
 
     public bool IsOn(string id) { return IsDivider(id) || (bool)Field(id).GetValue(this); }
 
-    Tuple<string, HashSet<string>> widgetCache; // read from the sampler thread too, so it's swapped as one object
-    public bool WidgetIsOn(string id)
+    Tuple<string, HashSet<string>> widgetCache, overlayCache; // read from the sampler thread too, so each is swapped as one object
+    static bool InItems(string items, ref Tuple<string, HashSet<string>> cache, string id)
     {
         if (IsDivider(id)) return true;
-        var src = WidgetItems ?? "";
-        var cache = widgetCache;
-        if (cache == null || cache.Item1 != src) widgetCache = cache = Tuple.Create(src, new HashSet<string>(src.Split(',')));
-        return cache.Item2.Contains(id);
+        var src = items ?? "";
+        var cc = cache;
+        if (cc == null || cc.Item1 != src) cache = cc = Tuple.Create(src, new HashSet<string>(src.Split(',')));
+        return cc.Item2.Contains(id);
     }
 
-    public void SetWidgetOn(string id, bool on)
+    static string WithItem(string items, string id, bool on)
     {
-        var set = (WidgetItems ?? "").Split(',').Where(x => x != "" && x != id).ToList();
+        var set = (items ?? "").Split(',').Where(x => x != "" && x != id).ToList();
         if (on) set.Add(id);
-        WidgetItems = string.Join(",", set);
+        return string.Join(",", set);
     }
 
-    // True when the bar or the widget shows this stat, i.e. when it needs measuring.
-    public bool Wants(string id) { return IsOn(id) || (WidgetShow && WidgetIsOn(id)); }
+    public bool WidgetIsOn(string id) { return InItems(WidgetItems, ref widgetCache, id); }
+    public void SetWidgetOn(string id, bool on) { WidgetItems = WithItem(WidgetItems, id, on); }
+    public bool OverlayIsOn(string id) { return InItems(OverlayItems, ref overlayCache, id); }
+    public void SetOverlayOn(string id, bool on) { OverlayItems = WithItem(OverlayItems, id, on); }
+
+    // True when the bar, the widget or the overlay shows this stat, i.e. when it needs measuring.
+    public bool Wants(string id) { return IsOn(id) || (WidgetShow && WidgetIsOn(id)) || (OverlayShow && OverlayIsOn(id)); }
 
     // ---- Per-item icon / colour overrides
     string customSrc;
@@ -227,6 +246,7 @@ class Settings
         WidgetWidth = cl(WidgetWidth, 120, 2000); WidgetScale = cl(WidgetScale, 30, 400); WidgetOpacity = cl(WidgetOpacity, 0, 100);
         WidgetRound = cl(WidgetRound, 0, 400); WidgetGraphSecs = cl(WidgetGraphSecs, 10, 600);
         WidgetStyle = cl(WidgetStyle, 0, 3); WidgetTheme = cl(WidgetTheme, 0, 2); WidgetLayer = cl(WidgetLayer, 0, 2);
+        OverlayScale = cl(OverlayScale, 30, 400); OverlayOpacity = cl(OverlayOpacity, 0, 100);
         PillOpacity = cl(PillOpacity, 0, 100); PillRound = cl(PillRound, 0, 400);
         GapStats = cl(GapStats, 0, 400); GapIcon = cl(GapIcon, 0, 400); EdgePad = cl(EdgePad, 0, 400);
         IconScale = cl(IconScale, 20, 400); RowGap = cl(RowGap, 0, 50);
@@ -325,6 +345,8 @@ class Snapshot
     public int Processes = -1, Ping = -1; // Ping: -1 = no reply yet, -2 = timed out
     public double Uptime;
     public string CpuName = "", CpuTempStatus = "";
+    public double Fps = double.NaN; // frame rate of the app in the foreground
+    public string FpsApp = "", FpsStatus = "";
 }
 
 // Reads sensors through LibreHardwareMonitorLib: CPU temperature/power (needs admin + PawnIO driver)
@@ -448,6 +470,147 @@ class HwSensors
     }
 }
 
+// Frame rate of the foreground app, counted from the graphics stack's own ETW events (the ones PresentMon uses):
+// DXGI and D3D9 "Present" calls for DirectX 9–12 games, and the kernel's present events for OpenGL and Vulkan.
+// A real-time trace session needs admin. It only runs while the FPS stat is shown.
+class FpsMeter
+{
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] static extern int StartTraceW(out ulong handle, string name, IntPtr props);
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] static extern int ControlTraceW(ulong handle, string name, IntPtr props, int code);
+    [DllImport("advapi32.dll")] static extern int EnableTraceEx2(ulong handle, ref Guid provider, int control, byte level, ulong any, ulong all, int timeout, IntPtr param);
+    [DllImport("advapi32.dll")] static extern ulong OpenTraceW(IntPtr logfile);
+    [DllImport("advapi32.dll")] static extern int ProcessTrace(ulong[] handles, int count, IntPtr start, IntPtr end);
+    [DllImport("advapi32.dll")] static extern int CloseTrace(ulong handle);
+    delegate void RecordCallback(IntPtr record);
+
+    const string SessionName = "Kinetik FPS";
+    static readonly Guid Dxgi = new Guid("ca11c036-0102-4a2d-a6ad-f03cfed5d3c9");
+    static readonly Guid D3d9 = new Guid("783aca0a-790e-4d7f-8451-aa850511c6b9");
+    static readonly Guid DxgKrnl = new Guid("802ec45a-1e99-4b83-9920-87c98277ba9d");
+    const int Sources = 7; // 0 DXGI present, 1 D3D9 present, 2-6 kernel blit / flip / present history / present / detailed history
+
+    // Present timestamps (QPC ticks) of one process, per source, for the last couple of seconds.
+    class Proc { public readonly Queue<long>[] Times = new Queue<long>[Sources]; public long Last; }
+
+    readonly Dictionary<int, Proc> procs = new Dictionary<int, Proc>();
+    readonly RecordCallback callback;
+    ulong session, trace = ulong.MaxValue;
+    bool exitHooked;
+    public string Error = "";
+
+    public FpsMeter() { callback = OnEvent; }
+
+    // EVENT_TRACE_PROPERTIES followed by room for the session name.
+    static IntPtr Properties()
+    {
+        const int size = 120 + 1024;
+        var p = Marshal.AllocHGlobal(size);
+        for (int i = 0; i < size; i++) Marshal.WriteByte(p, i, 0);
+        Marshal.WriteInt32(p, 0, size);     // Wnode.BufferSize
+        Marshal.WriteInt32(p, 40, 1);       // Wnode.ClientContext: QPC timestamps
+        Marshal.WriteInt32(p, 44, 0x20000); // Wnode.Flags: WNODE_FLAG_TRACED_GUID
+        Marshal.WriteInt32(p, 48, 64);      // BufferSize in KB
+        Marshal.WriteInt32(p, 64, 0x100);   // LogFileMode: EVENT_TRACE_REAL_TIME_MODE
+        Marshal.WriteInt32(p, 68, 1);       // FlushTimer: deliver events at least every second
+        Marshal.WriteInt32(p, 116, 120);    // LoggerNameOffset
+        return p;
+    }
+
+    static void StopSession()
+    {
+        var p = Properties();
+        try { ControlTraceW(0, SessionName, p, 1); } finally { Marshal.FreeHGlobal(p); } // EVENT_TRACE_CONTROL_STOP
+    }
+
+    public bool Start()
+    {
+        var p = Properties();
+        try
+        {
+            int err = StartTraceW(out session, SessionName, p);
+            if (err == 183) { StopSession(); err = StartTraceW(out session, SessionName, p); } // left over from a crash
+            if (err != 0) { session = 0; Error = err == 5 ? "needs admin" : "couldn't start (error " + err + ")"; return false; }
+        }
+        finally { Marshal.FreeHGlobal(p); }
+        if (!exitHooked) { exitHooked = true; AppDomain.CurrentDomain.ProcessExit += (s, e) => Stop(); } // the session would otherwise outlive Kinetik
+
+        var dxgi = Dxgi; var d3d9 = D3d9; var krnl = DxgKrnl;
+        EnableTraceEx2(session, ref dxgi, 1, 4, 0x2, 0, 0, IntPtr.Zero);       // "Events" keyword: Present start / stop
+        EnableTraceEx2(session, ref d3d9, 1, 4, 0x2, 0, 0, IntPtr.Zero);
+        EnableTraceEx2(session, ref krnl, 1, 4, 0x8000000, 0, 0, IntPtr.Zero); // "Present" keyword only
+
+        // EVENT_TRACE_LOGFILEW (448 bytes on x64): logger name, process mode, event record callback.
+        var log = Marshal.AllocHGlobal(448);
+        var name = Marshal.StringToHGlobalUni(SessionName);
+        for (int i = 0; i < 448; i++) Marshal.WriteByte(log, i, 0);
+        Marshal.WriteIntPtr(log, 8, name);
+        Marshal.WriteInt32(log, 28, 0x100 | 0x10000000); // PROCESS_TRACE_MODE_REAL_TIME | EVENT_RECORD
+        Marshal.WriteIntPtr(log, 424, Marshal.GetFunctionPointerForDelegate(callback));
+        trace = OpenTraceW(log);
+        Marshal.FreeHGlobal(log); Marshal.FreeHGlobal(name);
+        if (trace == ulong.MaxValue) { Error = "couldn't open the trace"; Stop(); return false; }
+
+        var t = trace;
+        new Thread(() => { try { ProcessTrace(new[] { t }, 1, IntPtr.Zero, IntPtr.Zero); } catch { } }) { IsBackground = true, Name = "FPS" }.Start();
+        return true;
+    }
+
+    public void Stop()
+    {
+        if (trace != ulong.MaxValue) { CloseTrace(trace); trace = ulong.MaxValue; }
+        if (session != 0) { StopSession(); session = 0; }
+    }
+
+    // Runs on the trace thread for every event. Reads EVENT_RECORD's header directly.
+    void OnEvent(IntPtr rec)
+    {
+        int provider = Marshal.ReadInt32(rec, 24), id = Marshal.ReadInt16(rec, 40) & 0xFFFF, src; // ProviderId.Data1, EventDescriptor.Id
+        if (provider == unchecked((int)0xca11c036)) { if (id != 42) return; src = 0; }
+        else if (provider == 0x783aca0a) { if (id != 1) return; src = 1; }
+        else if (provider == unchecked((int)0x802ec45a))
+        {
+            switch (id) { case 166: src = 2; break; case 168: src = 3; break; case 171: src = 4; break; case 184: src = 5; break; case 215: src = 6; break; default: return; }
+        }
+        else return;
+        int pid = Marshal.ReadInt32(rec, 12);
+        long ts = Marshal.ReadInt64(rec, 16), keep = ts - 2 * Stopwatch.Frequency;
+        lock (procs)
+        {
+            Proc p;
+            if (!procs.TryGetValue(pid, out p)) procs[pid] = p = new Proc();
+            var q = p.Times[src] ?? (p.Times[src] = new Queue<long>());
+            q.Enqueue(ts);
+            while (q.Count > 0 && q.Peek() < keep) q.Dequeue();
+            p.Last = Math.Max(p.Last, ts);
+        }
+    }
+
+    // Frames per second over the last second of the process's presents, or NaN when it isn't presenting.
+    // An app's DirectX presents are preferred; otherwise the busiest kernel event type (each fires about once per frame).
+    public double Read(int pid)
+    {
+        long now = Stopwatch.GetTimestamp(), f = Stopwatch.Frequency;
+        lock (procs)
+        {
+            foreach (var dead in procs.Where(kv => now - kv.Value.Last > 10 * f).Select(kv => kv.Key).ToList()) procs.Remove(dead);
+            Proc p;
+            if (!procs.TryGetValue(pid, out p) || now - p.Last > 3 * f) return double.NaN; // events can arrive up to a second late
+            double best = double.NaN;
+            for (int src = 0; src < Sources; src++)
+            {
+                var q = p.Times[src];
+                if (q == null || q.Count < 2) continue;
+                long last = q.Last(), from = last - f;
+                var recent = q.Where(t => t >= from).ToList();
+                double fps = recent.Count < 2 ? 0 : (recent.Count - 1) * (double)f / (last - recent[0]);
+                if (src <= 1 && fps > 0) return fps;
+                if (src > 1 && (double.IsNaN(best) || fps > best)) best = fps;
+            }
+            return best;
+        }
+    }
+}
+
 // A performance counter that only exists while its stat is shown, so hidden stats cost nothing.
 class LazyCounter
 {
@@ -489,6 +652,8 @@ class Sampler
     }
     [DllImport("kernel32.dll")] static extern bool GlobalMemoryStatusEx([In, Out] MEMSTATUS m);
     [DllImport("kernel32.dll")] static extern ulong GetTickCount64();
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
 
     // NVIDIA driver's management library (ships with the driver in System32).
     [StructLayout(LayoutKind.Sequential)] struct NvUtil { public uint Gpu, Mem; }
@@ -527,7 +692,10 @@ class Sampler
     readonly LazyCounter diskRead = new LazyCounter(new[] { "PhysicalDisk", "Disk Read Bytes/sec", "_Total" });
     readonly LazyCounter diskWrite = new LazyCounter(new[] { "PhysicalDisk", "Disk Write Bytes/sec", "_Total" });
     readonly LazyCounter procCount = new LazyCounter(new[] { "System", "Processes", "" });
-    List<PerformanceCounter> cores;
+    // Windows' own CPU package power meter (RAPL, in mW). Needs no admin or driver, so it covers PCs where
+    // LibreHardwareMonitor can't read the CPU (no PawnIO, not elevated, or a CPU it doesn't know yet).
+    readonly LazyCounter cpuPkgPower = new LazyCounter(new[] { "Energy Meter", "Power", "RAPL_Package0_PKG" });
+    List<PerformanceCounter> cores, thermalZones;
     double maxMhz;
     string cpuName = "";
     IntPtr gpu = IntPtr.Zero; string gpuName = "";
@@ -536,6 +704,7 @@ class Sampler
     long lastRx, lastTx; DateTime lastNet = DateTime.MinValue;
 
     HwSensors sensors; string sensorStatus = ""; bool sensorsFailed;
+    FpsMeter fpsMeter; string fpsError; uint fpsPid; string fpsApp = "";
     DateTime sensorsIdleSince = DateTime.MaxValue;
     volatile bool gpuScanRequested;
     volatile List<string> lhmGpus = new List<string>();
@@ -619,18 +788,31 @@ class Sampler
 
         UpdateSensors(now);
         if (AnyGpuStat) ReadGpu(s);
+        ReadFps(s, c.Wants("Fps"));
 
+        bool wantCpuSensors = c.Wants("CpuTemp") || c.Wants("CpuPower");
         if (!Program.IsAdmin) sensorStatus = "needs admin – right-click → Restart as administrator";
-        else if (sensors != null && sensors.HasCpu && (c.Wants("CpuTemp") || c.Wants("CpuPower")))
+        else if (sensors != null && sensors.HasCpu && wantCpuSensors)
         {
             try
             {
                 sensors.ReadCpu(out s.CpuTemp, out s.CpuPower);
-                sensorStatus = double.IsNaN(s.CpuTemp) ? "no temperature sensor reported (is the PawnIO driver installed?)" : "";
+                sensorStatus = !double.IsNaN(s.CpuTemp) ? ""
+                    : Program.PawnIOInstalled ? "no temperature sensor reported for this CPU"
+                    : "the PawnIO driver isn't installed – get it from pawnio.eu";
             }
             catch (Exception e) { sensorStatus = "read failed (" + e.Message + ")"; }
         }
-        s.CpuTempStatus = sensorStatus;
+        v = cpuPkgPower.Read(wantCpuSensors && double.IsNaN(s.CpuPower));
+        if (!double.IsNaN(v) && v > 0) s.CpuPower = v / 1000; // mW → W
+        string status = sensorStatus;
+        if (double.IsNaN(s.CpuTemp))
+        {
+            s.CpuTemp = ReadThermalZone(c.Wants("CpuTemp"));
+            if (!double.IsNaN(s.CpuTemp)) status = "approximate, from the ACPI thermal zone" + (sensorStatus != "" ? " (" + sensorStatus + ")" : "");
+        }
+        else ReadThermalZone(false);
+        s.CpuTempStatus = status;
 
         if (c.Wants("DiskFree")) { ReadFree(now); s.FreeGb = freeGb; s.FreePct = freePct; s.FreeName = freeName; }
         ManagePing();
@@ -640,6 +822,33 @@ class Sampler
         ManageBatteries();
         s.Uptime = GetTickCount64() / 1000.0;
         return s;
+    }
+
+    // The trace session starts when the FPS stat is first shown and stops when nothing shows it.
+    void ReadFps(Snapshot s, bool wanted)
+    {
+        if (!wanted)
+        {
+            if (fpsMeter != null) { fpsMeter.Stop(); fpsMeter = null; }
+            fpsError = null;
+            return;
+        }
+        if (!Program.IsAdmin) { s.FpsStatus = "needs admin – right-click → Restart as administrator"; return; }
+        if (fpsMeter == null && fpsError == null)
+        {
+            var m = new FpsMeter();
+            if (m.Start()) fpsMeter = m; else fpsError = m.Error;
+        }
+        if (fpsMeter == null) { s.FpsStatus = fpsError; return; }
+        uint pid;
+        GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+        if (pid != fpsPid)
+        {
+            fpsPid = pid; fpsApp = "";
+            try { using (var p = Process.GetProcessById((int)pid)) fpsApp = p.ProcessName; } catch { }
+        }
+        s.Fps = fpsMeter.Read((int)pid);
+        s.FpsApp = fpsApp;
     }
 
     double[] ReadCores(bool wanted)
@@ -667,6 +876,38 @@ class Sampler
             return new double[0];
         }
         return cores.Select(pc => { try { return Clamp(pc.NextValue()); } catch { return 0.0; } }).ToArray();
+    }
+
+    // Fallback CPU temperature: the hottest ACPI thermal zone, which on most laptops sits on or next to the CPU.
+    // Desktops often report a fixed dummy value (e.g. 17 °C), so readings outside a believable range are ignored.
+    double ReadThermalZone(bool wanted)
+    {
+        if (!wanted)
+        {
+            if (thermalZones != null) { foreach (var pc in thermalZones) pc.Dispose(); thermalZones = null; }
+            return double.NaN;
+        }
+        if (thermalZones == null)
+        {
+            thermalZones = new List<PerformanceCounter>();
+            try
+            {
+                foreach (var n in new PerformanceCounterCategory("Thermal Zone Information").GetInstanceNames())
+                    thermalZones.Add(new PerformanceCounter("Thermal Zone Information", "Temperature", n, true));
+            }
+            catch { }
+        }
+        double best = double.NaN;
+        foreach (var pc in thermalZones)
+        {
+            try
+            {
+                double t = pc.NextValue() - 273.15; // Kelvin
+                if (t >= 25 && t <= 120 && (double.IsNaN(best) || t > best)) best = t;
+            }
+            catch { }
+        }
+        return best;
     }
 
     // The adapter list is cached (enumerating it allocates a lot) and refreshed every 30 s or when the network changes.
@@ -1451,6 +1692,7 @@ static class Stats
         { "GpuVram", new[] { "VRAM used (GB)", "Memory chip", "GpuColor", "VRAM" } },
         { "GpuVramPct", new[] { "VRAM usage %", "Memory chip", "GpuColor", "VRAM" } },
         { "GpuPower", new[] { "GPU power draw", "Plug", "GpuColor", "GPWR" } },
+        { "Fps", new[] { "Frame rate (FPS)", "Monitor", "GpuColor", "FPS" } },
         { "Disk", new[] { "Disk activity", "Drive", "DiskColor", "DISK" } },
         { "DiskRead", new[] { "Disk read speed", "Drive read", "DiskColor", "RD" } },
         { "DiskWrite", new[] { "Disk write speed", "Drive write", "DiskColor", "WR" } },
@@ -1482,6 +1724,14 @@ static class Program
 {
     public const string AppName = "Kinetik", LegacyName = "PCStatsBar";
     public static readonly bool IsAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+
+    // LibreHardwareMonitor reads CPU temperature and power through the PawnIO kernel driver.
+    public static readonly bool PawnIOInstalled = CheckPawnIO();
+    static bool CheckPawnIO()
+    {
+        try { using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\PawnIO")) return k != null; }
+        catch { return false; }
+    }
     static readonly Dictionary<string, Assembly> loaded = new Dictionary<string, Assembly>();
 
     [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
@@ -1836,9 +2086,20 @@ class StatsBar : Form
         widgetItem.Click += (s, e) => SetWidget(!Cfg.WidgetShow);
         var unlockItem = new ToolStripMenuItem("Unlock desktop widget");
         unlockItem.Click += (s, e) => { Cfg.WidgetLocked = false; Cfg.Save(); Render(true); NotifySettings("Widget"); };
+        var overlayItem = new ToolStripMenuItem("Game overlay");
+        overlayItem.Click += (s, e) => SetOverlay(!Cfg.OverlayShow);
+        var unlockOverlay = new ToolStripMenuItem("Unlock game overlay");
+        unlockOverlay.Click += (s, e) => { Cfg.OverlayLocked = false; Cfg.Save(); Render(true); NotifySettings("Overlay"); };
         menu.Items.Add(widgetItem);
         menu.Items.Add(unlockItem);
-        menu.Opening += (s, e) => { widgetItem.Checked = Cfg.WidgetShow; unlockItem.Visible = Cfg.WidgetShow && Cfg.WidgetLocked; };
+        menu.Items.Add(overlayItem);
+        menu.Items.Add(unlockOverlay);
+        menu.Opening += (s, e) =>
+        {
+            widgetItem.Checked = Cfg.WidgetShow; unlockItem.Visible = Cfg.WidgetShow && Cfg.WidgetLocked;
+            overlayItem.Checked = Cfg.OverlayShow; overlayItem.ShortcutKeyDisplayString = Cfg.OverlayHotkey ? "Ctrl+Shift+F10" : null;
+            unlockOverlay.Visible = Cfg.OverlayShow && Cfg.OverlayLocked;
+        };
         menu.Items.Add("Refresh batteries now", null, (s, e) => ThreadPool.QueueUserWorkItem(_ => Sampler.ReadBatteries()));
         if (!Program.IsAdmin) menu.Items.Add("Restart as administrator (CPU temp)", null, (s, e) => Program.RestartAsAdmin());
         menu.Items.Add(new ToolStripSeparator());
@@ -1965,6 +2226,7 @@ class StatsBar : Form
         if (disposing && tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
         surface.Dispose();
         if (disposing && widget != null) widget.Dispose();
+        if (disposing && overlay != null) overlay.Dispose();
         if (disposing) { DisposeFonts(); if (measureG != null) { measureG.Dispose(); measureBmp.Dispose(); } brush.Dispose(); }
         base.Dispose(disposing);
     }
@@ -1990,8 +2252,8 @@ class StatsBar : Form
     }
 
     // ---- Layout model ----
-    class Part { public string Text, Template; public Color Color; public bool Bold; public float W; }
-    class Seg
+    public class Part { public string Text, Template; public Color Color; public bool Bold; public float W; }
+    public class Seg
     {
         public IconFn Icon; public string Label; public Color IconColor; public float LabelW;
         public string Id; public double Act; // what the icon's animation follows
@@ -2030,19 +2292,20 @@ class StatsBar : Form
         return t.Minutes + "m";
     }
 
-    List<Seg> BuildSegments(Snapshot s, Color val, Color dim)
+    // The stats in ids that isOn accepts, as segments. Shared with the game overlay, which can force text labels.
+    public List<Seg> BuildSegments(Snapshot s, Color val, Color dim, List<string> ids, Func<string, bool> isOn, bool textLabels)
     {
         var c = Cfg;
         var segs = new List<Seg>();
         Func<double, int, Color> warn = (v, limit) => v >= limit ? c.WarnColor : val;
 
-        foreach (var id in c.OrderList())
+        foreach (var id in ids)
         {
-            if (!c.IsOn(id)) continue;
+            if (!isOn(id)) continue;
             var info = Stats.Get(id, c);
-            bool customIcon = c.IconOf(id) != "";
+            bool customIcon = c.IconOf(id) != "", asText = textLabels || info.TextLabel;
             double act = IconAnim.Activity(id, s);
-            Func<Seg> seg = () => new Seg { Icon = info.Icon, Label = info.TextLabel ? info.Short : null, IconColor = info.Color, Id = id, Act = act };
+            Func<Seg> seg = () => new Seg { Icon = info.Icon, Label = asText ? info.Short : null, IconColor = info.Color, Id = id, Act = act };
             Action<string, string, Color> add = (text, template, color) =>
             {
                 var sg = seg();
@@ -2080,6 +2343,12 @@ class StatsBar : Form
                     if (s.HasGpu && s.VramTotal > 0) { double p = s.VramUsed * 100 / s.VramTotal; add(p.ToString("0") + "%", "100%", warn(p, c.WarnRam)); }
                     break;
                 case "GpuPower": if (s.HasGpu) add(s.GpuPower.ToString("0") + " W", "888 W", val); break;
+                case "Fps":
+                {
+                    string v = double.IsNaN(s.Fps) ? "--" : s.Fps.ToString("0");
+                    add(asText ? v : v + " fps", asText ? "888" : "888 fps", double.IsNaN(s.Fps) ? dim : val); // "FPS 144", not "FPS 144 fps"
+                    break;
+                }
                 case "Disk": if (s.Disk >= 0) add(s.Disk.ToString("0") + "%", "100%", warn(s.Disk, 95)); break;
                 case "DiskRead": if (s.DiskRead >= 0) add(Speed(s.DiskRead), "88.8 MB/s", val); break;
                 case "DiskWrite": if (s.DiskWrite >= 0) add(Speed(s.DiskWrite), "88.8 MB/s", val); break;
@@ -2207,7 +2476,7 @@ class StatsBar : Form
             val = light ? Color.FromArgb(20, 20, 20) : Color.White;
             dim = light ? Color.FromArgb(95, 95, 100) : Color.FromArgb(150, 150, 160);
         }
-        var segs = BuildSegments(Sampler.Snap, val, dim);
+        var segs = BuildSegments(Sampler.Snap, val, dim, Cfg.OrderList(), Cfg.IsOn, false);
         if (segs.Count == 0) segs.Add(new Seg { Icon = Icons.Gear, IconColor = dim, Parts = { new Part { Text = "Right-click for settings", Template = "", Color = dim } } });
 
         float fontPx = FontPx(height);
@@ -2374,6 +2643,9 @@ class StatsBar : Form
         IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
         SyncWidget();
         if (widget != null) { if (fullscreen && (fsScreen == null || widget.IsOnScreen(fsScreen))) widget.HideNow(); else widget.Render(force); }
+        SyncOverlay();
+        if (overlay != null) overlay.Render(force); // made for games, so it stays up in fullscreen
+        SyncHotkey();
         SyncTaskbarButton();
         SyncTray();
         UpdateTrayText(Sampler.Snap);
@@ -2408,6 +2680,7 @@ class StatsBar : Form
         if (s.CpuName != "") sb.AppendLine("CPU: " + s.CpuName);
         if (s.CpuTempStatus != "" && (Cfg.CpuTemp || Cfg.CpuPower)) sb.AppendLine("CPU temp: " + s.CpuTempStatus);
         if (s.HasGpu) sb.AppendLine("GPU: " + s.GpuName);
+        if (Cfg.Fps) sb.AppendLine("FPS: " + (s.FpsStatus != "" ? s.FpsStatus : s.FpsApp != "" ? s.FpsApp : "the app in front"));
         if (Cfg.Ping) sb.AppendLine("Ping: " + Cfg.PingHost);
         if (Cfg.Wifi && s.WifiName != "") sb.AppendLine("Wi-Fi: " + s.WifiName);
         if (Cfg.DiskFree && s.FreeName != "") sb.AppendLine("Free space: " + s.FreeName + " (" + s.FreePct.ToString("0") + "% free)");
@@ -2453,6 +2726,39 @@ class StatsBar : Form
         Cfg.WidgetShow = on;
         Cfg.Save();
         BeginInvoke((Action)(() => { Render(true); NotifySettings("Widget"); }));
+    }
+
+    // ---- Game overlay, plus a global hotkey to show or hide it without leaving the game.
+    OverlayForm overlay;
+    [DllImport("user32.dll")] static extern bool RegisterHotKey(IntPtr h, int id, uint mods, uint key);
+    [DllImport("user32.dll")] static extern bool UnregisterHotKey(IntPtr h, int id);
+    bool hotkeyOn;
+
+    void SyncOverlay()
+    {
+        if (overlay != null && !Cfg.OverlayShow) { overlay.Close(); overlay.Dispose(); overlay = null; }
+        if (Cfg.OverlayShow && overlay == null) { overlay = new OverlayForm(this); overlay.Show(); }
+    }
+
+    public void SetOverlay(bool on)
+    {
+        Cfg.OverlayShow = on;
+        Cfg.Save();
+        BeginInvoke((Action)(() => { Render(true); NotifySettings("Overlay"); }));
+    }
+
+    void SyncHotkey()
+    {
+        if (!IsHandleCreated || Cfg.OverlayHotkey == hotkeyOn) return;
+        if (Cfg.OverlayHotkey) hotkeyOn = RegisterHotKey(Handle, 1, 0x2 | 0x4 | 0x4000, (uint)Keys.F10); // Ctrl+Shift, no auto-repeat
+        else { UnregisterHotKey(Handle, 1); hotkeyOn = false; }
+        if (Cfg.OverlayHotkey && !hotkeyOn) Cfg.OverlayHotkey = false; // another app already has it
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == 0x312 && m.WParam.ToInt32() == 1) { SetOverlay(!Cfg.OverlayShow); return; } // WM_HOTKEY
+        base.WndProc(ref m);
     }
 
     // Keeps an open Settings page in step with changes made from a right-click menu.
@@ -2884,6 +3190,7 @@ class IconAnim
             case "GpuFan": return s.GpuFan < 0 ? 0 : Clamp(s.GpuFanRpm ? s.GpuFan / 3200 : s.GpuFan / 100);
             case "GpuVram": case "GpuVramPct": return s.VramTotal > 0 ? Clamp(s.VramUsed / s.VramTotal) : 0;
             case "GpuPower": return Clamp(s.GpuPower / 350);
+            case "Fps": return double.IsNaN(s.Fps) ? 0 : Clamp(s.Fps / 144);
             case "Processes": return Clamp(s.Processes / 600.0);
             case "PcBattery": return SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online ? 0.6 : 0.1;
             case "DiskFree": return 0.1;
@@ -3763,7 +4070,7 @@ class WidgetForm : Form
         if (id == "Up" || id == "Down" || id == "NetTotal" || id == "Ping" || id == "Wifi") return "Network";
         if (id.StartsWith("Cpu")) return "Processor";
         if (id.StartsWith("Ram")) return "Memory";
-        if (id.StartsWith("Gpu")) return "Graphics";
+        if (id.StartsWith("Gpu") || id == "Fps") return "Graphics";
         if (id.StartsWith("Disk")) return "Storage";
         if (id == "Processes" || id == "Uptime") return "System";
         return "Battery";
@@ -3860,6 +4167,13 @@ class WidgetForm : Form
                 if (s.HasGpu && s.VramTotal > 0) { double p = s.VramUsed * 100 / s.VramTotal; Pct(row("VRAM usage", p.ToString("0") + "%"), p, c.WarnRam); }
                 break;
             case "GpuPower": if (s.HasGpu) Graph(row("GPU power", s.GpuPower.ToString("0") + " W"), s.GpuPower, 0, 10); break;
+            case "Fps":
+            {
+                string label = s.FpsApp != "" ? "Frame rate (" + s.FpsApp + ")" : "Frame rate";
+                if (double.IsNaN(s.Fps)) { r = row(label, "-- fps"); r.Dim = true; }
+                else Graph(row(label, s.Fps.ToString("0") + " fps"), s.Fps, 0, 30);
+                break;
+            }
             case "Disk": if (s.Disk >= 0) Pct(row("Disk activity", s.Disk.ToString("0") + "%"), s.Disk, 95); break;
             case "DiskRead": if (s.DiskRead >= 0) Graph(row("Disk read", StatsBar.Speed(s.DiskRead)), s.DiskRead, 0, 10240); break;
             case "DiskWrite": if (s.DiskWrite >= 0) Graph(row("Disk write", StatsBar.Speed(s.DiskWrite)), s.DiskWrite, 0, 10240); break;
@@ -4142,6 +4456,287 @@ class WidgetForm : Form
                 g.FillPath(fill, path);
         }
         using (var p = new Pen(col, Math.Max(1.2f, 1.5f * u)) { LineJoin = LineJoin.Round }) g.DrawLines(p, pts);
+    }
+}
+
+// ======================================================================= Game overlay
+// A slim always-on-top strip of stats for gaming: one line of text over a see-through backdrop, in the corner of the screen.
+// It shows over games running borderless or windowed. Exclusive fullscreen owns the whole display, so nothing can draw over it.
+class OverlayForm : Form
+{
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
+    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int i, int v);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+
+    readonly StatsBar bar;
+    readonly Settings c;
+    readonly DibSurface surface = new DibSurface();
+    readonly ContextMenuStrip menu = new ContextMenuStrip();
+    readonly SolidBrush brush = new SolidBrush(Color.White);
+    readonly IconAnim anim = new IconAnim();
+    readonly System.Windows.Forms.Timer animTimer = new System.Windows.Forms.Timer { Interval = 16 };
+    readonly Bitmap measureBmp = new Bitmap(1, 1);
+    readonly Graphics measureG;
+    List<StatsBar.Seg> segs = new List<StatsBar.Seg>();
+    string lastKey;
+    int winW, winH;
+    bool dragging, clickThrough;
+    Point grab;
+    Font font, bold; float fontPx, u = 1;
+    float iconSz, iconGap, partGap, segGap, pad, barW, barGap;
+    static readonly StringFormat Fmt = MakeFormat();
+
+    static StringFormat MakeFormat()
+    {
+        var f = (StringFormat)StringFormat.GenericTypographic.Clone();
+        f.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoWrap;
+        return f;
+    }
+
+    public OverlayForm(StatsBar bar)
+    {
+        this.bar = bar; c = bar.Cfg;
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        StartPosition = FormStartPosition.Manual;
+        clickThrough = c.OverlayLocked;
+        measureG = Graphics.FromImage(measureBmp);
+
+        menu.Renderer = new DarkMenuRenderer();
+        var lockItem = new ToolStripMenuItem("Lock position (click-through)");
+        lockItem.Click += (s, e) => { c.OverlayLocked = !c.OverlayLocked; c.Save(); bar.NotifySettings("Overlay"); Render(true); };
+        menu.Opening += (s, e) => lockItem.Checked = c.OverlayLocked;
+        menu.Items.Add("Overlay settings…", null, (s, e) => bar.OpenSettings("Overlay"));
+        menu.Items.Add(lockItem);
+        menu.Items.Add("Hide overlay", null, (s, e) => bar.SetOverlay(false));
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Kinetik settings…", null, (s, e) => bar.OpenSettings(null));
+        animTimer.Tick += (s, e) => { animTimer.Interval = 1000 / Math.Max(10, c.AnimFps); AnimFrame(); };
+        animTimer.Start();
+    }
+
+    // Text labels don't move, so only icons need the per-frame repaint.
+    bool Animated { get { return c.BarAnimate && !c.OverlayText; } }
+
+    void AnimFrame()
+    {
+        anim.Advance();
+        if (Animated && !dragging && IsHandleCreated && Visible && winW > 0) Draw();
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= 0x80000 | 0x80 | 0x8 | 0x08000000; // LAYERED | TOOLWINDOW | TOPMOST | NOACTIVATE
+            if (clickThrough) cp.ExStyle |= 0x20;             // TRANSPARENT: clicks go to the game underneath
+            return cp;
+        }
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == 0x21) { m.Result = (IntPtr)3; return; } // WM_MOUSEACTIVATE → MA_NOACTIVATE: never takes focus from the game
+        base.WndProc(ref m);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        surface.Dispose();
+        if (disposing)
+        {
+            animTimer.Dispose(); menu.Dispose(); brush.Dispose(); measureG.Dispose(); measureBmp.Dispose();
+            if (font != null) font.Dispose();
+            if (bold != null) bold.Dispose();
+        }
+        base.Dispose(disposing);
+    }
+
+    // ---- dragging (while unlocked) and the menu
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left) { dragging = true; grab = new Point(Cursor.Position.X - c.OverlayX, Cursor.Position.Y - c.OverlayY); }
+        base.OnMouseDown(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        Cursor = Cursors.SizeAll;
+        if (dragging)
+        {
+            var p = Snap(new Point(Cursor.Position.X - grab.X, Cursor.Position.Y - grab.Y));
+            c.OverlayX = p.X; c.OverlayY = p.Y;
+            SetWindowPos(Handle, IntPtr.Zero, p.X, p.Y, 0, 0, 0x1 | 0x4 | 0x10); // NOSIZE | NOZORDER | NOACTIVATE
+        }
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        if (dragging) { dragging = false; c.Save(); }
+        if (e.Button == MouseButtons.Right) menu.Show(Cursor.Position);
+        base.OnMouseUp(e);
+    }
+
+    // Games usually cover the whole screen, so it snaps to the screen's edges rather than the taskbar-free area.
+    Point Snap(Point p)
+    {
+        var b = Screen.FromPoint(Cursor.Position).Bounds;
+        int gap = (int)(8 * u), reach = (int)(16 * u);
+        if (Math.Abs(p.X - (b.Left + gap)) < reach) p.X = b.Left + gap;
+        else if (Math.Abs(p.X + winW - (b.Right - gap)) < reach) p.X = b.Right - gap - winW;
+        else if (Math.Abs(p.X + winW / 2 - (b.Left + b.Width / 2)) < reach) p.X = b.Left + (b.Width - winW) / 2;
+        if (Math.Abs(p.Y - (b.Top + gap)) < reach) p.Y = b.Top + gap;
+        else if (Math.Abs(p.Y + winH - (b.Bottom - gap)) < reach) p.Y = b.Bottom - gap - winH;
+        return p;
+    }
+
+    void EnsurePosition()
+    {
+        if (c.OverlayX == int.MinValue || !Screen.AllScreens.Any(sc => sc.Bounds.IntersectsWith(new Rectangle(c.OverlayX, c.OverlayY, winW, winH))))
+        {
+            var b = Screen.PrimaryScreen.Bounds;
+            c.OverlayX = b.Left + (int)(8 * u);
+            c.OverlayY = b.Top + (int)(8 * u);
+        }
+    }
+
+    // ---- layout and drawing
+    void EnsureFonts()
+    {
+        float px = (float)Math.Round(14 * u * 2) / 2;
+        if (font != null && px == fontPx) return;
+        if (font != null) font.Dispose();
+        if (bold != null) bold.Dispose();
+        font = new Font(c.FontName, px, FontStyle.Regular, GraphicsUnit.Pixel);
+        bold = new Font(c.FontName, px, FontStyle.Bold, GraphicsUnit.Pixel);
+        fontPx = px;
+    }
+
+    float Measure(string text, Font f) { return string.IsNullOrEmpty(text) ? 0 : measureG.MeasureString(text, f, PointF.Empty, Fmt).Width; }
+
+    public void Render(bool force)
+    {
+        if (clickThrough != c.OverlayLocked && IsHandleCreated)
+        {
+            clickThrough = c.OverlayLocked;
+            int ex = GetWindowLong(Handle, -20);
+            SetWindowLong(Handle, -20, clickThrough ? ex | 0x20 : ex & ~0x20);
+        }
+        u = DeviceDpi / 96f * c.OverlayScale / 100f;
+        EnsureFonts();
+        Color val = Color.FromArgb(245, 245, 248), dim = Color.FromArgb(160, 160, 170);
+        segs = bar.BuildSegments(bar.Sampler.Snap, val, dim, c.OverlayOrderList(), c.OverlayIsOn, c.OverlayText);
+        if (segs.Count == 0)
+            segs.Add(new StatsBar.Seg { Icon = Icons.Gear, IconColor = dim, Parts = { new StatsBar.Part { Text = "Right-click → Overlay settings", Template = "", Color = dim } } });
+
+        iconSz = (float)Math.Round(fontPx * 1.1f); iconGap = fontPx * 0.4f; partGap = fontPx * 0.4f;
+        segGap = fontPx * 1.0f; pad = fontPx * 0.7f;
+        barW = Math.Max(2, fontPx * 0.22f); barGap = Math.Max(1, barW * 0.45f);
+        float w = 0;
+        foreach (var seg in segs)
+        {
+            if (seg.IsSep) { seg.W = 1; w += seg.W + segGap; continue; }
+            float sw = 0;
+            if (seg.Label != null) { seg.LabelW = Measure(seg.Label, bold); sw += seg.LabelW + iconGap; }
+            else if (seg.Icon != null) sw += iconSz + iconGap;
+            if (seg.Bars != null) sw += seg.Bars.Length * (barW + barGap) - barGap;
+            for (int i = 0; i < seg.Parts.Count; i++)
+            {
+                var p = seg.Parts[i];
+                p.W = Math.Max(Measure(p.Text, p.Bold ? bold : font), Measure(p.Template, p.Bold)); // templates stop the strip jittering
+                sw += p.W + (i > 0 ? partGap : 0);
+            }
+            seg.W = (float)Math.Ceiling(sw);
+            w += seg.W + segGap;
+        }
+        winW = Math.Max(8, (int)Math.Ceiling(w - segGap + pad * 2));
+        winH = (int)Math.Ceiling(Math.Max(fontPx * 1.25f, iconSz) + fontPx * 0.7f);
+        EnsurePosition();
+
+        var k = new StringBuilder();
+        k.Append(winW).Append('x').Append(winH).Append(c.OverlayOpacity).Append(c.OverlayX).Append(',').Append(c.OverlayY);
+        foreach (var seg in segs)
+        {
+            k.Append('|').Append(seg.Label).Append(seg.IconColor.ToArgb());
+            foreach (var p in seg.Parts) k.Append(';').Append(p.Text).Append(p.Color.ToArgb());
+            if (seg.Bars != null) foreach (var b in seg.Bars) k.Append(',').Append((int)b);
+        }
+        var key = k.ToString();
+        if (force || key != lastKey || Animated) Draw();
+        lastKey = key;
+        ShowWindow(Handle, 8); // SW_SHOWNA
+        SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10); // back on top, in case the game went topmost
+    }
+
+
+
+    float Measure(string text, bool isBold) { return Measure(text, isBold ? bold : font); }
+
+    void Draw()
+    {
+        var bmp = surface.Canvas(winW, winH);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.Transparent);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            int alpha = Math.Max(1, (int)Math.Round(c.OverlayOpacity * 2.55)); // ≥ 1 so the strip still catches clicks while unlocked
+            Theme.FillRound(g, new RectangleF(0, 0, winW, winH), Math.Min(winH / 2f, 6 * u), Color.FromArgb(alpha, 10, 10, 14));
+
+            float rowH = Math.Max(fontPx * 1.25f, iconSz), cy = (winH - rowH) / 2, textY = (winH - font.GetHeight(g)) / 2;
+            float x = pad, sh = Math.Max(1, u);
+            var shadow = Color.FromArgb(c.OverlayOpacity < 50 ? 170 : 90, 0, 0, 0); // keeps text readable over bright scenes
+            Action<string, Font, Color, float> text = (t, f, col, tx) =>
+            {
+                brush.Color = shadow; g.DrawString(t, f, brush, tx + sh, textY + sh, Fmt);
+                brush.Color = col; g.DrawString(t, f, brush, tx, textY, Fmt);
+            };
+            foreach (var seg in segs)
+            {
+                if (seg.IsSep)
+                {
+                    using (var p = new Pen(Color.FromArgb(90, seg.IconColor), Math.Max(1, u))) g.DrawLine(p, x, winH * 0.25f, x, winH * 0.75f);
+                    x += seg.W + segGap;
+                    continue;
+                }
+                float sx = x;
+                if (seg.Label != null) { text(seg.Label, bold, seg.IconColor, sx); sx += seg.LabelW + iconGap; }
+                else if (seg.Icon != null)
+                {
+                    var ir = new RectangleF(sx, (winH - iconSz) / 2, iconSz, iconSz);
+                    if (c.BarAnimate) anim.Draw(g, seg.Id, seg.Icon, ir, seg.IconColor, seg.Act, seg.IconColor == c.WarnColor);
+                    else seg.Icon(g, ir, seg.IconColor);
+                    sx += iconSz + iconGap;
+                }
+                if (seg.Bars != null)
+                {
+                    float by = (winH - iconSz) / 2;
+                    using (var bg = new SolidBrush(Color.FromArgb(60, seg.BarColor))) using (var fg = new SolidBrush(seg.BarColor))
+                        for (int i = 0; i < seg.Bars.Length; i++)
+                        {
+                            float bx = sx + i * (barW + barGap), h = iconSz * (float)seg.Bars[i] / 100f;
+                            g.FillRectangle(bg, bx, by, barW, iconSz);
+                            g.FillRectangle(fg, bx, by + iconSz - h, barW, h);
+                        }
+                    sx += seg.Bars.Length * (barW + barGap) - barGap;
+                }
+                for (int i = 0; i < seg.Parts.Count; i++)
+                {
+                    var p = seg.Parts[i];
+                    if (i > 0) sx += partGap;
+                    text(p.Text, p.Bold ? bold : font, p.Color, sx);
+                    sx += p.W;
+                }
+                x += seg.W + segGap;
+            }
+        }
+        surface.Push(Handle, c.OverlayX, c.OverlayY);
     }
 }
 
@@ -4912,7 +5507,7 @@ class SettingsForm : Form
         var brand = new Label { Text = "Kinetik", Font = Theme.UI(13f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Height = 64, Dock = DockStyle.Top, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var version = new Label { Text = "v" + VersionText, Font = Theme.UI(8.5f), ForeColor = Theme.Sub, AutoSize = false, Height = 36, Dock = DockStyle.Bottom, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var navList = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(10, 0, 10, 0), BackColor = Theme.Nav };
-        foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "Widget", "General", "About" }) navList.Controls.Add(NavItem(p));
+        foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "Widget", "Overlay", "General", "About" }) navList.Controls.Add(NavItem(p));
         nav.Controls.Add(navList); nav.Controls.Add(brand); nav.Controls.Add(version);
 
         var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
@@ -4940,7 +5535,7 @@ class SettingsForm : Form
 
     static readonly Dictionary<string, IconFn> navIcons = new Dictionary<string, IconFn>
     {
-        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "Widget", Icons.Monitor }, { "General", Icons.Gear }, { "About", Icons.Info }
+        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "Widget", Icons.Monitor }, { "Overlay", Icons.Gamepad }, { "General", Icons.Gear }, { "About", Icons.Info }
     };
 
     Label NavItem(string name)
@@ -5069,6 +5664,7 @@ class SettingsForm : Form
         else if (name == "Appearance") BuildAppearance();
         else if (name == "Colours") BuildColours();
         else if (name == "Widget") BuildWidget();
+        else if (name == "Overlay") BuildOverlay();
         else if (name == "General") BuildGeneral();
         else BuildAbout();
 
@@ -5111,8 +5707,9 @@ class SettingsForm : Form
         Stat("Cpu");
         Stat("CpuCores", "A tiny usage bar for every logical core");
         Stat("CpuClock");
-        Stat("CpuTemp", Program.IsAdmin ? "Via LibreHardwareMonitor sensors" : "Needs admin – see General → Run as administrator");
-        Stat("CpuPower", Program.IsAdmin ? "Package power in watts" : "Needs admin");
+        Stat("CpuTemp", !Program.IsAdmin ? "Needs admin for an exact reading – see General → Run as administrator"
+            : Program.PawnIOInstalled ? "Via LibreHardwareMonitor sensors" : "Needs the PawnIO driver for an exact reading – see General");
+        Stat("CpuPower", "Package power in watts");
 
         Header("Memory");
         Stat("Ram"); Stat("RamGb");
@@ -5135,6 +5732,7 @@ class SettingsForm : Form
         Stat("GpuClock", "Core clock in MHz");
         Stat("GpuFan", "Percent, or RPM when that's all the card reports");
         Stat("GpuVram"); Stat("GpuVramPct"); Stat("GpuPower");
+        Stat("Fps", Program.IsAdmin ? "Frame rate of the app in front (DirectX, OpenGL and Vulkan)" : "Needs admin – see General → Run as administrator");
 
         Header("Storage");
         Stat("Disk", "How busy the drives are");
@@ -5451,6 +6049,63 @@ class SettingsForm : Form
         list.Controls.Add(arrangeList);
     }
 
+    // ---- Game overlay: an always-on-top strip with its own stats and order, for use while gaming.
+    void BuildOverlay()
+    {
+        Hint("A slim strip that stays on top of games so you can watch your stats while you play. It shows over games in borderless or windowed mode; exclusive fullscreen hides it.", 48);
+
+        Header("Game overlay");
+        Switch(Icons.Gamepad, Theme.Accent, "Show game overlay", "OverlayShow");
+        Switch(Icons.Bolt, Theme.Accent, "Hotkey: Ctrl+Shift+F10", "OverlayHotkey", "Shows or hides the overlay from inside a game");
+        Switch(Icons.Mouse, Theme.Accent, "Lock position (click-through)", "OverlayLocked", "Clicks go to the game. Unlock it from the taskbar bar's menu.");
+        Add(Icons.Monitor, Theme.Accent, "Position", "Drag it while unlocked. This moves it back to the top-left corner.", Btn("Reset position", (s, e) => { c.OverlayX = c.OverlayY = int.MinValue; Apply(); }));
+        if (!Program.IsAdmin)
+            Add(Icons.Monitor, c.GpuColor, "FPS counter needs admin", "Frame rates are read from Windows' graphics events", Btn("Restart as admin", (s, e) => Program.RestartAsAdmin(), true));
+
+        Header("Look");
+        Add(Icons.Text, Theme.Accent, "Labels", null,
+            Combo(new[] { "Text (CPU, GPU, FPS…)", "Icons" }, c.OverlayText ? 0 : 1, i => { c.OverlayText = i == 0; Apply(); }, 190));
+        SliderRow(Icons.Chip, Theme.Accent, "Size", "OverlayScale", 60, 250, "%");
+        SliderRow(Icons.Palette, Theme.Accent, "Background opacity", "OverlayOpacity", 0, 100, "%");
+
+        Header("Contents");
+        Hint("Switch on the stats to show, and drag rows to reorder them (left → right). Icons and colours are shared with the taskbar bar.", 30);
+        var tools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 8) };
+        var addBtn = Btn("+  Add divider", (s, e) =>
+        {
+            var id = c.NewDividerId();
+            var o = c.OverlayOrderList();
+            int at = arrangeList != null && arrangeList.SelectedId != null ? o.IndexOf(arrangeList.SelectedId) + 1 : o.Count;
+            o.Insert(at, id);
+            c.OverlayOrder = string.Join(",", o);
+            Apply();
+            pendingSelect = id;
+            RefreshPage();
+        }, true);
+        addBtn.Margin = new Padding(0, 0, 8, 0);
+        var resetBtn = Btn("Reset contents", (s, e) =>
+        {
+            if (MessageBox.Show(this, "Put the overlay's stats back to the default selection and order, and remove its dividers?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            c.OverlayOrder = Settings.DefaultOverlayOrder;
+            c.OverlayItems = Settings.DefaultOverlayItems;
+            Apply(); RefreshPage();
+        });
+        tools.Controls.Add(addBtn); tools.Controls.Add(resetBtn);
+        list.Controls.Add(tools);
+
+        arrangeList = new ReorderList(c, c.OverlayOrderList(), RowW, c.OverlayIsOn, c.SetOverlayOn, "Separator line") { Margin = new Padding(0, 4, 0, 0) };
+        arrangeList.Moved += order => { c.OverlayOrder = string.Join(",", order); Apply(); };
+        arrangeList.Toggled += id => Apply();
+        arrangeList.Removed += id =>
+        {
+            c.OverlayOrder = string.Join(",", c.OverlayOrderList().Where(x => x != id));
+            c.SetCustom(id, "", null);
+            Apply();
+        };
+        arrangeList.IconClicked += ShowIconPicker;
+        list.Controls.Add(arrangeList);
+    }
+
     void BuildGeneral()
     {
         Header("Settings window");
@@ -5501,10 +6156,15 @@ class SettingsForm : Form
         var startup = new Toggle { On = Program.IsStartupEnabled() };
         startup.Changed += (s, e) => { Program.SetStartup(startup.On); startup.On = Program.IsStartupEnabled(); };
         Add(Icons.Bolt, Theme.Accent, "Run at startup", Program.IsAdmin ? "Starts with admin rights at login (no UAC prompt)" : "Restart as admin first to enable CPU temp at startup", startup);
-        if (Program.IsAdmin)
-            Add(Icons.Thermo, c.TempColor, "Running as administrator", "CPU temperature and power are available", null);
+        if (!Program.IsAdmin)
+            Add(Icons.Thermo, c.TempColor, "Run as administrator", "Required for an exact CPU temperature", Btn("Restart as admin", (s, e) => Program.RestartAsAdmin(), true));
+        else if (!Program.PawnIOInstalled)
+            Add(Icons.Thermo, c.TempColor, "Install the PawnIO driver", "Required for an exact CPU temperature. Restart Kinetik after installing.", Btn("Get PawnIO", (s, e) =>
+            {
+                try { Process.Start(new ProcessStartInfo("https://pawnio.eu") { UseShellExecute = true }); } catch { }
+            }, true));
         else
-            Add(Icons.Thermo, c.TempColor, "Run as administrator", "Required to read CPU temperature and power", Btn("Restart as admin", (s, e) => Program.RestartAsAdmin(), true));
+            Add(Icons.Thermo, c.TempColor, "Running as administrator", "CPU temperature and power are available", null);
 
         Header("Reset");
         Add(Icons.Gear, Theme.Sub, "Restore default settings", "Every option, including the order and custom icons", Btn("Reset", (s, e) =>
