@@ -133,13 +133,13 @@ Everything about the overlay is set on the **Overlay** page in Settings:
 
 ## Download and use
 
-1. Download `Kinetik.exe` from the [Releases](../../releases/latest) page.
-2. Run it. The bar appears on your taskbar next to the tray icons.
+1. Download `Kinetik.zip` from the [Releases](../../releases/latest) page and extract it to a folder of your choice. It contains `Kinetik.exe` and a `lib` folder.
+2. Run `Kinetik.exe`. The bar appears on your taskbar next to the tray icons.
 3. **Right-click** the bar and choose **Settings…** to customise it, or **Arrange stats…** to go straight to the order and icons.
 
-It's a single portable exe with no installer. (If you turn on Run at startup as administrator, Kinetik copies itself to `C:\Program Files\Kinetik` so the elevated startup task runs a copy only admins can change.) Settings are saved in the registry at `HKCU\Software\Kinetik`.
+It's portable, with no installer. Keep the `lib` folder next to `Kinetik.exe`: it holds the LibreHardwareMonitor library that reads CPU temperature and AMD / Intel GPUs. Kinetik checks each DLL in it against the version it was built with and won't load one that's been changed. (If you turn on Run at startup as administrator, Kinetik copies itself to `C:\Program Files\Kinetik` along with its `lib` folder, so the elevated startup task runs a copy only admins can change.) Settings are saved in the registry at `HKCU\Software\Kinetik`.
 
-**Updating:** right-click the bar, choose **Exit**, replace the exe with the new one and run it again. Your settings carry over.
+**Updating:** right-click the bar, choose **Exit**, extract the new zip over your old folder (replacing `Kinetik.exe` and `lib`) and run it again. Your settings carry over. Versions up to v2.0.3 were a single exe; for those, put the new `Kinetik.exe` and `lib` folder where the old exe was.
 
 Windows SmartScreen may warn you because the exe isn't code-signed. Click **More info → Run anyway**.
 
@@ -179,7 +179,7 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 
 ## CPU temperature
 
-Windows doesn't provide CPU temperatures to normal apps, so Kinetik reads them through [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)'s library, which is built into the exe. This requires:
+Windows doesn't provide CPU temperatures to normal apps, so Kinetik reads them through [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)'s library, which ships in the `lib` folder next to the exe. This requires:
 
 - **Administrator rights:** right-click the bar and choose **Restart as administrator**. To have it start elevated automatically, turn on **Run at startup** while it's running as admin.
 - **The PawnIO driver:** it's installed along with the LibreHardwareMonitor app, or you can get it from [pawnio.eu](https://pawnio.eu). If it's missing, **Settings → General** says so and has a **Get PawnIO** button. Restart Kinetik after installing it.
@@ -338,7 +338,9 @@ No Visual Studio or SDK needed. It compiles with the .NET Framework compiler tha
    build.bat
    ```
 
-   This produces a single `Kinetik.exe`, with every DLL in `lib\` and the app icon embedded inside it.
+   This produces `Kinetik.exe` with the app icon embedded. It loads the DLLs from the `lib\` folder next to it, so it runs straight from the source folder. `build.bat package` also makes `Kinetik.zip` (the exe, `lib\*.dll` and the license) for a release.
+
+   Kinetik only loads DLLs whose SHA-256 matches the list in `LibHashes` in `Kinetik.cs`. If you use different versions of the DLLs, update that list.
 
 ## Feedback
 

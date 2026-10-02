@@ -2,7 +2,7 @@
 // Shows network speed and ping, CPU (usage, clock, temp, power, per-core), RAM and commit, GPU (usage, temp, clock,
 // fan, VRAM, power), disk activity / throughput / free space, processes, uptime, and battery levels of the PC and
 // connected Bluetooth devices. Every item can be reordered, given its own icon and colour, and split into groups
-// with dividers. CPU temperature/power come from LibreHardwareMonitorLib (embedded in the exe) and need admin rights.
+// with dividers. CPU temperature/power come from LibreHardwareMonitorLib (in the lib folder) and need admin rights.
 // Also a desktop widget, and a game overlay strip with an FPS counter (read from Windows' graphics ETW events).
 // Right-click the bar for Settings. Build: build.bat (uses the .NET Framework compiler built into Windows).
 //
@@ -966,6 +966,7 @@ class Sampler
             sensors = hw;
             lhmGpus = hw.GpuNames;
         }
+        catch (IOException) { sensorStatus = "unavailable – keep the lib folder next to Kinetik.exe"; sensorsFailed = true; }
         catch (Exception e) { sensorStatus = "unavailable (" + e.Message + ")"; sensorsFailed = true; }
     }
 
@@ -1745,7 +1746,7 @@ static class Program
         // No background GC thread: this app's heap is tiny, so concurrent collection only costs memory.
         GCSettings.LatencyMode = GCLatencyMode.Batch;
         try { SetDefaultDllDirectories(0x800); } catch { } // LOAD_LIBRARY_SEARCH_SYSTEM32
-        AppDomain.CurrentDomain.AssemblyResolve += ResolveEmbedded;
+        AppDomain.CurrentDomain.AssemblyResolve += ResolveLib;
         bool created;
         MigrateLegacy();
         using (var mutex = new Mutex(true, AppName, out created))
@@ -1796,22 +1797,57 @@ static class Program
         try { SetProcessWorkingSetSize(GetCurrentProcess(), (IntPtr)(-1), (IntPtr)(-1)); } catch { }
     }
 
-    // The LibreHardwareMonitor DLLs are embedded as resources so the app stays a single exe.
-    static Assembly ResolveEmbedded(object sender, ResolveEventArgs e)
+    // LibreHardwareMonitor and its dependencies ship in a lib folder next to the exe. The runtime never looks there
+    // by itself, so they only load through here, and only if each file matches the copy this build was made with:
+    // a DLL swapped into the folder (which may be user-writable) can't run inside Kinetik, even when it's elevated.
+    // Update this list whenever the DLLs in lib\ change.
+    static readonly Dictionary<string, string> LibHashes = new Dictionary<string, string>
+    {
+        { "BlackSharp.Core", "CAFB93AFCC8D8A367E21F619673D05C06887D8964867FED1371F02DED1CD3E23" },
+        { "DiskInfoToolkit", "1ACBF51B3C10C51C986CF43021680D34A2E38D9A5BA652BCFA9A1B5F7FC09800" },
+        { "HidSharp", "79F2BC8DDFF102E6DBEDE84B2C211A3AEA2ED675BF762FA0F02ECB65F61EE812" },
+        { "LibreHardwareMonitorLib", "6EBC194316536BA61AF5BE24508AD9FCBB2ECC685E716C12E787C79530F66BF0" },
+        { "RAMSPDToolkit-NDD", "B6882354C7C8EC186617E421507743DBFAE09C5C1FC24CEF76A1D0C0C26651DE" },
+        { "System.Buffers", "2D78D770C9CB997199154AE8C018B9F1D1EFBC86729F7264DDE6DBAD2A12CAC3" },
+        { "System.CodeDom", "FD9DE6770340B32D1A57E21833620F5F440638CE518A38D55712424162B847E5" },
+        { "System.Memory", "D5E8E4866F9CFA66F7765660F84B210198893E55335487AFE5EBDA342C0E913D" },
+        { "System.Numerics.Vectors", "20C2FA81B8C70D651099D762954F285FD4F942E63B2D7217C145DAB8D4B2F4C9" },
+        { "System.Runtime.CompilerServices.Unsafe", "08CBD7278B66F1E68425A82D4B97181A4130D93E3DD91831407ABA7212CCDACF" },
+        { "System.Security.AccessControl", "FF14C5F628B9A6798D173AEFBBA0A43D61E66F715108E2576AC0D3DFAB9071D0" },
+        { "System.Security.Principal.Windows", "B4D8E15ADC235D0E858E39B5133E5D00A4BAA8C94F4F39E3B5E791B0F9C0C806" },
+        { "System.Threading.AccessControl", "5E3A3902F04F840C0FC1F9C2F249F804F6CFDF7901B2E06778BC2A4603AE4694" },
+    };
+
+    static string LibDir(string exe) { return Path.Combine(Path.GetDirectoryName(exe), "lib"); }
+
+    static string Sha256(string path)
+    {
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+        using (var f = File.OpenRead(path))
+            return BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "");
+    }
+
+    // True when lib\<name>.dll next to the given exe is exactly the expected file.
+    static bool LibOk(string exe, string name)
+    {
+        string want, path = Path.Combine(LibDir(exe), name + ".dll");
+        try { return LibHashes.TryGetValue(name, out want) && File.Exists(path) && Sha256(path) == want; }
+        catch { return false; }
+    }
+
+    static Assembly ResolveLib(object sender, ResolveEventArgs e)
     {
         var name = new AssemblyName(e.Name).Name;
         lock (loaded)
         {
-            Assembly a;
+            Assembly a = null;
             if (loaded.TryGetValue(name, out a)) return a;
-            using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream(name + ".dll"))
+            loaded[name] = null; // the fallbacks below can ask for the same name again; this ends that loop
+            if (LibHashes.ContainsKey(name))
             {
-                if (st != null)
-                {
-                    var bytes = new byte[st.Length];
-                    st.Read(bytes, 0, bytes.Length);
-                    a = Assembly.Load(bytes);
-                }
+                // Only ever the verified file: a missing or changed one fails the load (sensors then report why).
+                if (LibOk(Application.ExecutablePath, name)) a = Assembly.LoadFrom(Path.Combine(LibDir(Application.ExecutablePath), name + ".dll"));
+                if (a != null || !name.StartsWith("System.")) { loaded[name] = a; return a; }
             }
             // Newer framework-package versions requested by the library (e.g. System.Management) → use the built-in one.
             if (a == null) a = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(x => x.GetName().Name == name);
@@ -1923,11 +1959,24 @@ static class Program
             var a = new FileInfo(me); var b = new FileInfo(InstalledExe);
             if (a.Length != b.Length || FileVersionInfo.GetVersionInfo(me).FileVersion != FileVersionInfo.GetVersionInfo(InstalledExe).FileVersion)
                 File.Copy(me, InstalledExe, true);
+            CopyLib();
         }
         catch { }
     }
 
-    // Copies this exe into Program Files (created by an admin process, so it inherits the admin-only write access).
+    // Brings the installed lib folder in line with this build's, from this exe's own (verified) lib folder.
+    static void CopyLib()
+    {
+        var me = Application.ExecutablePath;
+        if (SamePath(me, InstalledExe)) return;
+        Directory.CreateDirectory(LibDir(InstalledExe));
+        foreach (var name in LibHashes.Keys)
+            if (!LibOk(InstalledExe, name) && LibOk(me, name))
+                File.Copy(Path.Combine(LibDir(me), name + ".dll"), Path.Combine(LibDir(InstalledExe), name + ".dll"), true);
+    }
+
+    // Copies this exe and its lib folder into Program Files (created by an admin process, so it inherits the
+    // admin-only write access).
     static bool InstallCopy()
     {
         try
@@ -1935,6 +1984,7 @@ static class Program
             Directory.CreateDirectory(InstallDir);
             var me = Application.ExecutablePath;
             if (!SamePath(me, InstalledExe)) File.Copy(me, InstalledExe, true);
+            CopyLib();
             return File.Exists(InstalledExe);
         }
         catch { return false; }
@@ -1943,7 +1993,14 @@ static class Program
     static void RemoveInstalledCopy()
     {
         if (SamePath(Application.ExecutablePath, InstalledExe)) return; // can't delete ourselves while running
-        try { if (File.Exists(InstalledExe)) File.Delete(InstalledExe); Directory.Delete(InstallDir); } catch { }
+        try
+        {
+            if (File.Exists(InstalledExe)) File.Delete(InstalledExe);
+            foreach (var name in LibHashes.Keys) { var p = Path.Combine(LibDir(InstalledExe), name + ".dll"); if (File.Exists(p)) File.Delete(p); }
+            if (Directory.Exists(LibDir(InstalledExe))) Directory.Delete(LibDir(InstalledExe));
+            Directory.Delete(InstallDir);
+        }
+        catch { }
     }
 
     public static bool IsStartupEnabled()
