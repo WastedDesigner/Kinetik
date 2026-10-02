@@ -5,6 +5,13 @@
   - It has its own list of stats and order, with dividers, separate from the bar and the widget. Show them with text labels (`CPU`, `GPU`, `FPS`…) or icons, and adjust the size and background opacity.
   - Drag it anywhere. It snaps to the screen's edges and top centre. **Lock position** makes it click-through, so clicks go to the game.
   - It stays visible over fullscreen apps, unlike the bar and widget. It shows over games in **borderless or windowed** mode. Exclusive fullscreen owns the whole display, so no overlay can draw there.
+
+![The game overlay with text labels](screenshots/overlay-text.png)
+
+![The game overlay with icons](screenshots/overlay-icons.png)
+
+![The Overlay page in Settings](screenshots/settings-overlay.png)
+
 - **New: FPS counter.** Shows the frame rate of the app in front, on the overlay (on by default), the bar or the widget. It counts the frames Windows' graphics system reports for DirectX 9–12 games, and for OpenGL and Vulkan games. Like CPU temperature, it needs Kinetik to run as administrator.
 - **Fix: CPU power and temperature on laptops.** Some laptops showed neither, because they were only read through LibreHardwareMonitor, which needs the PawnIO driver.
   - CPU power now falls back to Windows' own power meter, which needs no driver or admin rights.
