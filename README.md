@@ -1,18 +1,28 @@
-# Kinetik
+# Kinetik: taskbar system monitor, FPS counter and game overlay for Windows
 
-A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It sits just left of the system tray and shows live hardware stats, each with its own icon and colour. Every stat can be switched on or off, reordered, restyled and grouped with dividers.
+[![Latest release](https://img.shields.io/github/v/release/WastedDesigner/Kinetik?label=download)](../../releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/WastedDesigner/Kinetik/total)](../../releases)
+[![License: GPL v3](https://img.shields.io/github/license/WastedDesigner/Kinetik)](LICENSE)
+![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
+
+**Kinetik** is a free, open-source system monitor for the Windows 11 and Windows 10 taskbar, with a game overlay and an FPS counter. It shows live **CPU and GPU temperature, usage, clock speed and power draw**, **RAM**, **network upload and download speed**, **ping**, **disk activity**, and **Bluetooth headphone and controller battery levels**, right next to the system tray, like TrafficMonitor.
+
+For gaming, its always-on-top **FPS overlay** shows the frame rate with **1% lows**, a **frame-time graph**, **render latency** and the **base frame rate before DLSS or FSR frame generation**, for DirectX, Vulkan and OpenGL games, without hooking into them. There's also a desktop widget with live graphs, notifications when your PC runs hot, and benchmark recording to CSV.
+
+Every stat can be switched on or off, reordered, restyled and grouped with dividers. It's a small portable app with no installer.
 
 > **About this project:** I originally made this for my own personal use and decided to share it in case anyone else finds it useful. If you run into a bug or have an idea for a feature, please [open an issue](../../issues). I'll do my best to look into it and implement what I can.
 
 ![Kinetik on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
 
-**Latest version: v2.0.4.** [Download it from Releases](../../releases/latest).
+**Latest version: v3.0.0.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 
 - [Features](#features)
 - [Desktop widget](#desktop-widget)
 - [Game overlay](#game-overlay)
+- [Notifications](#notifications)
 - [Download and use](#download-and-use)
 - [Settings guide](#settings-guide)
 - [Tips and shortcuts](#tips-and-shortcuts)
@@ -28,20 +38,20 @@ A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It
 
 ### Stats
 
-Each one can be turned on or off. There are 30 in total.
+Each one can be turned on or off. There are 44 in total.
 
 | Category | What it shows |
 |---|---|
-| Network | Upload speed, download speed, total speed (upload + download), ping to any website or IP address, Wi-Fi signal strength |
+| Network | Upload speed, download speed, total speed (upload + download), the app using the most network\*, ping to any website or IP address, Wi-Fi signal strength, VPN status, public IP address |
 | CPU | Usage, per-core usage bars, clock speed (GHz), temperature\*, package power\* |
-| Memory | RAM usage %, RAM used / total (GB), committed memory % (includes the page file) |
-| GPU (NVIDIA, AMD, Intel) | Usage, temperature, clock speed (MHz), fan speed (% or RPM), VRAM used / total (GB), VRAM usage %, power draw. If you have more than one GPU, you can choose which one to show |
-| Gaming | Frame rate (FPS) of the game or app in front\* (DirectX, OpenGL and Vulkan) |
-| Storage | Disk activity %, read speed, write speed, free space on any drive |
-| System | Running processes, uptime |
+| Memory | RAM usage %, RAM used / total (GB), committed memory % (includes the page file), RAM temperature\* |
+| GPU (NVIDIA, AMD, Intel) | Usage, temperature, hot spot temperature, memory temperature, clock speed (MHz), fan speed (% or RPM), VRAM used / total (GB), VRAM usage %, power draw. If you have more than one GPU, you can choose which one to show |
+| Gaming\* | FPS of the game or app in front (DirectX, OpenGL and Vulkan), base FPS before DLSS / FSR frame generation, 1% and 0.1% lows, frame time with a graph, render latency |
+| Storage | Disk activity %, read speed, write speed, free space on any drive, drive temperature\* |
+| System | Running processes, uptime, time, date |
 | Batteries | Laptop battery % (with a + while charging), laptop battery time left, and Bluetooth headphones, mice, keyboards and controllers (each with an icon for its device type) |
 
-\* CPU temperature and FPS need the app to run as administrator ([see below](#cpu-temperature)). CPU power also works without admin on most PCs.
+\* These need the app to run as administrator ([see below](#cpu-temperature)). CPU power also works without admin on most PCs. Base FPS and render latency come from NVIDIA Reflex, which every DLSS frame generation game has.
 
 ### Customisation
 
@@ -96,7 +106,10 @@ Everything about the widget is set on the **Widget** page in Settings:
 - Hides itself in fullscreen games, videos and presentations
 - Left-click opens Task Manager
 - Tray icon: click it for Settings, right-click it for the menu (even while the bar is hidden), hover for a CPU / RAM / GPU summary
-- Hovering shows details: CPU and GPU model, the ping address, the free-space drive and Bluetooth device names
+- **Hover graphs:** hover over any stat on the bar for its last minute as a graph, its minimum, average and maximum, and the processes using the most CPU, memory, GPU, disk or network
+- **Every monitor:** optionally put the bar on each monitor's taskbar
+- **Profiles:** save setups such as Gaming and Work and switch between them from the right-click menu, or back up every setting to a file
+- **Updates install themselves:** **Settings → About → Check for updates** downloads the new version, checks it against the checksum in the release notes, and restarts Kinetik
 - Optional run at startup. When it's running as admin, it's set up as an elevated scheduled task that runs a protected copy in `C:\Program Files\Kinetik`, so there's no UAC prompt at login.
 - Update interval from 0.5 to 5 seconds
 - Shift the bar left if it overlaps other taskbar icons
@@ -126,10 +139,24 @@ Turn it on from the bar's right-click menu (**Game overlay**), in **Settings →
 - **Your look:** text labels (`CPU`, `GPU`, `FPS`…) or icons, size, and background opacity. Text has a soft shadow so it stays readable over bright scenes.
 - **Moving it:** drag it anywhere. It snaps to the screen's edges and top centre. **Lock position** makes it click-through, so your clicks go to the game. Unlock it from the bar's right-click menu.
 - **Works in:** borderless and windowed games. Exclusive fullscreen owns the whole display, so no overlay can draw over it. Switch the game to borderless (often called "fullscreen windowed") to see it.
+- **Frame generation aware:** **FPS** counts what reaches your screen, and **Base FPS** the frames the game renders itself, so you can see what DLSS or FSR frame generation adds. Base FPS and **render latency** work in games with NVIDIA Reflex.
+- **Stutter you can see:** **1% and 0.1% lows** over the last 10 seconds, and a **frame-time graph** of the last 3 seconds where spikes are stutters.
+- **Shows itself in games:** with **Show automatically in games** on, it appears while a fullscreen or borderless game is in front and hides when you leave. With several monitors it **moves to the game's monitor**, and it **closes with the game**.
+- **Session summaries:** when a game closes, a notification shows how long you played, the average FPS, the 1% low and the peak GPU temperature. Each session is saved to `Documents\Kinetik\Sessions.csv`.
+- **Benchmarks:** **Ctrl+Shift+F11** records every stat, each update, to a CSV file in `Documents\Kinetik\Benchmarks`, for comparing settings or drivers.
 
 Everything about the overlay is set on the **Overlay** page in Settings:
 
 ![The Overlay page in Settings](screenshots/settings-overlay.png)
+
+## Notifications
+
+Kinetik can tell you when something needs attention, using Windows' own notifications (so Focus assist and Do not disturb apply). Pick them in **Settings → General → Notifications**:
+
+- the CPU or GPU staying above its warning temperature for 30 seconds
+- a Bluetooth device's battery, or the laptop's, dropping below its warning level
+- the free-space drive running low
+- ping staying high or timing out (off by default)
 
 ## Download and use
 
@@ -139,7 +166,7 @@ Everything about the overlay is set on the **Overlay** page in Settings:
 
 It's portable, with no installer. Keep the `lib` folder next to `Kinetik.exe`: it holds the LibreHardwareMonitor library that reads CPU temperature and AMD / Intel GPUs. Kinetik checks each DLL in it against the version it was built with and won't load one that's been changed. (If you turn on Run at startup as administrator, Kinetik copies itself to `C:\Program Files\Kinetik` along with its `lib` folder, so the elevated startup task runs a copy only admins can change.) Settings are saved in the registry at `HKCU\Software\Kinetik`.
 
-**Updating:** right-click the bar, choose **Exit**, extract the new zip over your old folder (replacing `Kinetik.exe` and `lib`) and run it again. Your settings carry over. Versions up to v2.0.3 were a single exe; for those, put the new `Kinetik.exe` and `lib` folder where the old exe was.
+**Updating:** from v3.0.0 on, use **Settings → About → Check for updates**, which installs the new version for you. Or right-click the bar, choose **Exit**, extract the new zip over your old folder (replacing `Kinetik.exe` and `lib`) and run it again. Your settings carry over. Versions up to v2.0.3 were a single exe; for those, put the new `Kinetik.exe` and `lib` folder where the old exe was.
 
 Windows SmartScreen may warn you because the exe isn't code-signed. Click **More info → Run anyway**.
 
@@ -149,12 +176,12 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 |---|---|
 | **Stats** | Switch each stat on or off, grouped by Network, Processor, Memory, Graphics, Storage, System and Batteries. Also: the ping address, which GPU to show, which drive to measure free space on, and whether to show Bluetooth device names. |
 | **Arrange** | The order of everything on the bar. Drag rows, click an icon to change it or its colour, **+ Add divider**, remove dividers with ✕, and **Reset order**. Turn off **Show switched-off stats** to list only what's on your taskbar. |
-| **Appearance** | Font and size, one or two lines, spacing sliders (with **Reset spacing**), divider style and height, animated icons and their frame rate, and the background pill's opacity and corner roundness. |
+| **Appearance** | Font and size, one or two lines, spacing sliders (with **Reset spacing**), divider style and height, hover graphs, animated icons and their frame rate, and the background pill's opacity and corner roundness. |
 | **Colours** | Match the taskbar theme, text and warning colours, a colour for each icon group, and the background colour. |
-| **Overlay** | Turn the game overlay on, the Ctrl+Shift+F10 hotkey, lock (click-through), position, text labels or icons, size, background opacity, and its own **Contents** list. |
+| **Overlay** | Turn the game overlay on, show it automatically in games, move it to the game's monitor, close it with the game, the Ctrl+Shift+F10 hotkey, lock (click-through), position, session summaries, benchmark recording (Ctrl+Shift+F11), text labels or icons, size, background opacity, and its own **Contents** list. |
 | **Widget** | Turn the desktop widget on, and set its placement, lock, click-through and snapping, style, theme, colours, size, width, roundness, shadow, animated icons, title, headings and graph history. Its **Contents** list works like the Arrange page. |
-| **General** | Settings window background colour, update interval, shift left, left-click action, hide in fullscreen, tray icon (spinning, with a choice of backgrounds), taskbar button, desktop shortcut, warning limits, run at startup, restart as administrator, and restore default settings. |
-| **About** | Version number, **Check for updates** (opens the release page if there's a newer version) and copyright. |
+| **General** | Settings window background colour, update interval, shift left, left-click action, hide in fullscreen, show on all taskbars, tray icon (spinning, with a choice of backgrounds), taskbar button, desktop shortcut, warning limits, notifications, profiles and backup, run at startup, restart as administrator, and restore default settings. |
+| **About** | Version number, **Check for updates** (installs a newer version for you), **Include test versions**, and copyright. |
 
 ### Screenshots
 
@@ -168,9 +195,10 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 ## Tips and shortcuts
 
 - **Tray icon:** click for Settings, right-click for the same menu as the bar. If it's hidden under the **^** arrow, drag it onto the taskbar.
-- **Right-click menu:** Settings…, Arrange stats…, Desktop widget, Unlock desktop widget (when it's locked), Game overlay, Unlock game overlay (when it's locked), Refresh batteries now, Restart as administrator, Exit
+- **Right-click menu:** Settings…, Arrange stats…, Desktop widget, Unlock desktop widget (when it's locked), Game overlay, Unlock game overlay (when it's locked), Record benchmark, Profiles, Refresh batteries now, Restart as administrator, Exit
 - **Widget:** drag to move it, and right-click it for Widget settings, Lock position and Hide widget. If it's locked and click-through, unlock it from the bar's right-click menu.
 - **Game overlay:** **Ctrl+Shift+F10** shows or hides it, even in a game. Right-click it (while unlocked) for Overlay settings, Lock position and Hide overlay.
+- **Benchmarks:** **Ctrl+Shift+F11** starts and stops recording, even in a game
 - **Arrange page keys:** ↑ / ↓ select a row, **Alt+↑ / Alt+↓** (or Ctrl) move it, **Space** switches it on or off, **Delete** removes a divider
 - **Sliders:** click one first, then use the mouse wheel or ← / → keys for fine adjustments
 - **Text labels instead of icons:** open the icon picker and choose **Text** for a compact, icon-free look
@@ -191,7 +219,9 @@ Without these, Kinetik falls back to what Windows provides itself:
 
 Hover over the bar to see what's missing if the temperature shows `--°C`.
 
-The **FPS counter** also needs administrator rights, because it reads Windows' graphics event tracing.
+The **FPS counter**, its lows, frame times and latency, game detection, the top network app, and drive and RAM temperatures also need administrator rights. The gaming stats come from Windows' graphics event tracing, the same data PresentMon uses.
+
+While Base FPS or render latency is shown, games with NVIDIA Reflex measure their own latency a few times a second, as they do with NVIDIA FrameView.
 
 ## Requirements
 
@@ -210,10 +240,22 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Batteries of devices on proprietary USB dongles (Razer HyperSpeed, Logitech Lightspeed, SteelSeries, etc.) are only visible to their vendor apps, so they aren't shown. The same devices connected over Bluetooth do work.
 - The widget's "On the desktop" placement keeps it behind your windows, but Windows' Show desktop (Win+D) may hide it. If it does, choose **Always on top** instead.
 - The game overlay can't appear over games in exclusive fullscreen. Use borderless or windowed mode.
-- The FPS counter measures the app in front, so it shows `--` on the desktop or in apps that aren't drawing new frames.
+- The FPS counter measures the app in front, so it shows `--` on the desktop or in apps that aren't drawing new frames. Browsers draw in a separate process, so they show `--` too.
+- Base FPS and render latency need a game with NVIDIA Reflex. Other games show `--` for them.
+- Showing the overlay automatically, session summaries and moving to the game's monitor recognise games that fill their screen (fullscreen or borderless), not windowed ones.
+- The public IP stat asks api.ipify.org for your address every 5 minutes while it's shown. It's off unless you switch it on.
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v3.0.0: gaming update
+
+- **Game overlay:** base FPS before frame generation, 1% and 0.1% lows, a frame-time graph and render latency. It can show itself in games, move to the game's monitor and close with the game.
+- **Session summaries** when a game closes, and **benchmark recording** to CSV with Ctrl+Shift+F11.
+- **Notifications** for a hot CPU or GPU, low batteries, a full drive and high ping.
+- **Hover graphs** on the bar with the top processes, and the bar on **every monitor's taskbar**.
+- **14 new stats:** GPU hot spot and memory temperature, drive and RAM temperature, top network app, VPN status, public IP, time and date, plus the gaming stats above.
+- **Profiles**, **backup and restore**, and **updates that install themselves** after checking the download's checksum.
 
 ### v2.0.4: zip download
 

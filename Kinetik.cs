@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("2.1.0.0")]
-[assembly: AssemblyFileVersion("2.1.0.0")]
-[assembly: AssemblyInformationalVersion("2.1.0-beta.1")]
+[assembly: AssemblyVersion("3.0.0.0")]
+[assembly: AssemblyFileVersion("3.0.0.0")]
+[assembly: AssemblyInformationalVersion("3.0.0")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -2720,7 +2720,7 @@ class StatsBar : Form
         if (disposing && widget != null) widget.Dispose();
         if (disposing && overlay != null) overlay.Dispose();
         if (disposing) { foreach (var m in mirrors) m.Dispose(); if (hover != null) hover.Dispose(); hoverTimer.Dispose(); }
-        if (disposing) { Watch.StopRecording(); if (noteIcon != null) { noteIcon.Visible = false; noteIcon.Dispose(); } noteTimer.Dispose(); }
+        if (disposing) { Watch.Shutdown(); if (noteIcon != null) { noteIcon.Visible = false; noteIcon.Dispose(); } noteTimer.Dispose(); }
         if (disposing) { DisposeFonts(); if (measureG != null) { measureG.Dispose(); measureBmp.Dispose(); } brush.Dispose(); }
         base.Dispose(disposing);
     }
@@ -3640,7 +3640,9 @@ class GameWatch
 {
     readonly StatsBar bar;
     Settings c { get { return bar.Cfg; } }
-    public static string DataDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik"); } }
+    // Documents\Kinetik: Sessions.csv, and recorded benchmarks in Benchmarks.
+    public static string DataDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Kinetik"); } }
+    public static string BenchDir { get { return Path.Combine(DataDir, "Benchmarks"); } }
 
     public GameWatch(StatsBar bar) { this.bar = bar; }
 
@@ -3712,7 +3714,14 @@ class GameWatch
         Alerts(s, now);
     }
 
-    void End(Session x)
+    // Saves the game session in progress, e.g. when Kinetik exits before the game does.
+    public void Shutdown()
+    {
+        StopRecording();
+        if (cur != null) { End(cur, false); cur = null; }
+    }
+
+    void End(Session x, bool notify = true)
     {
         var length = x.LastSeen - x.Start;
         if (!c.SessionSummary || length.TotalSeconds < 60 || x.FpsCount == 0) return;
@@ -3722,6 +3731,9 @@ class GameWatch
         try
         {
             string path = Path.Combine(DataDir, "Sessions.csv");
+            // Test builds kept the log in AppData\Local\Kinetik; carry those sessions over once.
+            string old = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik", "Sessions.csv");
+            if (!File.Exists(path) && File.Exists(old)) { SafeFile.Write(path, File.ReadAllText(old)); try { File.Delete(old); } catch { } }
             bool fresh = !File.Exists(path);
             using (var w = SafeFile.Append(path))
             {
@@ -3734,7 +3746,7 @@ class GameWatch
         var parts = new List<string> { StatsBar.Duration(length.TotalSeconds), "average " + avg.ToString("0") + " fps" };
         if (!double.IsNaN(low)) parts.Add("1% low " + low.ToString("0"));
         if (!double.IsNaN(x.PeakGpu)) parts.Add("GPU peak " + x.PeakGpu.ToString("0") + "°C");
-        bar.Notify("Game session: " + x.Name, string.Join(" · ", parts), () => OpenFolder(DataDir));
+        if (notify) bar.Notify("Game session: " + x.Name, string.Join(" · ", parts), () => OpenFolder(DataDir));
     }
 
     static string Csv(string v) { return v.IndexOfAny(new[] { ',', '"', '\n' }) >= 0 ? "\"" + v.Replace("\"", "\"\"") + "\"" : v; }
@@ -3745,7 +3757,7 @@ class GameWatch
         catch { }
     }
 
-    // ---- benchmark recording: every sample to a CSV file in Documents\Kinetik Benchmarks
+    // ---- benchmark recording: every sample to a CSV file in Documents\Kinetik\Benchmarks
     StreamWriter writer; string recordPath; int rows; double recFpsSum; int recFpsCount;
     public bool IsRecording { get { return writer != null; } }
 
@@ -3756,7 +3768,7 @@ class GameWatch
         string app = s.GameName != "" ? s.GameName : s.FpsApp != "" ? s.FpsApp : "Kinetik";
         app = new string(app.Where(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_').ToArray());
         if (app == "") app = "Kinetik";
-        recordPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Kinetik Benchmarks",
+        recordPath = Path.Combine(BenchDir,
             app + " " + DateTime.Now.ToString("yyyy-MM-dd HH.mm.ss") + ".csv");
         try
         {
@@ -7727,10 +7739,9 @@ class SettingsForm : Form
 
         Header("Sessions and benchmarks");
         Switch(Icons.List, Theme.Accent, "Session summary", "SessionSummary", "When a game closes: play time, average FPS, 1% low and peak temperatures, saved to a log. Needs admin.");
-        Add(Icons.List, Theme.Accent, "Session log", "Sessions.csv, one line per game session", Btn("Open folder", (s, e) => { Directory.CreateDirectory(GameWatch.DataDir); GameWatch.OpenFolder(GameWatch.DataDir); }));
+        Add(Icons.List, Theme.Accent, "Session log", "Documents\\Kinetik\\Sessions.csv: one line per game session of a minute or more", Btn("Open folder", (s, e) => { Directory.CreateDirectory(GameWatch.DataDir); GameWatch.OpenFolder(GameWatch.DataDir); }));
         Switch(Icons.Bolt, Theme.Accent, "Hotkey: Ctrl+Shift+F11", "BenchHotkey", "Starts and stops recording a benchmark: every stat, each update, to a CSV file");
-        var benchDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Kinetik Benchmarks");
-        Add(Icons.Pulse, Theme.Accent, "Benchmarks", "Saved in Documents\\Kinetik Benchmarks", Btn("Open folder", (s, e) => { Directory.CreateDirectory(benchDir); GameWatch.OpenFolder(benchDir); }));
+        Add(Icons.Pulse, Theme.Accent, "Benchmarks", "Saved in Documents\\Kinetik\\Benchmarks", Btn("Open folder", (s, e) => { Directory.CreateDirectory(GameWatch.BenchDir); GameWatch.OpenFolder(GameWatch.BenchDir); }));
 
         Header("Look");
         Add(Icons.Text, Theme.Accent, "Labels", null,

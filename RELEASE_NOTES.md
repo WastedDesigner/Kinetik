@@ -1,6 +1,6 @@
-# Kinetik v2.1.0 beta 1 (test version)
+# Kinetik v3.0.0
 
-**This is a test version.** Everything new here needs more testing before a stable release. Please report anything odd on the Issues page.
+Kinetik 3 is a big update for gaming: frame-generation-aware FPS, 1% lows, frame times and latency on the game overlay, which now shows itself, follows your game to its monitor and closes with it. There are also notifications, hover graphs on the bar, 14 new stats, profiles, and updates that install themselves.
 
 **For gaming**
 - **New: Base FPS.** The frame rate the game renders itself, before DLSS or FSR frame generation adds frames. FPS keeps showing what reaches the screen. Works in games with NVIDIA Reflex, which every DLSS frame generation game has.
@@ -8,8 +8,10 @@
 - **New: frame time graph.** The time per frame, with a little graph of the last 3 seconds. Spikes are stutters.
 - **New: render latency.** Time from a game starting a frame to presenting it, in games with NVIDIA Reflex.
 - **New: show the overlay automatically.** **Settings → Overlay → Show automatically in games** brings the overlay up while a fullscreen or borderless game is in front, and hides it when you leave. Ctrl+Shift+F10 hides it for the rest of that game.
-- **New: session summaries.** When a game closes, a notification shows how long you played, the average FPS, the 1% low and the peak GPU temperature. Each session is also saved to `Sessions.csv`.
-- **New: benchmark recording.** **Ctrl+Shift+F11** (or **Record benchmark** in the right-click menu) records every stat, each update, to a CSV file in `Documents\Kinetik Benchmarks`. Press it again to stop.
+- **New: the overlay follows your game.** On a PC with several monitors, the overlay moves to the same spot on whichever monitor the game is on, and back afterwards (**Move to the game's monitor**).
+- **New: the overlay closes with the game.** When the game it was showing for exits, the overlay turns off, even if you turned it on yourself (**Close with the game**).
+- **New: session summaries.** When a game closes, a notification shows how long you played, the average FPS, the 1% low and the peak GPU temperature. Each session of a minute or more is also saved to `Documents\Kinetik\Sessions.csv`, including when Kinetik closes before the game.
+- **New: benchmark recording.** **Ctrl+Shift+F11** (or **Record benchmark** in the right-click menu) records every stat, each update, to a CSV file in `Documents\Kinetik\Benchmarks`. Press it again to stop.
 
 **Notifications** (Settings → General → Notifications)
 - When the CPU or GPU stays above its warning temperature for 30 seconds.
@@ -29,12 +31,16 @@
 **Settings**
 - **New: profiles.** Save your setup under a name (for example Gaming and Work) in **Settings → General → Profiles and backup**, and switch between them there or from the right-click menu.
 - **New: back up and restore** every setting to a `.kinetik` file.
-- **New: install updates from Kinetik.** **Settings → About → Check for updates** can now download and install a new version. It checks the download against the SHA-256 in the release notes before changing anything, keeps the old files until the next start, and restarts Kinetik. **Include test versions** offers test builds like this one.
+- **New: install updates from Kinetik.** **Settings → About → Check for updates** can now download and install a new version. It checks the download against the SHA-256 in the release notes before changing anything, keeps the old files until the next start, and restarts Kinetik. **Include test versions** also offers test builds.
 
 **Notes**
 - FPS, the lows, frame times, latency, game detection and per-app network all need Kinetik to run as administrator, like before.
 - While Base FPS or render latency is shown, games with NVIDIA Reflex measure their own latency a few times a second, as they do with NVIDIA FrameView.
 - An elevated startup copy in `C:\Program Files\Kinetik` is now only ever replaced by a newer version, so running an older copy as administrator no longer downgrades it.
+
+**Updating from v2.x:** right-click the bar → **Exit**, then extract the zip into the folder where your old `Kinetik.exe` was, replacing it and its `lib` folder. From v3.0.0 on, **Settings → About → Check for updates** installs new versions for you. If you use **Run at startup**, run the new Kinetik once as administrator so the startup copy is updated too.
+
+**SHA-256 of `Kinetik.exe`:** `007D3B8BFAF418DA771A539FFA725C1C442255B9282E586A67CEA7E79B061EAD`. To check your copy, run `Get-FileHash Kinetik.exe` in PowerShell.
 
 ---
 
