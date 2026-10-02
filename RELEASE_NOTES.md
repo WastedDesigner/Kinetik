@@ -1,3 +1,16 @@
+# Kinetik v2.0.4
+
+- **The download is now a zip.** `Kinetik.zip` contains `Kinetik.exe` and a `lib` folder. Extract it anywhere and keep the two together. The `lib` folder holds the LibreHardwareMonitor library that reads CPU temperature and AMD / Intel GPUs.
+  - Until now that library was packed inside the exe and unpacked into memory when Kinetik started. Antivirus software treats programs that do this with suspicion, which is the likely reason some people saw Windows Defender flag Kinetik. The exe no longer does it, and is now about 290 KB instead of 3.3 MB.
+- **Security: every DLL is checked before it loads.** Kinetik compares each file in `lib` with the exact version it was built with (by SHA-256) and refuses any that don't match. A DLL swapped into the folder can't run inside Kinetik, even when it's running as administrator.
+- **Elevated startup copies the `lib` folder too.** With **Run at startup** on as administrator, `C:\Program Files\Kinetik` now gets the `lib` folder alongside the exe.
+
+**Updating from v2.0.3 or earlier:** right-click the bar → **Exit**, then extract the zip into the folder where your old `Kinetik.exe` was, replacing it. If you use **Run at startup**, run the new Kinetik once as administrator (right-click → **Restart as administrator**) so the startup copy is updated too.
+
+**SHA-256 of `Kinetik.exe`:** `399B8797D5B98BE607CDEE1779BA50D7ED10ABAD2BBC00C5B7A3CC3C6BCF77E1`. To check your copy, run `Get-FileHash Kinetik.exe` in PowerShell.
+
+---
+
 # Kinetik v2.0.3
 
 - **New: game overlay.** A slim, always-on-top strip of stats you can keep on screen while you play.

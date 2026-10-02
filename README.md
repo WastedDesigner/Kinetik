@@ -6,7 +6,7 @@ A lightweight, TrafficMonitor-style stats overlay for the Windows 11 taskbar. It
 
 ![Kinetik on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
 
-**Latest version: v2.0.3.** [Download it from Releases](../../releases/latest).
+**Latest version: v2.0.4.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 
@@ -214,6 +214,11 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v2.0.4: zip download
+
+- The download is now `Kinetik.zip`, with `Kinetik.exe` and a `lib` folder. The LibreHardwareMonitor DLLs are no longer packed inside the exe, a pattern antivirus software is wary of.
+- Each DLL in `lib` is checked against the version Kinetik was built with before it loads.
 
 ### v2.0.3: game overlay and FPS counter
 
