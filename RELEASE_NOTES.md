@@ -1,3 +1,43 @@
+# Kinetik v2.1.0 beta 1 (test version)
+
+**This is a test version.** Everything new here needs more testing before a stable release. Please report anything odd on the Issues page.
+
+**For gaming**
+- **New: Base FPS.** The frame rate the game renders itself, before DLSS or FSR frame generation adds frames. FPS keeps showing what reaches the screen. Works in games with NVIDIA Reflex, which every DLSS frame generation game has.
+- **New: 1% and 0.1% lows.** The frame rate that 99% (or 99.9%) of frames beat over the last 10 seconds. They show stutter that an average hides.
+- **New: frame time graph.** The time per frame, with a little graph of the last 3 seconds. Spikes are stutters.
+- **New: render latency.** Time from a game starting a frame to presenting it, in games with NVIDIA Reflex.
+- **New: show the overlay automatically.** **Settings → Overlay → Show automatically in games** brings the overlay up while a fullscreen or borderless game is in front, and hides it when you leave. Ctrl+Shift+F10 hides it for the rest of that game.
+- **New: session summaries.** When a game closes, a notification shows how long you played, the average FPS, the 1% low and the peak GPU temperature. Each session is also saved to `Sessions.csv`.
+- **New: benchmark recording.** **Ctrl+Shift+F11** (or **Record benchmark** in the right-click menu) records every stat, each update, to a CSV file in `Documents\Kinetik Benchmarks`. Press it again to stop.
+
+**Notifications** (Settings → General → Notifications)
+- When the CPU or GPU stays above its warning temperature for 30 seconds.
+- When a Bluetooth device's battery, or the laptop's, drops below its warning level.
+- When the free-space drive runs low (at most every 6 hours).
+- Optional: when ping stays high or times out.
+
+**On the bar**
+- **New: hover graphs.** Hover over a stat for its last minute as a graph, its minimum, average and maximum, and the processes using the most CPU, memory, GPU, disk or network. Turn it off in **Settings → Appearance → Hover graphs**.
+- **New: show on all taskbars.** **Settings → General → Show on all taskbars** puts a copy of the bar on every monitor's taskbar.
+
+**New stats**
+- GPU hot spot and GPU memory temperature (not every card reports these).
+- Drive temperature (the hottest drive) and RAM temperature (if your memory reports it). Both need administrator rights.
+- Top network app (needs administrator rights), VPN status, public IP address (asks api.ipify.org every 5 minutes while it's shown), time and date.
+
+**Settings**
+- **New: profiles.** Save your setup under a name (for example Gaming and Work) in **Settings → General → Profiles and backup**, and switch between them there or from the right-click menu.
+- **New: back up and restore** every setting to a `.kinetik` file.
+- **New: install updates from Kinetik.** **Settings → About → Check for updates** can now download and install a new version. It checks the download against the SHA-256 in the release notes before changing anything, keeps the old files until the next start, and restarts Kinetik. **Include test versions** offers test builds like this one.
+
+**Notes**
+- FPS, the lows, frame times, latency, game detection and per-app network all need Kinetik to run as administrator, like before.
+- While Base FPS or render latency is shown, games with NVIDIA Reflex measure their own latency a few times a second, as they do with NVIDIA FrameView.
+- An elevated startup copy in `C:\Program Files\Kinetik` is now only ever replaced by a newer version, so running an older copy as administrator no longer downgrades it.
+
+---
+
 # Kinetik v2.0.4
 
 - **The download is now a zip.** `Kinetik.zip` contains `Kinetik.exe` and a `lib` folder. Extract it anywhere and keep the two together. The `lib` folder holds the LibreHardwareMonitor library that reads CPU temperature and AMD / Intel GPUs.

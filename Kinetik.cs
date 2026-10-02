@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("2.0.4.0")]
-[assembly: AssemblyFileVersion("2.0.4.0")]
-[assembly: AssemblyInformationalVersion("2.0.4")]
+[assembly: AssemblyVersion("2.1.0.0")]
+[assembly: AssemblyFileVersion("2.1.0.0")]
+[assembly: AssemblyInformationalVersion("2.1.0-beta.1")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -58,6 +58,9 @@ class Settings
     public bool Cpu = true, CpuCores = false, CpuClock = true, CpuTemp = true, CpuPower = false;
     public bool Ram = true, RamGb = true, RamCommit = false;
     public bool Gpu = true, GpuTemp = true, GpuClock = false, GpuFan = false, GpuVram = false, GpuVramPct = false, GpuPower = false, Fps = false, BaseFps = false;
+    public bool FpsLow = false, FpsLow01 = false, FrameTime = false, Latency = false;
+    public bool GpuHotspot = false, GpuMemTemp = false, SsdTemp = false, RamTemp = false;
+    public bool NetApp = false, PublicIp = false, Vpn = false, Clock = false, Date = false;
     public bool Disk = false, DiskRead = false, DiskWrite = false, DiskFree = false;
     public bool Processes = false, Uptime = false;
     public bool PcBattery = true, BatTime = false, Batteries = true, DeviceNames = false;
@@ -82,6 +85,9 @@ class Settings
 
     // Game overlay: a slim always-on-top strip with its own stats, for use while gaming
     public bool OverlayShow = false, OverlayLocked = false, OverlayHotkey = true, OverlayText = true;
+    public bool OverlayAuto = false;     // show the overlay by itself while a game is in front
+    public bool SessionSummary = false;  // log and announce a summary when a game closes
+    public bool BenchHotkey = true;      // Ctrl+Shift+F11 records every stat to a CSV file
     public string OverlayOrder = DefaultOverlayOrder, OverlayItems = DefaultOverlayItems;
     public int OverlayX = int.MinValue, OverlayY = int.MinValue; // int.MinValue = top-left corner of the main screen
     public int OverlayScale = 100, OverlayOpacity = 60;
@@ -107,22 +113,30 @@ class Settings
     public int Interval = 1000, Offset = 0;
     public bool ClickTaskMgr = true, HideFullscreen = true, TrayIcon = true;
     public bool TrayAnimate = true, TaskbarButton = false;
+    public bool BarHover = true;      // hovering a stat on the bar shows its last minute and the top process
+    public bool AllTaskbars = false;  // also show the bar on other monitors' taskbars
+    public bool UpdateBeta = false;   // offer test versions in the update check
+    // Notifications
+    public bool AlertTemps = true, AlertBattery = true, AlertDisk = true, AlertPing = false;
     public int AnimFps = 60, TrayStyle = 0, AppBackground = 0; // icon animation frame rate; tray icon background (see TrayIconArt.Styles)
 
     // Every stat that can appear on the bar, in default order. Dividers ("Sep1", "Sep2", ...) are added by the user.
-    public const string DefaultOrder = "Up,Down,NetTotal,Ping,Wifi,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit," +
-        "Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Fps,BaseFps,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
+    public const string DefaultOrder = "Up,Down,NetTotal,NetApp,Ping,Wifi,PublicIp,Vpn,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit,RamTemp," +
+        "Gpu,GpuTemp,GpuHotspot,GpuMemTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Fps,BaseFps,FpsLow,FpsLow01,FrameTime,Latency," +
+        "Disk,DiskRead,DiskWrite,DiskFree,SsdTemp,Processes,Uptime,Clock,Date,PcBattery,BatTime,Batteries";
     public static readonly string[] StatIds = DefaultOrder.Split(',');
 
     // The widget has its own order (grouped by hardware) and its own set of stats that are switched on.
-    public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Fps,BaseFps," +
-        "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Wifi,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
+    public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuHotspot,GpuMemTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower," +
+        "Fps,BaseFps,FpsLow,FpsLow01,FrameTime,Latency,Ram,RamGb,RamCommit,RamTemp,Down,Up,NetTotal,NetApp,Ping,Wifi,PublicIp,Vpn," +
+        "Disk,DiskRead,DiskWrite,DiskFree,SsdTemp,Processes,Uptime,Clock,Date,PcBattery,BatTime,Batteries";
     public const string DefaultWidgetItems = "Cpu,CpuTemp,CpuClock,Gpu,GpuTemp,GpuVram,Ram,RamGb,Down,Up,Wifi";
     public static readonly string[] WidgetIds = DefaultWidgetOrder.Split(',');
 
     // The game overlay likewise has its own order and selection, with the frame rate first.
-    public const string DefaultOverlayOrder = "Fps,BaseFps,Cpu,CpuTemp,CpuPower,CpuClock,CpuCores,Gpu,GpuTemp,GpuPower,GpuClock,GpuFan,GpuVram,GpuVramPct," +
-        "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Wifi,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
+    public const string DefaultOverlayOrder = "Fps,BaseFps,FpsLow,FpsLow01,FrameTime,Latency,Cpu,CpuTemp,CpuPower,CpuClock,CpuCores," +
+        "Gpu,GpuTemp,GpuHotspot,GpuMemTemp,GpuPower,GpuClock,GpuFan,GpuVram,GpuVramPct,Ram,RamGb,RamCommit,RamTemp," +
+        "Down,Up,NetTotal,NetApp,Ping,Wifi,PublicIp,Vpn,Disk,DiskRead,DiskWrite,DiskFree,SsdTemp,Processes,Uptime,Clock,Date,PcBattery,BatTime,Batteries";
     public const string DefaultOverlayItems = "Fps,Cpu,CpuTemp,Gpu,GpuTemp,Ram";
     public static readonly string[] OverlayIds = DefaultOverlayOrder.Split(',');
 
@@ -189,7 +203,20 @@ class Settings
     public void SetOverlayOn(string id, bool on) { OverlayItems = WithItem(OverlayItems, id, on); }
 
     // True when the bar, the widget or the overlay shows this stat, i.e. when it needs measuring.
-    public bool Wants(string id) { return IsOn(id) || (WidgetShow && WidgetIsOn(id)) || (OverlayShow && OverlayIsOn(id)); }
+    public bool Wants(string id)
+    {
+        if (IsOn(id) || (WidgetShow && WidgetIsOn(id)) || ((OverlayShow || OverlayAuto) && OverlayIsOn(id))) return true;
+        if (AlertTemps && (id == "CpuTemp" || id == "GpuTemp")) return true;
+        if (AlertDisk && id == "DiskFree") return true;
+        if (AlertPing && id == "Ping") return true;
+        if (AlertBattery && id == "Batteries") return true;
+        if ((OverlayAuto || SessionSummary || Recording) && (id == "Fps" || id == "FpsLow" || id == "GpuTemp" || id == "CpuTemp")) return true;
+        return false;
+    }
+
+    // Set while a benchmark CSV is being recorded. A property, so it is never saved with the settings.
+    volatile bool recording;
+    public bool Recording { get { return recording; } set { recording = value; } }
 
     // ---- Per-item icon / colour overrides
     string customSrc;
@@ -239,7 +266,7 @@ class Settings
 
     // Keeps every number within what the app can handle, so a bad or tampered registry value can't crash it
     // (e.g. a zero timer interval) or make it allocate a huge window.
-    void Sanitize()
+    public void Sanitize()
     {
         Func<int, int, int, int> cl = (v, lo, hi) => Math.Max(lo, Math.Min(hi, v));
         Interval = cl(Interval, 250, 60000); Offset = cl(Offset, 0, 10000); AnimFps = cl(AnimFps, 10, 120);
@@ -347,6 +374,14 @@ class Snapshot
     public string CpuName = "", CpuTempStatus = "";
     public double Fps = double.NaN; // frame rate of the app in the foreground
     public double BaseFps = double.NaN; // frames the game itself rendered, before frame generation (Reflex games)
+    public double FpsLow = double.NaN, FpsLow01 = double.NaN; // 1% / 0.1% lows over the last 10 seconds
+    public double FrameTime = double.NaN;                       // average frame time over the last second, ms
+    public double[] FrameGraph = new double[0];                 // worst frame time per slice of the last 3 s, 0-100
+    public double Latency = double.NaN;                         // Reflex simulation start → present end, ms
+    public int GamePid; public string GameName = "";            // the game in front, if one is
+    public double GpuHotspot = double.NaN, GpuMemTemp = double.NaN, SsdTemp = double.NaN, RamTemp = double.NaN;
+    public string NetAppName = ""; public double NetAppRate = -1;
+    public string PublicIp = "", Vpn = null;                    // Vpn: null = not checked, "" = none, else its name
     public string FpsApp = "", FpsStatus = "";
 }
 
@@ -358,20 +393,24 @@ class HwSensors
     LibreHardwareMonitor.Hardware.Computer computer;
     LibreHardwareMonitor.Hardware.IHardware cpu;
     List<LibreHardwareMonitor.Hardware.IHardware> gpus = new List<LibreHardwareMonitor.Hardware.IHardware>();
+    List<LibreHardwareMonitor.Hardware.IHardware> nvGpus = new List<LibreHardwareMonitor.Hardware.IHardware>();
     string bestGpu;
     public string Error = "";
-    public bool CpuEnabled;
+    public bool CpuEnabled, DrivesEnabled;
+    DateTime drivesAt = DateTime.MinValue;
+    double ssdTemp = double.NaN, ramTemp = double.NaN;
 
     public bool HasCpu { get { return cpu != null; } }
     public List<string> GpuNames { get { return gpus.Select(g => g.Name).ToList(); } }
 
-    public bool Open(bool withCpu)
+    public bool Open(bool withCpu, bool withDrives)
     {
-        CpuEnabled = withCpu;
+        CpuEnabled = withCpu; DrivesEnabled = withDrives;
         try
         {
-            computer = new LibreHardwareMonitor.Hardware.Computer { IsCpuEnabled = withCpu, IsGpuEnabled = true };
+            computer = new LibreHardwareMonitor.Hardware.Computer { IsCpuEnabled = withCpu, IsGpuEnabled = true, IsStorageEnabled = withDrives, IsMemoryEnabled = withDrives };
             computer.Open();
+            nvGpus = computer.Hardware.Where(h => h.HardwareType == LibreHardwareMonitor.Hardware.HardwareType.GpuNvidia).ToList();
             cpu = computer.Hardware.FirstOrDefault(h => h.HardwareType == LibreHardwareMonitor.Hardware.HardwareType.Cpu);
             gpus = computer.Hardware.Where(h => h.HardwareType == LibreHardwareMonitor.Hardware.HardwareType.GpuAmd
                                              || h.HardwareType == LibreHardwareMonitor.Hardware.HardwareType.GpuIntel).ToList();
@@ -393,7 +432,7 @@ class HwSensors
     public void Close()
     {
         try { if (computer != null) computer.Close(); } catch { }
-        computer = null; cpu = null; gpus = new List<LibreHardwareMonitor.Hardware.IHardware>();
+        computer = null; cpu = null; gpus = new List<LibreHardwareMonitor.Hardware.IHardware>(); nvGpus = new List<LibreHardwareMonitor.Hardware.IHardware>();
     }
 
     // First sensor of the given type whose name matches one of the candidates (in priority order).
@@ -447,6 +486,42 @@ class HwSensors
         return true;
     }
 
+    // GPU hot spot and memory temperatures of the chosen card (any vendor), and the hottest drive and DIMM.
+    // Drives and DIMMs are read every 10 seconds: their temperatures move slowly and SMART queries aren't free.
+    public void ReadExtra(string gpuName, bool preferNvidia, bool drives, Snapshot s)
+    {
+        var T = LibreHardwareMonitor.Hardware.SensorType.Temperature;
+        var all = gpus.Concat(nvGpus).ToList();
+        var g = all.FirstOrDefault(x => x.Name == gpuName)
+             ?? (preferNvidia ? nvGpus.FirstOrDefault() : all.FirstOrDefault(x => x.Name == bestGpu));
+        if (g != null)
+        {
+            g.Update();
+            s.GpuHotspot = Value(g, T, "GPU Hot Spot");
+            s.GpuMemTemp = Value(g, T, "GPU Memory Junction", "GPU Memory");
+        }
+        if (!drives || computer == null) return;
+        if ((DateTime.UtcNow - drivesAt).TotalSeconds >= 10)
+        {
+            drivesAt = DateTime.UtcNow;
+            ssdTemp = ramTemp = double.NaN;
+            foreach (var h in computer.Hardware)
+            {
+                bool storage = h.HardwareType == LibreHardwareMonitor.Hardware.HardwareType.Storage;
+                if (!storage && h.HardwareType != LibreHardwareMonitor.Hardware.HardwareType.Memory) continue;
+                try { h.Update(); } catch { continue; }
+                foreach (var sub in new[] { h }.Concat(h.SubHardware))
+                    foreach (var sn in sub.Sensors)
+                    {
+                        if (sn.SensorType != T || !sn.Value.HasValue || sn.Value.Value <= 0 || sn.Value.Value > 150) continue;
+                        if (storage) ssdTemp = double.IsNaN(ssdTemp) ? sn.Value.Value : Math.Max(ssdTemp, sn.Value.Value);
+                        else ramTemp = double.IsNaN(ramTemp) ? sn.Value.Value : Math.Max(ramTemp, sn.Value.Value);
+                    }
+            }
+        }
+        s.SsdTemp = ssdTemp; s.RamTemp = ramTemp;
+    }
+
     public void ReadCpu(out double temp, out double power)
     {
         temp = double.NaN; power = double.NaN;
@@ -493,17 +568,27 @@ class FpsMeter
     static readonly Guid D3d9 = new Guid("783aca0a-790e-4d7f-8451-aa850511c6b9");
     static readonly Guid DxgKrnl = new Guid("802ec45a-1e99-4b83-9920-87c98277ba9d");
     static readonly Guid PclStats = new Guid("0d216f06-82a6-4d49-bc4f-8f38ae56efab"); // "PCLStatsTraceLoggingProvider"
+    static readonly Guid KernelNet = new Guid("7dd42a49-5329-4832-8dfd-43d979153a88"); // Microsoft-Windows-Kernel-Network
     const int Sources = 8; // 0 DXGI present, 1 D3D9 present, 2-6 kernel blit / flip / present history / present / detailed history,
                            // 7 Reflex simulation start (one per rendered frame)
     const int Presents = 7; // sources below this are displayed frames
 
-    // Present timestamps (QPC ticks) of one process, per source, for the last couple of seconds.
-    class Proc { public readonly Queue<long>[] Times = new Queue<long>[Sources]; public long Last; }
+    // One process's recent events: present timestamps (QPC ticks) per source for the last 10 seconds (enough for
+    // 1% lows), and its Reflex frames in flight and their latencies.
+    class Proc
+    {
+        public readonly Queue<long>[] Times = new Queue<long>[Sources];
+        public long Last;
+        public readonly Dictionary<ulong, long> SimStart = new Dictionary<ulong, long>(); // Reflex frame id → simulation start
+        public readonly Queue<KeyValuePair<long, double>> Latency = new Queue<KeyValuePair<long, double>>(); // (time, ms)
+    }
 
     readonly Dictionary<int, Proc> procs = new Dictionary<int, Proc>();
+    Dictionary<int, long[]> net = new Dictionary<int, long[]>(); // pid → { sent, received } bytes since the last TakeNet
+    readonly object netLock = new object();
     readonly RecordCallback callback;
     ulong session, trace = ulong.MaxValue;
-    bool exitHooked, baseOn;
+    bool exitHooked, baseOn, netOn;
     public string Error = "";
 
     public FpsMeter() { callback = OnEvent; }
@@ -567,7 +652,7 @@ class FpsMeter
     {
         if (trace != ulong.MaxValue) { CloseTrace(trace); trace = ulong.MaxValue; }
         if (session != 0) { StopSession(); session = 0; }
-        baseOn = false;
+        baseOn = netOn = false;
     }
 
     // Switches the Reflex markers on or off for the running session.
@@ -579,27 +664,78 @@ class FpsMeter
         baseOn = on;
     }
 
+    // Switches per-app network accounting (TCP / UDP send and receive sizes) on or off.
+    public void SetNet(bool on)
+    {
+        if (session == 0 || on == netOn) return;
+        var g = KernelNet;
+        EnableTraceEx2(session, ref g, on ? 1 : 0, 4, 0x30, 0, 0, IntPtr.Zero); // IPv4 | IPv6 keywords
+        netOn = on;
+        if (!on) lock (netLock) net.Clear();
+    }
+
     // Runs on the trace thread for every event. Reads EVENT_RECORD's header directly.
     void OnEvent(IntPtr rec)
     {
         int provider = Marshal.ReadInt32(rec, 24), id = Marshal.ReadInt16(rec, 40) & 0xFFFF, src; // ProviderId.Data1, EventDescriptor.Id
-        if (provider == unchecked((int)0xca11c036)) { if (id != 42) return; src = 0; }
+        int len = Marshal.ReadInt16(rec, 86) & 0xFFFF;
+        IntPtr data = Marshal.ReadIntPtr(rec, 96);
+        long ts = Marshal.ReadInt64(rec, 16);
+        if (provider == 0x7dd42a49)
+        {
+            // Send / receive events start with the owning process ID and the size. Receives are often logged from
+            // another process's context, so the header's process ID can't be used.
+            bool send = id == 10 || id == 26 || id == 42 || id == 58, recv = id == 11 || id == 27 || id == 43 || id == 59;
+            if ((!send && !recv) || len < 8 || data == IntPtr.Zero) return;
+            int npid = Marshal.ReadInt32(data), size = Marshal.ReadInt32(data, 4);
+            lock (netLock)
+            {
+                long[] b;
+                if (!net.TryGetValue(npid, out b)) net[npid] = b = new long[2];
+                b[send ? 0 : 1] += size;
+            }
+            return;
+        }
+        int pid = Marshal.ReadInt32(rec, 12);
+        if (provider == 0x0d216f06)
+        {
+            // PCLStatsEvent (V1-V3) carry UInt32 Marker then UInt64 FrameID; the provider's other events are shorter.
+            if (len < 12 || data == IntPtr.Zero) return;
+            int marker = Marshal.ReadInt32(data);
+            ulong frame = (ulong)Marshal.ReadInt64(data, 4);
+            if (marker == 5) // PCLSTATS_PRESENT_END: the frame's latency, from when its simulation started
+            {
+                lock (procs)
+                {
+                    Proc lp; long start;
+                    if (procs.TryGetValue(pid, out lp) && lp.SimStart.TryGetValue(frame, out start))
+                    {
+                        lp.SimStart.Remove(frame);
+                        lp.Latency.Enqueue(new KeyValuePair<long, double>(ts, (ts - start) * 1000.0 / Stopwatch.Frequency));
+                        while (lp.Latency.Count > 0 && lp.Latency.Peek().Key < ts - 2 * Stopwatch.Frequency) lp.Latency.Dequeue();
+                    }
+                }
+                return;
+            }
+            if (marker != 0) return; // 0 = PCLSTATS_SIMULATION_START
+            src = 7;
+            lock (procs)
+            {
+                Proc sp;
+                if (!procs.TryGetValue(pid, out sp)) procs[pid] = sp = new Proc();
+                if (sp.SimStart.Count > 256) // frames that never presented
+                    foreach (var k in sp.SimStart.Where(kv => kv.Value < ts - 2 * Stopwatch.Frequency).Select(kv => kv.Key).ToList()) sp.SimStart.Remove(k);
+                sp.SimStart[frame] = ts;
+            }
+        }
+        else if (provider == unchecked((int)0xca11c036)) { if (id != 42) return; src = 0; }
         else if (provider == 0x783aca0a) { if (id != 1) return; src = 1; }
         else if (provider == unchecked((int)0x802ec45a))
         {
             switch (id) { case 166: src = 2; break; case 168: src = 3; break; case 171: src = 4; break; case 184: src = 5; break; case 215: src = 6; break; default: return; }
         }
-        else if (provider == 0x0d216f06)
-        {
-            // PCLStatsEvent (V1-V3) carry UInt32 Marker then UInt64 FrameID; the provider's other events are shorter.
-            int len = Marshal.ReadInt16(rec, 86) & 0xFFFF;
-            IntPtr data = Marshal.ReadIntPtr(rec, 96);
-            if (len < 12 || data == IntPtr.Zero || Marshal.ReadInt32(data) != 0) return; // 0 = PCLSTATS_SIMULATION_START
-            src = 7;
-        }
         else return;
-        int pid = Marshal.ReadInt32(rec, 12);
-        long ts = Marshal.ReadInt64(rec, 16), keep = ts - 2 * Stopwatch.Frequency;
+        long keep = ts - (src < Presents ? 10 : 2) * Stopwatch.Frequency;
         lock (procs)
         {
             Proc p;
@@ -611,12 +747,87 @@ class FpsMeter
         }
     }
 
+    // Frames per second over the last second of a queue.
     static double Rate(Queue<long> q, long f)
     {
         if (q == null || q.Count < 2) return double.NaN;
         long last = q.Last(), from = last - f;
         var recent = q.Where(t => t >= from).ToList();
         return recent.Count < 2 ? 0 : (recent.Count - 1) * (double)f / (last - recent[0]);
+    }
+
+    // The source that best counts this process's displayed frames: its DirectX presents if it makes any,
+    // otherwise the busiest kernel event type (each fires about once per frame). -1 when it isn't presenting.
+    static int Source(Proc p, long f)
+    {
+        int best = -1; double bestFps = double.NaN;
+        for (int src = 0; src < Presents; src++)
+        {
+            double fps = Rate(p.Times[src], f);
+            if (double.IsNaN(fps)) continue;
+            if (src <= 1 && fps > 0) return src;
+            if (src > 1 && (double.IsNaN(bestFps) || fps > bestFps)) { bestFps = fps; best = src; }
+        }
+        return best;
+    }
+
+    Proc Live(int pid, long now, long f)
+    {
+        Proc p;
+        return procs.TryGetValue(pid, out p) && now - p.Last <= 3 * f ? p : null; // events can arrive up to a second late
+    }
+
+    // Frames per second over the last second of the process's presents, or NaN when it isn't presenting.
+    public double Read(int pid)
+    {
+        long now = Stopwatch.GetTimestamp(), f = Stopwatch.Frequency;
+        lock (procs)
+        {
+            foreach (var dead in procs.Where(kv => now - kv.Value.Last > 15 * f && kv.Value.SimStart.Count == 0).Select(kv => kv.Key).ToList()) procs.Remove(dead);
+            var p = Live(pid, now, f);
+            if (p == null) return double.NaN;
+            int src = Source(p, f);
+            return src < 0 ? double.NaN : Rate(p.Times[src], f);
+        }
+    }
+
+    // Frame pacing of the process: 1% and 0.1% lows over the last 10 seconds (the frame rate that 99% / 99.9% of
+    // frames beat), the average frame time over the last second, and the worst frame time in each tenth of a second
+    // over the last 3 seconds, scaled 0-100 for a little graph.
+    public void ReadPacing(int pid, out double low1, out double low01, out double frameMs, out double[] graph)
+    {
+        low1 = low01 = frameMs = double.NaN; graph = new double[0];
+        long now = Stopwatch.GetTimestamp(), f = Stopwatch.Frequency;
+        lock (procs)
+        {
+            var p = Live(pid, now, f);
+            if (p == null) return;
+            int src = Source(p, f);
+            if (src < 0) return;
+            var t = p.Times[src].ToArray();
+            if (t.Length < 3) return;
+            var ms = new double[t.Length - 1];
+            for (int i = 1; i < t.Length; i++) ms[i - 1] = (t[i] - t[i - 1]) * 1000.0 / f;
+            var sorted = (double[])ms.Clone();
+            Array.Sort(sorted);
+            Func<double, double> pct = q => sorted[Math.Max(0, Math.Min(sorted.Length - 1, (int)Math.Ceiling(q * sorted.Length) - 1))];
+            low1 = 1000 / Math.Max(0.01, pct(0.99));
+            low01 = 1000 / Math.Max(0.01, pct(0.999));
+            long last = t[t.Length - 1];
+            var lastSecond = new List<double>();
+            const int slices = 30;
+            var worst = new double[slices];
+            for (int i = 1; i < t.Length; i++)
+            {
+                long age = last - t[i];
+                if (age <= f) lastSecond.Add(ms[i - 1]);
+                int slice = slices - 1 - (int)(age * 10 / f);
+                if (slice >= 0 && slice < slices) worst[slice] = Math.Max(worst[slice], ms[i - 1]);
+            }
+            frameMs = lastSecond.Count > 0 ? lastSecond.Average() : ms[ms.Length - 1];
+            double top = Math.Max(1000.0 / 30, worst.Max()); // a 30 fps frame fills a third at most, so spikes stand out
+            graph = worst.Select(v => Math.Min(100, v * 100 / top)).ToArray();
+        }
     }
 
     // Rendered frames per second from the game's Reflex markers, or NaN for games without Reflex.
@@ -631,25 +842,29 @@ class FpsMeter
         }
     }
 
-    // Frames per second over the last second of the process's presents, or NaN when it isn't presenting.
-    // An app's DirectX presents are preferred; otherwise the busiest kernel event type (each fires about once per frame).
-    public double Read(int pid)
+    // Average time from a frame's simulation start to its present over the last second (Reflex games only), in ms.
+    public double ReadLatency(int pid)
     {
         long now = Stopwatch.GetTimestamp(), f = Stopwatch.Frequency;
         lock (procs)
         {
-            foreach (var dead in procs.Where(kv => now - kv.Value.Last > 10 * f).Select(kv => kv.Key).ToList()) procs.Remove(dead);
             Proc p;
-            if (!procs.TryGetValue(pid, out p) || now - p.Last > 3 * f) return double.NaN; // events can arrive up to a second late
-            double best = double.NaN;
-            for (int src = 0; src < Presents; src++)
-            {
-                double fps = Rate(p.Times[src], f);
-                if (double.IsNaN(fps)) continue;
-                if (src <= 1 && fps > 0) return fps;
-                if (src > 1 && (double.IsNaN(best) || fps > best)) best = fps;
-            }
-            return best;
+            if (!procs.TryGetValue(pid, out p) || p.Latency.Count == 0) return double.NaN;
+            long last = p.Latency.Last().Key;
+            if (now - last > 3 * f) return double.NaN;
+            var recent = p.Latency.Where(kv => kv.Key >= last - f).Select(kv => kv.Value).ToList();
+            return recent.Count == 0 ? double.NaN : recent.Average();
+        }
+    }
+
+    // Bytes each process sent and received since the last call.
+    public Dictionary<int, long[]> TakeNet()
+    {
+        lock (netLock)
+        {
+            var taken = net;
+            net = new Dictionary<int, long[]>();
+            return taken;
         }
     }
 }
@@ -763,7 +978,7 @@ class Sampler
     public void Start()
     {
         new Thread(Loop) { IsBackground = true, Priority = ThreadPriority.BelowNormal }.Start();
-        NetworkChange.NetworkAddressChanged += (s, e) => nics = null;
+        NetworkChange.NetworkAddressChanged += (s, e) => { nics = null; RefreshIp(); vpnAt = DateTime.MinValue; };
     }
 
     void Init()
@@ -831,7 +1046,10 @@ class Sampler
 
         UpdateSensors(now);
         if (AnyGpuStat) ReadGpu(s);
-        ReadFps(s, c.Wants("Fps") || c.Wants("BaseFps"), c.Wants("BaseFps"));
+        if (sensors != null && (WantGpuExtra || WantDrives))
+            try { sensors.ReadExtra(NvidiaChosen ? gpuName : cfg.GpuSource, NvidiaChosen, WantDrives, s); } catch { }
+        ReadTrace(s);
+        ManageWeb(s);
 
         bool wantCpuSensors = c.Wants("CpuTemp") || c.Wants("CpuPower");
         if (!Program.IsAdmin) sensorStatus = "needs admin – right-click → Restart as administrator";
@@ -867,6 +1085,135 @@ class Sampler
         return s;
     }
 
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
+
+    static readonly int OwnPid = Process.GetCurrentProcess().Id;
+    // Set by the bar while its hover graph for a network stat is open, so per-app traffic is measured for it.
+    public volatile bool NetHover;
+    // Latest per-app network rates (bytes/s, sent + received), for the hover graph.
+    public volatile List<KeyValuePair<string, double>> NetApps = new List<KeyValuePair<string, double>>();
+    DateTime netAt = DateTime.MinValue;
+    readonly Dictionary<int, string> procNames = new Dictionary<int, string>();
+
+    string ProcName(int pid)
+    {
+        string n;
+        if (procNames.TryGetValue(pid, out n)) return n;
+        if (procNames.Count > 500) procNames.Clear();
+        try { using (var p = Process.GetProcessById(pid)) n = p.ProcessName; } catch { n = pid == 0 || pid == 4 ? "System" : "pid " + pid; }
+        procNames[pid] = n;
+        return n;
+    }
+
+    // One trace session covers every stat that comes from Windows' event tracing. It starts when the first of them
+    // is needed and stops when none are.
+    void ReadTrace(Snapshot s)
+    {
+        var c = cfg;
+        bool pacing = c.Wants("FpsLow") || c.Wants("FpsLow01") || c.Wants("FrameTime") || c.Recording;
+        bool wantBase = c.Wants("BaseFps") || c.Wants("Latency");
+        bool wantNet = c.Wants("NetApp") || NetHover;
+        bool wantFps = c.Wants("Fps") || pacing || wantBase;
+        ReadFps(s, wantFps || wantNet, wantBase);
+        if (fpsMeter == null) return;
+        fpsMeter.SetNet(wantNet);
+        int pid = (int)fpsPid;
+        if (pacing)
+        {
+            double[] graph;
+            fpsMeter.ReadPacing(pid, out s.FpsLow, out s.FpsLow01, out s.FrameTime, out graph);
+            s.FrameGraph = graph;
+        }
+        if (c.Wants("Latency")) s.Latency = fpsMeter.ReadLatency(pid);
+
+        // A game: the app in front draws its own frames and fills its whole screen (fullscreen or borderless).
+        if (!double.IsNaN(s.Fps) && s.Fps >= 15 && pid != OwnPid && fpsApp != "explorer")
+        {
+            var fg = GetForegroundWindow();
+            RECT r;
+            if (fg != IntPtr.Zero && GetWindowRect(fg, out r))
+            {
+                var b = Screen.FromHandle(fg).Bounds;
+                if (r.L <= b.Left + 2 && r.T <= b.Top + 2 && r.R >= b.Right - 2 && r.B >= b.Bottom - 2) { s.GamePid = pid; s.GameName = fpsApp; }
+            }
+        }
+
+        if (wantNet)
+        {
+            var now = DateTime.UtcNow;
+            var bytes = fpsMeter.TakeNet();
+            double secs = (now - netAt).TotalSeconds;
+            netAt = now;
+            if (secs > 0 && secs < 10)
+            {
+                var rates = bytes.GroupBy(kv => ProcName(kv.Key))
+                                 .Select(g => new KeyValuePair<string, double>(g.Key, g.Sum(kv => kv.Value[0] + kv.Value[1]) / secs))
+                                 .OrderByDescending(kv => kv.Value).ToList();
+                NetApps = rates;
+                if (rates.Count > 0) { s.NetAppName = rates[0].Key; s.NetAppRate = rates[0].Value; }
+                else { s.NetAppName = ""; s.NetAppRate = 0; }
+            }
+        }
+        else netAt = DateTime.MinValue;
+    }
+
+    // ---- Public IP (asked of api.ipify.org every 5 minutes, only while that stat is shown) and VPN status.
+    System.Threading.Timer ipTimer;
+    volatile string publicIp = "";
+    DateTime vpnAt = DateTime.MinValue; string vpnName = null;
+    static readonly Regex VpnName = new Regex(@"VPN|WireGuard|TAP-|\bTUN\b|OpenVPN|Tailscale|ZeroTier|NordLynx|Proton|Mullvad|AnyConnect|GlobalProtect|Fortinet|Wintun|Pulse Secure|SonicWall", RegexOptions.IgnoreCase);
+    static readonly Regex NotVpn = new Regex(@"Teredo|ISATAP|6to4|IP-HTTPS|Loopback|Hyper-V|vEthernet|VirtualBox|VMware", RegexOptions.IgnoreCase);
+
+    void ManageWeb(Snapshot s)
+    {
+        if (cfg.Wants("PublicIp"))
+        {
+            if (ipTimer == null) ipTimer = new System.Threading.Timer(_ => FetchIp(), null, 0, 5 * 60 * 1000);
+            s.PublicIp = publicIp;
+        }
+        else if (ipTimer != null) { ipTimer.Dispose(); ipTimer = null; publicIp = ""; }
+
+        if (cfg.Wants("Vpn"))
+        {
+            if ((DateTime.UtcNow - vpnAt).TotalSeconds >= 5 || vpnName == null)
+            {
+                vpnAt = DateTime.UtcNow;
+                try
+                {
+                    var v = NetworkInterface.GetAllNetworkInterfaces().FirstOrDefault(n => n.OperationalStatus == OperationalStatus.Up
+                        && !NotVpn.IsMatch(n.Name + " " + n.Description)
+                        && (n.NetworkInterfaceType == NetworkInterfaceType.Ppp || VpnName.IsMatch(n.Name + " " + n.Description)));
+                    vpnName = v == null ? "" : v.Name;
+                }
+                catch { vpnName = ""; }
+            }
+            s.Vpn = vpnName;
+        }
+        else vpnName = null;
+    }
+
+    public void RefreshIp() { if (ipTimer != null) ipTimer.Change(0, 5 * 60 * 1000); }
+
+    void FetchIp()
+    {
+        try
+        {
+            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+            var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create("https://api.ipify.org");
+            req.UserAgent = "Kinetik";
+            req.Timeout = req.ReadWriteTimeout = 8000;
+            using (var resp = req.GetResponse())
+            using (var rd = new StreamReader(resp.GetResponseStream()))
+            {
+                var text = new string(rd.ReadToEnd().Take(64).ToArray()).Trim();
+                System.Net.IPAddress ip;
+                publicIp = System.Net.IPAddress.TryParse(text, out ip) ? ip.ToString() : "";
+            }
+        }
+        catch { publicIp = ""; }
+    }
+
     // The trace session starts when the FPS stat is first shown and stops when nothing shows it.
     void ReadFps(Snapshot s, bool wanted, bool wantBase)
     {
@@ -892,7 +1239,7 @@ class Sampler
         }
         fpsMeter.SetBase(wantBase);
         s.Fps = fpsMeter.Read((int)pid);
-        if (wantBase) s.BaseFps = fpsMeter.ReadBase((int)pid);
+        if (cfg.Wants("BaseFps")) s.BaseFps = fpsMeter.ReadBase((int)pid);
         s.FpsApp = fpsApp;
     }
 
@@ -986,12 +1333,13 @@ class Sampler
     void UpdateSensors(DateTime now)
     {
         bool wantCpu = Program.IsAdmin && (cfg.Wants("CpuTemp") || cfg.Wants("CpuPower"));
-        bool wantGpu = (AnyGpuStat && !NvidiaChosen) || gpuScanRequested;
-        if (wantCpu || wantGpu)
+        bool wantGpu = (AnyGpuStat && !NvidiaChosen) || gpuScanRequested || WantGpuExtra;
+        bool wantDrives = WantDrives;
+        if (wantCpu || wantGpu || wantDrives)
         {
             sensorsIdleSince = DateTime.MaxValue;
-            if (sensors != null && wantCpu && !sensors.CpuEnabled) CloseSensors();
-            if (sensors == null && !sensorsFailed) OpenSensors(wantCpu);
+            if (sensors != null && ((wantCpu && !sensors.CpuEnabled) || (wantDrives && !sensors.DrivesEnabled))) CloseSensors();
+            if (sensors == null && !sensorsFailed) OpenSensors(wantCpu, wantDrives);
             gpuScanRequested = false;
         }
         else if (sensors != null)
@@ -1001,12 +1349,15 @@ class Sampler
         }
     }
 
-    void OpenSensors(bool withCpu)
+    bool WantGpuExtra { get { return cfg.Wants("GpuHotspot") || cfg.Wants("GpuMemTemp"); } }
+    bool WantDrives { get { return Program.IsAdmin && (cfg.Wants("SsdTemp") || cfg.Wants("RamTemp")); } }
+
+    void OpenSensors(bool withCpu, bool withDrives)
     {
         try
         {
             var hw = new HwSensors();
-            if (!hw.Open(withCpu)) { sensorStatus = "unavailable (" + hw.Error + ")"; sensorsFailed = true; return; }
+            if (!hw.Open(withCpu, withDrives)) { sensorStatus = "unavailable (" + hw.Error + ")"; sensorsFailed = true; return; }
             sensorStatus = hw.Error != "" ? "unavailable (" + hw.Error + ")" : "";
             sensors = hw;
             lhmGpus = hw.GpuNames;
@@ -1740,6 +2091,19 @@ static class Stats
         { "GpuPower", new[] { "GPU power draw", "Plug", "GpuColor", "GPWR" } },
         { "Fps", new[] { "Frame rate (FPS)", "Monitor", "GpuColor", "FPS" } },
         { "BaseFps", new[] { "Base frame rate (without frame generation)", "Layers", "GpuColor", "BASE" } },
+        { "FpsLow", new[] { "1% low FPS", "Pulse", "GpuColor", "1%" } },
+        { "FpsLow01", new[] { "0.1% low FPS", "Pulse", "GpuColor", "0.1%" } },
+        { "FrameTime", new[] { "Frame time graph", "Stack", "GpuColor", "FT" } },
+        { "Latency", new[] { "Render latency (Reflex)", "Hourglass", "GpuColor", "LAT" } },
+        { "GpuHotspot", new[] { "GPU hot spot temperature", "Thermometer", "GpuColor", "HOT" } },
+        { "GpuMemTemp", new[] { "GPU memory temperature", "Memory chip", "GpuColor", "GMEM" } },
+        { "SsdTemp", new[] { "Drive temperature (hottest)", "Drive", "DiskColor", "SSD" } },
+        { "RamTemp", new[] { "RAM temperature", "RAM stick", "RamColor", "RAMT" } },
+        { "NetApp", new[] { "Top network app", "Up / down", "DownColor", "APP" } },
+        { "PublicIp", new[] { "Public IP address", "Globe", "UpColor", "IP" } },
+        { "Vpn", new[] { "VPN status", "Signal", "UpColor", "VPN" } },
+        { "Clock", new[] { "Time", "Clock", "MiscColor", "TIME" } },
+        { "Date", new[] { "Date", "Clock", "MiscColor", "DATE" } },
         { "Disk", new[] { "Disk activity", "Drive", "DiskColor", "DISK" } },
         { "DiskRead", new[] { "Disk read speed", "Drive read", "DiskColor", "RD" } },
         { "DiskWrite", new[] { "Disk write speed", "Drive write", "DiskColor", "WR" } },
@@ -1793,6 +2157,7 @@ static class Program
         GCSettings.LatencyMode = GCLatencyMode.Batch;
         try { SetDefaultDllDirectories(0x800); } catch { } // LOAD_LIBRARY_SEARCH_SYSTEM32
         AppDomain.CurrentDomain.AssemblyResolve += ResolveLib;
+        Updates.CleanUp();
         bool created;
         MigrateLegacy();
         using (var mutex = new Mutex(true, AppName, out created))
@@ -2003,8 +2368,10 @@ static class Program
             if (SamePath(me, InstalledExe) || !File.Exists(InstalledExe)) { if (!File.Exists(InstalledExe)) SetStartup(true); return; }
             // Started by hand from elsewhere (as admin, so with the user's consent): refresh the installed copy if it differs.
             var a = new FileInfo(me); var b = new FileInfo(InstalledExe);
-            if (a.Length != b.Length || FileVersionInfo.GetVersionInfo(me).FileVersion != FileVersionInfo.GetVersionInfo(InstalledExe).FileVersion)
-                File.Copy(me, InstalledExe, true);
+            Version mine, theirs;
+            bool known = Version.TryParse(FileVersionInfo.GetVersionInfo(me).FileVersion, out mine) & Version.TryParse(FileVersionInfo.GetVersionInfo(InstalledExe).FileVersion, out theirs);
+            if (known && (mine > theirs || (mine == theirs && a.Length != b.Length))) File.Copy(me, InstalledExe, true);
+            else if (!known || mine < theirs) return; // leave a newer installed copy (and its lib folder) alone
             CopyLib();
         }
         catch { }
@@ -2168,6 +2535,8 @@ class StatsBar : Form
 
     public readonly Settings Cfg = new Settings();
     public readonly Sampler Sampler;
+    public readonly GameWatch Watch;
+    Snapshot watched;
     readonly ContextMenuStrip menu = new ContextMenuStrip();
     readonly ToolTip tip = new ToolTip { InitialDelay = 400, ShowAlways = true };
     string lastTip = "";
@@ -2190,17 +2559,31 @@ class StatsBar : Form
         var unlockItem = new ToolStripMenuItem("Unlock desktop widget");
         unlockItem.Click += (s, e) => { Cfg.WidgetLocked = false; Cfg.Save(); Render(true); NotifySettings("Widget"); };
         var overlayItem = new ToolStripMenuItem("Game overlay");
-        overlayItem.Click += (s, e) => SetOverlay(!Cfg.OverlayShow);
+        overlayItem.Click += (s, e) => ToggleOverlay();
+        var benchItem = new ToolStripMenuItem("Record benchmark");
+        benchItem.Click += (s, e) => Watch.ToggleRecording();
         var unlockOverlay = new ToolStripMenuItem("Unlock game overlay");
         unlockOverlay.Click += (s, e) => { Cfg.OverlayLocked = false; Cfg.Save(); Render(true); NotifySettings("Overlay"); };
         menu.Items.Add(widgetItem);
         menu.Items.Add(unlockItem);
         menu.Items.Add(overlayItem);
         menu.Items.Add(unlockOverlay);
+        menu.Items.Add(benchItem);
+        var profilesItem = new ToolStripMenuItem("Profiles");
+        menu.Items.Add(profilesItem);
         menu.Opening += (s, e) =>
         {
             widgetItem.Checked = Cfg.WidgetShow; unlockItem.Visible = Cfg.WidgetShow && Cfg.WidgetLocked;
-            overlayItem.Checked = Cfg.OverlayShow; overlayItem.ShortcutKeyDisplayString = Cfg.OverlayHotkey ? "Ctrl+Shift+F10" : null;
+            overlayItem.Checked = Cfg.OverlayShow || Watch.AutoOverlay; overlayItem.ShortcutKeyDisplayString = Cfg.OverlayHotkey ? "Ctrl+Shift+F10" : null;
+            benchItem.Checked = Watch.IsRecording; benchItem.Text = Watch.IsRecording ? "Stop recording benchmark" : "Record benchmark";
+            benchItem.ShortcutKeyDisplayString = Cfg.BenchHotkey ? "Ctrl+Shift+F11" : null;
+            profilesItem.DropDownItems.Clear();
+            foreach (var name in Profiles.List())
+            {
+                var n = name;
+                profilesItem.DropDownItems.Add(n, null, (s2, e2) => { if (Profiles.Load(Cfg, n)) { Theme.Use(Cfg.AppBackground); if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.Close(); Render(true); } });
+            }
+            if (profilesItem.DropDownItems.Count == 0) profilesItem.DropDownItems.Add(new ToolStripMenuItem("Save one in Settings → General") { Enabled = false });
             unlockOverlay.Visible = Cfg.OverlayShow && Cfg.OverlayLocked;
         };
         menu.Items.Add("Refresh batteries now", null, (s, e) => ThreadPool.QueueUserWorkItem(_ => Sampler.ReadBatteries()));
@@ -2209,6 +2592,8 @@ class StatsBar : Form
         menu.Items.Add("Exit", null, (s, e) => Close());
 
         Sampler = new Sampler(Cfg, () => { try { BeginInvoke((Action)Render); } catch { } });
+        Watch = new GameWatch(this);
+        hoverTimer.Tick += (s, e) => ShowHover();
         HandleCreated += (s, e) =>
         {
             Sampler.Start(); TrimSoon(15000); ListenForShow();
@@ -2305,6 +2690,7 @@ class StatsBar : Form
             trayStyle = Cfg.TrayStyle;
             tray = new NotifyIcon { Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, 0), Text = "Kinetik", ContextMenuStrip = menu };
             tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) OpenSettings(null); };
+            tray.BalloonTipClicked += (s, e) => { if (noteClick != null) noteClick(); };
             tray.Visible = true;
             trayText = null;
         }
@@ -2330,6 +2716,8 @@ class StatsBar : Form
         surface.Dispose();
         if (disposing && widget != null) widget.Dispose();
         if (disposing && overlay != null) overlay.Dispose();
+        if (disposing) { foreach (var m in mirrors) m.Dispose(); if (hover != null) hover.Dispose(); hoverTimer.Dispose(); }
+        if (disposing) { Watch.StopRecording(); if (noteIcon != null) { noteIcon.Visible = false; noteIcon.Dispose(); } noteTimer.Dispose(); }
         if (disposing) { DisposeFonts(); if (measureG != null) { measureG.Dispose(); measureBmp.Dispose(); } brush.Dispose(); }
         base.Dispose(disposing);
     }
@@ -2346,12 +2734,203 @@ class StatsBar : Form
 
     protected override bool ShowWithoutActivation { get { return true; } }
 
-    protected override void OnMouseUp(MouseEventArgs e)
+    protected override void OnMouseUp(MouseEventArgs e) { Clicked(e.Button); base.OnMouseUp(e); }
+
+    public void Clicked(MouseButtons b)
     {
-        if (e.Button == MouseButtons.Right) menu.Show(Cursor.Position);
-        else if (e.Button == MouseButtons.Left && Cfg.ClickTaskMgr)
+        HideHover();
+        if (b == MouseButtons.Right) menu.Show(Cursor.Position);
+        else if (b == MouseButtons.Left && Cfg.ClickTaskMgr)
             try { Process.Start(new ProcessStartInfo(Program.SystemExe("taskmgr.exe")) { UseShellExecute = true }); } catch { }
-        base.OnMouseUp(e);
+    }
+
+    // ---- Hover graphs: the last minute of whatever stat is under the mouse, with the top process behind it.
+    HoverPopup hover;
+    string hoverId;
+    readonly System.Windows.Forms.Timer hoverTimer = new System.Windows.Forms.Timer { Interval = 350 };
+    readonly Dictionary<string, Queue<double>> hoverHist = new Dictionary<string, Queue<double>>();
+    const int HoverSeconds = 60;
+
+    Seg SegAt(Point p)
+    {
+        if (shownL == null) return null;
+        foreach (var col in shownL.Cols)
+            foreach (var sg in col)
+                if (!sg.IsSep && p.X >= sg.X && p.X < sg.X + sg.W + shownL.SegGap / 2 && (col.Count == 1 || (p.Y >= sg.Y && p.Y < sg.Y + shownL.RowH)))
+                    return sg;
+        return null;
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        if (Cfg.BarHover)
+        {
+            var sg = SegAt(e.Location);
+            string id = sg == null ? null : sg.Id;
+            if (id != hoverId)
+            {
+                hoverId = id;
+                if (id == null) HideHover();
+                else if (hover != null && hover.Visible) ShowHover();
+                else { hoverTimer.Stop(); hoverTimer.Start(); }
+            }
+        }
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e) { hoverId = null; HideHover(); base.OnMouseLeave(e); }
+
+    void HideHover()
+    {
+        hoverTimer.Stop();
+        if (hover != null && hover.Visible) hover.Hide();
+        Sampler.NetHover = false;
+        TopProcs.Reset();
+    }
+
+    static string TopKind(string id)
+    {
+        if (id == "Cpu" || id == "CpuCores" || id == "CpuClock" || id == "CpuPower" || id == "CpuTemp") return "cpu";
+        if (id == "Ram" || id == "RamGb" || id == "RamCommit") return "ram";
+        if (id == "Gpu" || id == "GpuVram" || id == "GpuVramPct" || id == "GpuPower" || id == "GpuTemp" || id == "GpuHotspot") return "gpu";
+        if (id == "Disk" || id == "DiskRead" || id == "DiskWrite") return "disk";
+        if (id == "Up" || id == "Down" || id == "NetTotal" || id == "NetApp") return "net";
+        return null;
+    }
+
+    // A stat's value as a number for its graph, or NaN when it has none.
+    public static double Num(string id, Snapshot s)
+    {
+        switch (id)
+        {
+            case "Up": return s.Up;
+            case "Down": return s.Down;
+            case "NetTotal": return s.Up + s.Down;
+            case "NetApp": return s.NetAppRate >= 0 ? s.NetAppRate : double.NaN;
+            case "Ping": return s.Ping >= 0 ? s.Ping : double.NaN;
+            case "Wifi": return s.Wifi >= 0 ? s.Wifi : double.NaN;
+            case "Cpu": return s.Cpu;
+            case "CpuCores": return s.Cores.Length > 0 ? s.Cores.Average() : double.NaN;
+            case "CpuClock": return s.CpuMhz > 0 ? s.CpuMhz : double.NaN;
+            case "CpuTemp": return s.CpuTemp;
+            case "CpuPower": return s.CpuPower;
+            case "Ram": return s.RamLoad;
+            case "RamGb": return s.RamUsed;
+            case "RamCommit": return s.Commit;
+            case "RamTemp": return s.RamTemp;
+            case "Gpu": return s.HasGpu ? s.GpuUtil : double.NaN;
+            case "GpuTemp": return s.HasGpu ? s.GpuTemp : double.NaN;
+            case "GpuHotspot": return s.GpuHotspot;
+            case "GpuMemTemp": return s.GpuMemTemp;
+            case "GpuClock": return s.HasGpu && s.GpuMhz > 0 ? s.GpuMhz : double.NaN;
+            case "GpuFan": return s.HasGpu && s.GpuFan >= 0 ? s.GpuFan : double.NaN;
+            case "GpuVram": return s.HasGpu ? s.VramUsed : double.NaN;
+            case "GpuVramPct": return s.HasGpu && s.VramTotal > 0 ? s.VramUsed * 100 / s.VramTotal : double.NaN;
+            case "GpuPower": return s.HasGpu ? s.GpuPower : double.NaN;
+            case "Fps": return s.Fps;
+            case "BaseFps": return s.BaseFps;
+            case "FpsLow": return s.FpsLow;
+            case "FpsLow01": return s.FpsLow01;
+            case "FrameTime": return s.FrameTime;
+            case "Latency": return s.Latency;
+            case "Disk": return s.Disk >= 0 ? s.Disk : double.NaN;
+            case "DiskRead": return s.DiskRead >= 0 ? s.DiskRead : double.NaN;
+            case "DiskWrite": return s.DiskWrite >= 0 ? s.DiskWrite : double.NaN;
+            case "DiskFree": return s.FreeGb >= 0 ? s.FreeGb : double.NaN;
+            case "SsdTemp": return s.SsdTemp;
+            case "Processes": return s.Processes >= 0 ? s.Processes : double.NaN;
+            default: return double.NaN;
+        }
+    }
+
+    // A number formatted the way that stat shows it.
+    public static string FormatValue(string id, double v, Snapshot s)
+    {
+        switch (id)
+        {
+            case "Up": case "Down": case "NetTotal": case "NetApp": case "DiskRead": case "DiskWrite": return Speed(v);
+            case "Ping": case "FrameTime": case "Latency": return v.ToString(id == "FrameTime" ? "0.0" : "0") + " ms";
+            case "CpuClock": return (v / 1000).ToString("0.00") + " GHz";
+            case "GpuClock": return v.ToString("0") + " MHz";
+            case "CpuTemp": case "GpuTemp": case "GpuHotspot": case "GpuMemTemp": case "SsdTemp": case "RamTemp": return v.ToString("0") + "°C";
+            case "CpuPower": case "GpuPower": return v.ToString("0") + " W";
+            case "RamGb": case "GpuVram": return v.ToString("0.0") + " GB";
+            case "DiskFree": return SizeGb(v);
+            case "Fps": case "BaseFps": case "FpsLow": case "FpsLow01": return v.ToString("0") + " fps";
+            case "Processes": return v.ToString("0");
+            case "GpuFan": return v.ToString("0") + (s.GpuFanRpm ? " rpm" : "%");
+            default: return v.ToString("0") + "%";
+        }
+    }
+
+    void RecordHover(Snapshot s)
+    {
+        int n = Math.Max(10, HoverSeconds * 1000 / Math.Max(250, Cfg.Interval));
+        foreach (var id in Cfg.OrderList())
+        {
+            if (!Cfg.IsOn(id)) { hoverHist.Remove(id); continue; }
+            double v = Num(id, s);
+            if (double.IsNaN(v)) continue;
+            Queue<double> q;
+            if (!hoverHist.TryGetValue(id, out q)) hoverHist[id] = q = new Queue<double>();
+            q.Enqueue(v);
+            while (q.Count > n) q.Dequeue();
+        }
+    }
+
+    void ShowHover()
+    {
+        hoverTimer.Stop();
+        if (hoverId == null || shownL == null) return;
+        var sg = shownL.Cols.SelectMany(col => col).FirstOrDefault(x => x.Id == hoverId && !x.IsSep);
+        if (sg == null) { HideHover(); return; }
+        var s = Sampler.Snap;
+        string id = hoverId, kind = TopKind(id);
+        var info = Stats.Get(id, Cfg);
+        string title = info.Title;
+        if (kind == "cpu" && s.CpuName != "") title += " · " + s.CpuName;
+        else if (kind == "gpu" && s.HasGpu) title += " · " + s.GpuName;
+        string value = string.Join("  ", sg.Parts.Select(p => p.Text));
+        if (value == "" && sg.Bars != null) value = FormatValue(id, Num(id, s), s);
+
+        Queue<double> q;
+        var hist = hoverHist.TryGetValue(id, out q) ? q.ToArray() : new double[0];
+        string range = hist.Length > 1 ? "Last " + (hist.Length * Math.Max(250, Cfg.Interval) / 1000) + " s:  min " + FormatValue(id, hist.Min(), s)
+            + "  ·  avg " + FormatValue(id, hist.Average(), s) + "  ·  max " + FormatValue(id, hist.Max(), s) : "";
+
+        var lines = new List<string>();
+        if ((id == "CpuTemp" || id == "CpuPower") && s.CpuTempStatus != "") lines.Add(s.CpuTempStatus);
+        if (id == "Fps" || id == "BaseFps" || id.StartsWith("FpsLow") || id == "FrameTime" || id == "Latency")
+        {
+            if (s.FpsStatus != "") lines.Add(s.FpsStatus);
+            else lines.Add("App in front: " + (s.FpsApp != "" ? s.FpsApp : "none"));
+            if ((id == "BaseFps" || id == "Latency") && double.IsNaN(Num(id, s))) lines.Add("Needs a game with NVIDIA Reflex");
+        }
+        if (id == "Ping") lines.Add("To " + Cfg.PingHost);
+        if (id == "Wifi" && s.WifiName != "") lines.Add("Network: " + s.WifiName);
+        if (id == "DiskFree" && s.FreeName != "") lines.Add(s.FreeName + " · " + s.FreePct.ToString("0") + "% free");
+        if (id == "Vpn" && !string.IsNullOrEmpty(s.Vpn)) lines.Add("Connection: " + s.Vpn);
+        if (id == "PublicIp") lines.Add("From api.ipify.org, every 5 minutes");
+        if (id == "Batteries") foreach (var d in Sampler.Devices) lines.Add("• " + d.Key + ": " + d.Value + "%");
+
+        if (kind == "net")
+        {
+            Sampler.NetHover = true;
+            if (!Program.IsAdmin) lines.Add("Top apps need admin");
+            else foreach (var a in Sampler.NetApps.Take(3)) lines.Add("• " + a.Key + "  " + Speed(a.Value));
+        }
+        else if (kind != null)
+        {
+            TopProcs.Sample(kind);
+            foreach (var a in TopProcs.Result)
+                lines.Add("• " + a.Key + "  " + (kind == "ram" ? SizeGb(a.Value / 1073741824.0) : kind == "disk" ? Speed(a.Value) : a.Value.ToString("0") + "%"));
+        }
+
+        if (hover == null) hover = new HoverPopup();
+        var pt = PointToScreen(new Point((int)(sg.X + sg.W / 2), 0));
+        hover.Set(title, value, info.Color, hist, range, lines, pt.X, lastY);
+        if (!hover.Visible) hover.Show();
+        hover.Invalidate();
     }
 
     // ---- Layout model ----
@@ -2363,9 +2942,9 @@ class StatsBar : Form
         public List<Part> Parts = new List<Part>();
         public double[] Bars; public Color BarColor;
         public bool IsSep; public float Mark; // divider: size of the line / dot
-        public float W;
+        public float W, X, Y; // width, and where it was last drawn
     }
-    class BarLayout
+    public class BarLayout
     {
         public List<List<Seg>> Cols = new List<List<Seg>>();
         public int Width;
@@ -2415,6 +2994,7 @@ class StatsBar : Form
                 sg.Parts.Add(new Part { Text = text, Template = template, Color = color, Bold = color != dim });
                 segs.Add(sg);
             };
+            Action<double, int> addTemp = (t, limit) => add(double.IsNaN(t) ? "--°C" : t.ToString("0") + "°C", "100°C", double.IsNaN(t) ? dim : warn(t, limit));
             switch (id)
             {
                 case "Up": add(Speed(s.Up), "88.8 MB/s", val); break;
@@ -2458,6 +3038,41 @@ class StatsBar : Form
                     add(asText ? v : v + " base", asText ? "888" : "888 base", double.IsNaN(s.BaseFps) ? dim : val);
                     break;
                 }
+                case "FpsLow": case "FpsLow01":
+                {
+                    double low = id == "FpsLow" ? s.FpsLow : s.FpsLow01;
+                    string v = double.IsNaN(low) ? "--" : low.ToString("0");
+                    add(asText ? v : v + (id == "FpsLow" ? " 1%" : " .1%"), asText ? "888" : "888 .1%", double.IsNaN(low) ? dim : val);
+                    break;
+                }
+                case "FrameTime":
+                {
+                    var sg = seg();
+                    if (s.FrameGraph.Length > 0) { sg.Bars = s.FrameGraph; sg.BarColor = info.Color; }
+                    sg.Parts.Add(new Part { Text = double.IsNaN(s.FrameTime) ? "-- ms" : s.FrameTime.ToString("0.0") + " ms", Template = "88.8 ms", Color = double.IsNaN(s.FrameTime) ? dim : val, Bold = !double.IsNaN(s.FrameTime) });
+                    segs.Add(sg);
+                    break;
+                }
+                case "Latency": add(double.IsNaN(s.Latency) ? "-- ms" : s.Latency.ToString("0") + " ms", "888 ms", double.IsNaN(s.Latency) ? dim : val); break;
+                case "GpuHotspot": addTemp(s.GpuHotspot, c.WarnGpuTemp + 15); break;
+                case "GpuMemTemp": addTemp(s.GpuMemTemp, 100); break;
+                case "SsdTemp": addTemp(s.SsdTemp, 70); break;
+                case "RamTemp": addTemp(s.RamTemp, 85); break;
+                case "NetApp":
+                    if (s.NetAppRate < 0) add("--", "", dim);
+                    else
+                    {
+                        var sg = seg();
+                        string n = s.NetAppName.Length > 12 ? s.NetAppName.Substring(0, 11) + "…" : s.NetAppName;
+                        if (n != "") sg.Parts.Add(new Part { Text = n, Template = "", Color = dim });
+                        sg.Parts.Add(new Part { Text = Speed(s.NetAppRate), Template = "88.8 MB/s", Color = val, Bold = true });
+                        segs.Add(sg);
+                    }
+                    break;
+                case "PublicIp": add(s.PublicIp != "" ? s.PublicIp : "--", "", s.PublicIp != "" ? val : dim); break;
+                case "Vpn": if (s.Vpn != null) add(s.Vpn != "" ? "on" : "off", "off", s.Vpn != "" ? val : dim); break;
+                case "Clock": add(DateTime.Now.ToString("t"), "", val); break;
+                case "Date": add(DateTime.Now.ToString("ddd d MMM"), "", val); break;
                 case "Disk": if (s.Disk >= 0) add(s.Disk.ToString("0") + "%", "100%", warn(s.Disk, 95)); break;
                 case "DiskRead": if (s.DiskRead >= 0) add(Speed(s.DiskRead), "88.8 MB/s", val); break;
                 case "DiskWrite": if (s.DiskWrite >= 0) add(Speed(s.DiskWrite), "88.8 MB/s", val); break;
@@ -2577,7 +3192,7 @@ class StatsBar : Form
     }
 
     // Works out what goes where. Key sums up everything that affects the pixels, so unchanged frames can be skipped.
-    BarLayout Build(int height, bool light)
+    public BarLayout Build(int height, bool light)
     {
         Color val = Cfg.ValueColor, dim = Cfg.LabelColor;
         if (Cfg.AutoTheme)
@@ -2642,7 +3257,7 @@ class StatsBar : Form
         return L;
     }
 
-    void PaintBar(Graphics g, BarLayout L, int height)
+    public void PaintBar(Graphics g, BarLayout L, int height)
     {
         g.Clear(Color.FromArgb(1, 0, 0, 0)); // near-invisible, but still catches mouse clicks
         g.TextRenderingHint = TextRenderingHint.AntiAlias;
@@ -2671,6 +3286,7 @@ class StatsBar : Form
                 var seg = col[row];
                 if (seg.IsSep) { PaintDivider(g, L, seg, cx, height); continue; }
                 float cy = col.Count == 1 ? (height - rowH) / 2 : (row == 0 ? height / 2f - rowH - Cfg.RowGap / 2f : height / 2f + Cfg.RowGap / 2f);
+                seg.X = cx; seg.Y = col.Count == 1 ? 0 : cy;
                 float sx = cx;
                 if (seg.Label != null)
                 {
@@ -2752,6 +3368,12 @@ class StatsBar : Form
         IntPtr taskbar = FindWindow("Shell_TrayWnd", null);
         SyncWidget();
         if (widget != null) { if (fullscreen && (fsScreen == null || widget.IsOnScreen(fsScreen))) widget.HideNow(); else widget.Render(force); }
+        var snap = Sampler.Snap;
+        bool freshSnap = snap != watched;
+        if (freshSnap) { watched = snap; Watch.OnSample(snap); RecordHover(snap); }
+        tip.Active = !Cfg.BarHover;
+        if (!Cfg.BarHover && hover != null && hover.Visible) HideHover();
+        SyncMirrors(fullscreen, fsScreen);
         SyncOverlay();
         if (overlay != null) overlay.Render(force); // made for games, so it stays up in fullscreen
         SyncHotkey();
@@ -2781,6 +3403,31 @@ class StatsBar : Form
         UpdateTooltip(Sampler.Snap);
         ShowWindow(Handle, 8); // SW_SHOWNA
         SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // stay above the taskbar
+        if (freshSnap && hover != null && hover.Visible) ShowHover();
+    }
+
+    // ---- The bar on other monitors' taskbars: one mirror per secondary taskbar, left of where its clock sits.
+    readonly List<MirrorBar> mirrors = new List<MirrorBar>();
+
+    void SyncMirrors(bool fullscreen, Screen fsScreen)
+    {
+        var bars = new List<IntPtr>();
+        if (Cfg.AllTaskbars)
+            for (IntPtr h = FindWindowEx(IntPtr.Zero, IntPtr.Zero, "Shell_SecondaryTrayWnd", null); h != IntPtr.Zero; h = FindWindowEx(IntPtr.Zero, h, "Shell_SecondaryTrayWnd", null))
+                bars.Add(h);
+        while (mirrors.Count > bars.Count) { var m = mirrors[mirrors.Count - 1]; mirrors.RemoveAt(mirrors.Count - 1); m.Close(); m.Dispose(); }
+        while (mirrors.Count < bars.Count) { var m = new MirrorBar(this); mirrors.Add(m); }
+        bool light = LightTaskbar();
+        for (int i = 0; i < bars.Count; i++)
+        {
+            RECT tb;
+            if (!GetWindowRect(bars[i], out tb) || (fullscreen && (fsScreen == null || Screen.FromHandle(bars[i]).DeviceName == fsScreen.DeviceName))) { mirrors[i].HideNow(); continue; }
+            int h = tb.B - tb.T;
+            if (h <= 0 || tb.R - tb.L < h * 4) { mirrors[i].HideNow(); continue; } // vertical or hidden taskbar
+            var L = Build(h, light);
+            int x = tb.R - (int)(h * 2.4) - Cfg.Offset - L.Width;
+            mirrors[i].Push(L, h, x, tb.T);
+        }
     }
 
     void UpdateTooltip(Snapshot s)
@@ -2819,6 +3466,7 @@ class StatsBar : Form
         anim.Advance();
         SpinTray();
         if (Cfg.BarAnimate && shownL != null && IsHandleCreated && lastX != int.MinValue) Push(shownL, shownH, lastX, lastY);
+        if (Cfg.BarAnimate) foreach (var m in mirrors) if (m.Last != null) m.Push(m.Last, m.H, m.X, m.Y);
     }
 
     // ---- Desktop widget: created and destroyed to match the settings.
@@ -2845,8 +3493,9 @@ class StatsBar : Form
 
     void SyncOverlay()
     {
-        if (overlay != null && !Cfg.OverlayShow) { overlay.Close(); overlay.Dispose(); overlay = null; }
-        if (Cfg.OverlayShow && overlay == null) { overlay = new OverlayForm(this); overlay.Show(); }
+        bool show = Cfg.OverlayShow || Watch.AutoOverlay;
+        if (overlay != null && !show) { overlay.Close(); overlay.Dispose(); overlay = null; }
+        if (show && overlay == null) { overlay = new OverlayForm(this); overlay.Show(); }
     }
 
     public void SetOverlay(bool on)
@@ -2856,18 +3505,63 @@ class StatsBar : Form
         BeginInvoke((Action)(() => { Render(true); NotifySettings("Overlay"); }));
     }
 
+    bool benchKeyOn;
+
+    // Ctrl+Shift+F10 shows or hides the overlay, Ctrl+Shift+F11 starts or stops a benchmark recording.
     void SyncHotkey()
     {
-        if (!IsHandleCreated || Cfg.OverlayHotkey == hotkeyOn) return;
-        if (Cfg.OverlayHotkey) hotkeyOn = RegisterHotKey(Handle, 1, 0x2 | 0x4 | 0x4000, (uint)Keys.F10); // Ctrl+Shift, no auto-repeat
-        else { UnregisterHotKey(Handle, 1); hotkeyOn = false; }
+        if (!IsHandleCreated) return;
+        SyncKey(1, Keys.F10, Cfg.OverlayHotkey, ref hotkeyOn);
+        SyncKey(2, Keys.F11, Cfg.BenchHotkey, ref benchKeyOn);
         if (Cfg.OverlayHotkey && !hotkeyOn) Cfg.OverlayHotkey = false; // another app already has it
+        if (Cfg.BenchHotkey && !benchKeyOn) Cfg.BenchHotkey = false;
+    }
+
+    void SyncKey(int id, Keys key, bool want, ref bool on)
+    {
+        if (want == on) return;
+        if (want) on = RegisterHotKey(Handle, id, 0x2 | 0x4 | 0x4000, (uint)key); // Ctrl+Shift, no auto-repeat
+        else { UnregisterHotKey(Handle, id); on = false; }
+    }
+
+    public void ToggleOverlay()
+    {
+        if (!Cfg.OverlayShow && Watch.AutoOverlay) { Watch.Suppress(); Render(true); } // hides it for this game
+        else SetOverlay(!Cfg.OverlayShow);
     }
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == 0x312 && m.WParam.ToInt32() == 1) { SetOverlay(!Cfg.OverlayShow); return; } // WM_HOTKEY
+        if (m.Msg == 0x312) // WM_HOTKEY
+        {
+            if (m.WParam.ToInt32() == 1) ToggleOverlay();
+            else if (m.WParam.ToInt32() == 2) Watch.ToggleRecording();
+            return;
+        }
         base.WndProc(ref m);
+    }
+
+    // ---- Notifications, as Windows toasts through the tray icon (a temporary one when the tray icon is off).
+    NotifyIcon noteIcon; Action noteClick;
+    readonly System.Windows.Forms.Timer noteTimer = new System.Windows.Forms.Timer { Interval = 15000 };
+
+    public void Notify(string title, string text, Action click)
+    {
+        var icon = tray;
+        if (icon == null)
+        {
+            if (noteIcon == null)
+            {
+                noteIcon = new NotifyIcon { Icon = TrayIconArt.Frame(Cfg.TrayStyle, SystemInformation.SmallIconSize.Width, 0), Text = "Kinetik" };
+                noteIcon.BalloonTipClicked += (s, e) => { if (noteClick != null) noteClick(); };
+                noteTimer.Tick += (s, e) => { noteTimer.Stop(); if (noteIcon != null) { noteIcon.Visible = false; noteIcon.Dispose(); noteIcon = null; } };
+            }
+            noteIcon.Visible = true;
+            noteTimer.Stop(); noteTimer.Start();
+            icon = noteIcon;
+        }
+        noteClick = click;
+        try { icon.ShowBalloonTip(8000, title, text, ToolTipIcon.None); } catch { }
     }
 
     // Keeps an open Settings page in step with changes made from a right-click menu.
@@ -2875,6 +3569,498 @@ class StatsBar : Form
     {
         if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.RefreshIfShowing(page);
     }
+}
+
+// ======================================================================= Safe file writes
+// Session logs, benchmarks and profiles are written while Kinetik may be running as administrator, into folders
+// the user's own programs can change. Refusing links stops one of those programs redirecting an admin write onto
+// a protected file.
+static class SafeFile
+{
+    [StructLayout(LayoutKind.Sequential, Pack = 4)] // FILETIMEs are two DWORDs, so 4-byte aligned
+    struct FileInfoByHandle
+    {
+        public uint Attributes; public long Created, Accessed, Written; public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+    }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetFileInformationByHandle(Microsoft.Win32.SafeHandles.SafeFileHandle h, out FileInfoByHandle info);
+
+    [StructLayout(LayoutKind.Sequential, Pack = 4, CharSet = CharSet.Unicode)]
+    struct FindData
+    {
+        public uint Attributes; public long Created, Accessed, Written; public uint SizeHigh, SizeLow, ReparseTag, Reserved1;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string Name;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 14)] public string ShortName;
+    }
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr FindFirstFileW(string path, out FindData data);
+    [DllImport("kernel32.dll")] static extern bool FindClose(IntPtr h);
+
+    // A symbolic link or junction. Other reparse points, like OneDrive's cloud folders, are ordinary folders here.
+    static bool IsLink(string path)
+    {
+        FindData d;
+        var h = FindFirstFileW(path, out d);
+        if (h == new IntPtr(-1)) return false;
+        FindClose(h);
+        return (d.Attributes & 0x400) != 0 && (d.ReparseTag == 0xA000000C || d.ReparseTag == 0xA0000003); // SYMLINK, MOUNT_POINT
+    }
+
+    // Opens path for appending (or creating), as UTF-8. Throws if the file or its folder is a link.
+    public static StreamWriter Append(string path)
+    {
+        var dir = Path.GetDirectoryName(path);
+        Directory.CreateDirectory(dir);
+        for (var d = new DirectoryInfo(dir); d != null && d.Parent != null; d = d.Parent)
+            if (IsLink(d.FullName)) throw new IOException(d.FullName + " is a link");
+        if (File.Exists(path) && IsLink(path)) throw new IOException(path + " is a link");
+        var fs = new FileStream(path, FileMode.OpenOrCreate, FileAccess.Write, FileShare.Read);
+        FileInfoByHandle info;
+        if (!GetFileInformationByHandle(fs.SafeFileHandle, out info) || info.Links > 1) // a hard link to another file
+        {
+            fs.Dispose();
+            throw new IOException(path + " is linked elsewhere");
+        }
+        fs.Seek(0, SeekOrigin.End);
+        return new StreamWriter(fs, new UTF8Encoding(false));
+    }
+
+    public static void Write(string path, string text)
+    {
+        using (var w = Append(path)) { w.BaseStream.SetLength(0); w.Write(text); }
+    }
+}
+
+// ======================================================================= Game sessions, benchmarks and alerts
+// Runs on the UI thread with each new sample: shows the overlay while a game is in front, keeps a summary of each
+// game session, records benchmarks, and raises notifications when something needs attention.
+class GameWatch
+{
+    readonly StatsBar bar;
+    Settings c { get { return bar.Cfg; } }
+    public static string DataDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik"); } }
+
+    public GameWatch(StatsBar bar) { this.bar = bar; }
+
+    // ---- overlay while gaming
+    public bool AutoOverlay { get; private set; }
+    int suppressedPid;
+    DateTime lastGameAt = DateTime.MinValue;
+
+    // The hotkey hides an automatically shown overlay until that game closes.
+    public void Suppress() { suppressedPid = cur != null ? cur.Pid : -1; AutoOverlay = false; }
+
+    // ---- sessions
+    class Session
+    {
+        public int Pid; public string Name; public DateTime Start, LastSeen;
+        public double FpsSum, LowSum; public int FpsCount, LowCount;
+        public double PeakCpu = double.NaN, PeakGpu = double.NaN, PeakHot = double.NaN;
+    }
+    Session cur;
+    DateTime exitCheckAt;
+
+    static double Max(double a, double b) { return double.IsNaN(a) ? b : double.IsNaN(b) ? a : Math.Max(a, b); }
+
+    public void OnSample(Snapshot s)
+    {
+        var now = DateTime.UtcNow;
+        if (s.GamePid != 0)
+        {
+            lastGameAt = now;
+            if (c.OverlayAuto && s.GamePid != suppressedPid) AutoOverlay = true;
+            if (cur == null || cur.Pid != s.GamePid)
+            {
+                if (cur != null) End(cur);
+                cur = new Session { Pid = s.GamePid, Name = s.GameName, Start = now };
+            }
+            cur.LastSeen = now;
+            if (!double.IsNaN(s.Fps)) { cur.FpsSum += s.Fps; cur.FpsCount++; }
+            if (!double.IsNaN(s.FpsLow)) { cur.LowSum += s.FpsLow; cur.LowCount++; }
+            cur.PeakCpu = Max(cur.PeakCpu, s.CpuTemp);
+            if (s.HasGpu) cur.PeakGpu = Max(cur.PeakGpu, s.GpuTemp);
+            cur.PeakHot = Max(cur.PeakHot, s.GpuHotspot);
+        }
+        else if (AutoOverlay && (now - lastGameAt).TotalSeconds > 5) AutoOverlay = false;
+        if (!c.OverlayAuto) AutoOverlay = false;
+
+        // A session ends when its game closes.
+        if (cur != null && (now - exitCheckAt).TotalSeconds >= 5)
+        {
+            exitCheckAt = now;
+            bool alive;
+            try { using (var p = Process.GetProcessById(cur.Pid)) alive = !p.HasExited; }
+            catch (ArgumentException) { alive = false; }
+            catch { alive = true; } // not allowed to ask: assume it's still running
+            if (!alive) { End(cur); cur = null; suppressedPid = 0; }
+        }
+
+        if (writer != null) Record(s);
+        Alerts(s, now);
+    }
+
+    void End(Session x)
+    {
+        var length = x.LastSeen - x.Start;
+        if (!c.SessionSummary || length.TotalSeconds < 60 || x.FpsCount == 0) return;
+        double avg = x.FpsSum / x.FpsCount, low = x.LowCount > 0 ? x.LowSum / x.LowCount : double.NaN;
+        var ci = CultureInfo.InvariantCulture;
+        Func<double, string> n = v => double.IsNaN(v) ? "" : v.ToString("0", ci);
+        try
+        {
+            string path = Path.Combine(DataDir, "Sessions.csv");
+            bool fresh = !File.Exists(path);
+            using (var w = SafeFile.Append(path))
+            {
+                if (fresh) w.WriteLine("Start,Game,Minutes,Average FPS,1% low FPS,Peak CPU °C,Peak GPU °C,Peak GPU hot spot °C");
+                w.WriteLine(string.Join(",", x.Start.ToLocalTime().ToString("yyyy-MM-dd HH:mm", ci), Csv(x.Name), length.TotalMinutes.ToString("0", ci),
+                    n(avg), n(low), n(x.PeakCpu), n(x.PeakGpu), n(x.PeakHot)));
+            }
+        }
+        catch { }
+        var parts = new List<string> { StatsBar.Duration(length.TotalSeconds), "average " + avg.ToString("0") + " fps" };
+        if (!double.IsNaN(low)) parts.Add("1% low " + low.ToString("0"));
+        if (!double.IsNaN(x.PeakGpu)) parts.Add("GPU peak " + x.PeakGpu.ToString("0") + "°C");
+        bar.Notify("Game session: " + x.Name, string.Join(" · ", parts), () => OpenFolder(DataDir));
+    }
+
+    static string Csv(string v) { return v.IndexOfAny(new[] { ',', '"', '\n' }) >= 0 ? "\"" + v.Replace("\"", "\"\"") + "\"" : v; }
+
+    public static void OpenFolder(string path)
+    {
+        try { Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "\"" + path + "\"")); }
+        catch { }
+    }
+
+    // ---- benchmark recording: every sample to a CSV file in Documents\Kinetik Benchmarks
+    StreamWriter writer; string recordPath; int rows; double recFpsSum; int recFpsCount;
+    public bool IsRecording { get { return writer != null; } }
+
+    public void ToggleRecording()
+    {
+        if (writer != null) { StopRecording(); return; }
+        var s = bar.Sampler.Snap;
+        string app = s.GameName != "" ? s.GameName : s.FpsApp != "" ? s.FpsApp : "Kinetik";
+        app = new string(app.Where(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_').ToArray());
+        if (app == "") app = "Kinetik";
+        recordPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Kinetik Benchmarks",
+            app + " " + DateTime.Now.ToString("yyyy-MM-dd HH.mm.ss") + ".csv");
+        try
+        {
+            writer = SafeFile.Append(recordPath);
+            writer.WriteLine("Time,App,FPS,Base FPS,1% low FPS,0.1% low FPS,Frame time ms,Latency ms,CPU %,CPU MHz,CPU °C,CPU W," +
+                             "GPU %,GPU °C,GPU hot spot °C,GPU MHz,GPU W,VRAM GB,RAM %,RAM GB");
+        }
+        catch (Exception e) { writer = null; bar.Notify("Couldn't start recording", e.Message, null); return; }
+        rows = 0; recFpsSum = 0; recFpsCount = 0;
+        c.Recording = true;
+        bar.Notify("Recording benchmark", (c.BenchHotkey ? "Press Ctrl+Shift+F11 again to stop." : "Use the Kinetik menu to stop.") + (Program.IsAdmin ? "" : " FPS needs admin."), null);
+    }
+
+    void Record(Snapshot s)
+    {
+        var ci = CultureInfo.InvariantCulture;
+        Func<double, string, string> n = (v, f) => double.IsNaN(v) || double.IsInfinity(v) ? "" : v.ToString(f, ci);
+        try
+        {
+            writer.WriteLine(string.Join(",", DateTime.Now.ToString("HH:mm:ss.f", ci), Csv(s.GameName != "" ? s.GameName : s.FpsApp),
+                n(s.Fps, "0.0"), n(s.BaseFps, "0.0"), n(s.FpsLow, "0.0"), n(s.FpsLow01, "0.0"), n(s.FrameTime, "0.00"), n(s.Latency, "0.0"),
+                n(s.Cpu, "0"), n(s.CpuMhz, "0"), n(s.CpuTemp, "0"), n(s.CpuPower, "0.0"),
+                s.HasGpu ? n(s.GpuUtil, "0") : "", s.HasGpu ? n(s.GpuTemp, "0") : "", n(s.GpuHotspot, "0"),
+                s.HasGpu ? n(s.GpuMhz, "0") : "", s.HasGpu ? n(s.GpuPower, "0.0") : "", s.HasGpu ? n(s.VramUsed, "0.00") : "",
+                s.RamLoad.ToString(ci), n(s.RamUsed, "0.00")));
+            rows++;
+            if (!double.IsNaN(s.Fps)) { recFpsSum += s.Fps; recFpsCount++; }
+            if (rows % 10 == 0) writer.Flush();
+        }
+        catch { StopRecording(); }
+    }
+
+    public void StopRecording()
+    {
+        if (writer == null) return;
+        try { writer.Dispose(); } catch { }
+        writer = null;
+        c.Recording = false;
+        var path = recordPath;
+        string text = rows + " samples" + (recFpsCount > 0 ? ", average " + (recFpsSum / recFpsCount).ToString("0") + " fps" : "") + ". Click to open the folder.";
+        bar.Notify("Benchmark saved", text, () => OpenFolder(Path.GetDirectoryName(path)));
+    }
+
+    // ---- alerts: a notification when something has needed attention for a while, then quiet for a cooldown
+    DateTime cpuHotSince = DateTime.MaxValue, gpuHotSince = DateTime.MaxValue, pingBadSince = DateTime.MaxValue;
+    readonly Dictionary<string, DateTime> lastAlert = new Dictionary<string, DateTime>();
+    readonly HashSet<string> lowDevices = new HashSet<string>();
+    bool pcLow;
+
+    bool Due(string key, double minutes, DateTime now)
+    {
+        DateTime t;
+        if (lastAlert.TryGetValue(key, out t) && (now - t).TotalMinutes < minutes) return false;
+        lastAlert[key] = now;
+        return true;
+    }
+
+    static bool Held(ref DateTime since, bool bad, DateTime now, double secs)
+    {
+        if (!bad) { since = DateTime.MaxValue; return false; }
+        if (since == DateTime.MaxValue) since = now;
+        return (now - since).TotalSeconds >= secs;
+    }
+
+    void Alerts(Snapshot s, DateTime now)
+    {
+        if (c.AlertTemps)
+        {
+            if (Held(ref cpuHotSince, !double.IsNaN(s.CpuTemp) && s.CpuTemp >= c.WarnCpuTemp, now, 30) && Due("cpu", 10, now))
+                bar.Notify("CPU is running hot", s.CpuTemp.ToString("0") + "°C for the last 30 seconds (your limit is " + c.WarnCpuTemp + "°C).", null);
+            if (Held(ref gpuHotSince, s.HasGpu && s.GpuTemp >= c.WarnGpuTemp, now, 30) && Due("gpu", 10, now))
+                bar.Notify("GPU is running hot", s.GpuTemp.ToString("0") + "°C for the last 30 seconds (your limit is " + c.WarnGpuTemp + "°C).", null);
+        }
+        if (c.AlertPing && Held(ref pingBadSince, s.Ping == -2 || s.Ping >= c.WarnPing, now, 30) && Due("ping", 10, now))
+            bar.Notify(s.Ping == -2 ? "Ping is timing out" : "Ping is high", (s.Ping == -2 ? "No replies" : s.Ping + " ms") + " from " + c.PingHost + " for the last 30 seconds.", null);
+        if (c.AlertDisk && s.FreeGb >= 0 && s.FreePct <= c.WarnFreePct && Due("disk", 6 * 60, now))
+            bar.Notify("Drive almost full", s.FreeName + " has " + StatsBar.SizeGb(s.FreeGb) + " free (" + s.FreePct.ToString("0") + "%).", null);
+        if (c.AlertBattery)
+        {
+            foreach (var d in bar.Sampler.Devices)
+            {
+                if (d.Value <= c.WarnBattery && lowDevices.Add(d.Key)) bar.Notify("Battery low: " + d.Key, d.Key + " is at " + d.Value + "%.", null);
+                else if (d.Value > c.WarnBattery + 5) lowDevices.Remove(d.Key); // charged again: warn next time
+            }
+            var ps = SystemInformation.PowerStatus;
+            if (ps.BatteryChargeStatus != BatteryChargeStatus.NoSystemBattery && ps.BatteryLifePercent <= 1)
+            {
+                int p = (int)Math.Round(ps.BatteryLifePercent * 100);
+                bool low = p <= c.WarnBattery && ps.PowerLineStatus != PowerLineStatus.Online;
+                if (low && !pcLow) bar.Notify("Battery low", "Your PC is at " + p + "%. Plug it in soon.", null);
+                if (!low && (p > c.WarnBattery + 5 || ps.PowerLineStatus == PowerLineStatus.Online)) pcLow = false; else if (low) pcLow = true;
+            }
+        }
+    }
+}
+
+// ======================================================================= Hover graphs
+// The processes using the most of something, sampled once a second while a hover graph shows them.
+static class TopProcs
+{
+    [DllImport("kernel32.dll")] static extern bool GetProcessIoCounters(IntPtr h, out IoCounters c);
+    [StructLayout(LayoutKind.Sequential)] struct IoCounters { public ulong ReadOps, WriteOps, OtherOps, ReadBytes, WriteBytes, OtherBytes; }
+
+    static Dictionary<int, long> cpuPrev = new Dictionary<int, long>(), ioPrev = new Dictionary<int, long>();
+    static Dictionary<string, CounterSample> gpuPrev = new Dictionary<string, CounterSample>();
+    static DateTime prevAt = DateTime.MinValue;
+    static string kindNow = "";
+    static int busy;
+    public static volatile List<KeyValuePair<string, double>> Result = new List<KeyValuePair<string, double>>();
+    static readonly Regex GpuInstance = new Regex(@"pid_(\d+)_.*engtype_(.+)$");
+
+    // kind: "cpu" (% of all cores), "ram" (bytes in use), "disk" (bytes/s), "gpu" (% of the busiest engine)
+    public static void Sample(string kind)
+    {
+        if (Interlocked.Exchange(ref busy, 1) == 1) return;
+        ThreadPool.QueueUserWorkItem(_ => { try { Run(kind); } catch { } finally { busy = 0; } });
+    }
+
+    public static void Reset() { kindNow = ""; Result = new List<KeyValuePair<string, double>>(); }
+
+    static void Run(string kind)
+    {
+        if (kind != kindNow)
+        {
+            cpuPrev.Clear(); ioPrev.Clear(); gpuPrev.Clear(); prevAt = DateTime.MinValue;
+            kindNow = kind; Result = new List<KeyValuePair<string, double>>();
+        }
+        var now = DateTime.UtcNow;
+        double secs = prevAt == DateTime.MinValue ? 0 : (now - prevAt).TotalSeconds;
+        prevAt = now;
+        var totals = new Dictionary<string, double>();
+        Action<string, double> add = (n, v) => { double t; totals.TryGetValue(n, out t); totals[n] = t + v; };
+
+        if (kind == "gpu")
+        {
+            var data = new PerformanceCounterCategory("GPU Engine").ReadCategory()["utilization percentage"];
+            var next = new Dictionary<string, CounterSample>();
+            var perPid = new Dictionary<int, Dictionary<string, double>>();
+            foreach (InstanceData d in data.Values)
+            {
+                next[d.InstanceName] = d.Sample;
+                CounterSample old;
+                var m = GpuInstance.Match(d.InstanceName);
+                if (!m.Success || !gpuPrev.TryGetValue(d.InstanceName, out old)) continue;
+                int pid = int.Parse(m.Groups[1].Value);
+                Dictionary<string, double> engines;
+                if (!perPid.TryGetValue(pid, out engines)) perPid[pid] = engines = new Dictionary<string, double>();
+                double e; engines.TryGetValue(m.Groups[2].Value, out e);
+                engines[m.Groups[2].Value] = e + CounterSample.Calculate(old, d.Sample);
+            }
+            gpuPrev = next;
+            foreach (var kv in perPid)
+            {
+                string name;
+                try { using (var p = Process.GetProcessById(kv.Key)) name = p.ProcessName; } catch { continue; }
+                add(name, kv.Value.Values.Max()); // like Task Manager: the busiest engine
+            }
+        }
+        else
+        {
+            var nextCpu = new Dictionary<int, long>(); var nextIo = new Dictionary<int, long>();
+            foreach (var p in Process.GetProcesses())
+                using (p)
+                {
+                    try
+                    {
+                        if (p.Id == 0) continue; // the Idle process
+                        long old;
+                        if (kind == "ram") add(p.ProcessName, p.WorkingSet64);
+                        else if (kind == "cpu")
+                        {
+                            long t = p.TotalProcessorTime.Ticks; nextCpu[p.Id] = t;
+                            if (secs > 0 && cpuPrev.TryGetValue(p.Id, out old))
+                                add(p.ProcessName, (t - old) * 100.0 / (secs * TimeSpan.TicksPerSecond * Environment.ProcessorCount));
+                        }
+                        else if (kind == "disk")
+                        {
+                            IoCounters io;
+                            if (!GetProcessIoCounters(p.Handle, out io)) continue;
+                            long t = (long)(io.ReadBytes + io.WriteBytes); nextIo[p.Id] = t;
+                            if (secs > 0 && ioPrev.TryGetValue(p.Id, out old)) add(p.ProcessName, (t - old) / secs);
+                        }
+                    }
+                    catch { } // protected processes can't be asked
+                }
+            cpuPrev = nextCpu; ioPrev = nextIo;
+        }
+        Result = totals.Where(kv => kv.Value > 0).OrderByDescending(kv => kv.Value).Take(3).ToList();
+    }
+}
+
+// The card that opens above a stat on the bar: its last minute as a graph, the range, and what's behind it.
+class HoverPopup : Form
+{
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int v, int size);
+    string title = "", value = "", range = "";
+    double[] hist = new double[0];
+    List<string> lines = new List<string>();
+    Color accent = Theme.Accent;
+    Font fTitle, fValue, fSmall;
+    float u = 1;
+
+    public HoverPopup()
+    {
+        FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; StartPosition = FormStartPosition.Manual;
+        DoubleBuffered = true; BackColor = Theme.Card;
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get { var cp = base.CreateParams; cp.ExStyle |= 0x80 | 0x8 | 0x08000000 | 0x20; return cp; } // TOOLWINDOW | TOPMOST | NOACTIVATE | TRANSPARENT
+    }
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        int round = 2; DwmSetWindowAttribute(Handle, 33, ref round, 4); // rounded corners
+        int dark = 1; DwmSetWindowAttribute(Handle, 20, ref dark, 4);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) foreach (var f in new[] { fTitle, fValue, fSmall }) if (f != null) f.Dispose();
+        base.Dispose(disposing);
+    }
+
+    public void Set(string title, string value, Color accent, double[] hist, string range, List<string> lines, int cursorX, int barTop)
+    {
+        this.title = title; this.value = value; this.accent = accent; this.hist = hist; this.range = range; this.lines = lines;
+        float nu = DeviceDpi / 96f;
+        if (fTitle == null || nu != u)
+        {
+            u = nu;
+            foreach (var f in new[] { fTitle, fValue, fSmall }) if (f != null) f.Dispose();
+            fTitle = Theme.UI(9.5f, FontStyle.Bold); fValue = Theme.UI(15f, FontStyle.Bold); fSmall = Theme.UI(8.5f);
+        }
+        int w = (int)(290 * u);
+        int h = (int)((12 + 22 + 30 + (hist.Length > 1 ? 62 + 18 : 0) + lines.Count * 18 + 10) * u);
+        var wa = Screen.FromPoint(new Point(cursorX, barTop - 1)).WorkingArea;
+        int x = Math.Max(wa.Left + 8, Math.Min(wa.Right - w - 8, cursorX - w / 2));
+        Bounds = new Rectangle(x, barTop - h - (int)(10 * u), w, h);
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+        g.Clear(Theme.Card);
+        float pad = 12 * u, y = pad, w = ClientSize.Width - pad * 2;
+        using (var sub = new SolidBrush(Theme.Sub)) using (var text = new SolidBrush(Theme.Text)) using (var ac = new SolidBrush(accent))
+        {
+            g.DrawString(title, fTitle, sub, new RectangleF(pad, y, w, 20 * u), new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap });
+            y += 22 * u;
+            g.DrawString(value, fValue, text, pad, y - 2 * u);
+            y += 30 * u;
+            if (hist.Length > 1)
+            {
+                var r = new RectangleF(pad, y, w, 56 * u);
+                double lo = hist.Min(), hi = hist.Max();
+                if (hi - lo < 1e-9) { hi = lo + 1; }
+                double floor = lo >= 0 && lo < hi * 0.5 ? 0 : lo; // start at 0 unless the values sit in a narrow high band
+                var pts = new PointF[hist.Length];
+                for (int i = 0; i < hist.Length; i++)
+                    pts[i] = new PointF(r.X + r.Width * i / (hist.Length - 1), r.Bottom - (float)((hist[i] - floor) / (hi - floor)) * r.Height);
+                using (var path = new GraphicsPath())
+                {
+                    path.AddLines(pts); path.AddLine(pts[pts.Length - 1], new PointF(r.Right, r.Bottom)); path.AddLine(new PointF(r.Right, r.Bottom), new PointF(r.X, r.Bottom));
+                    using (var fill = new LinearGradientBrush(r, Color.FromArgb(110, accent), Color.FromArgb(8, accent), 90f)) g.FillPath(fill, path);
+                }
+                using (var p = new Pen(accent, Math.Max(1.4f, 1.6f * u)) { LineJoin = LineJoin.Round }) g.DrawLines(p, pts);
+                using (var p = new Pen(Theme.Border, 1)) g.DrawLine(p, r.X, r.Bottom, r.Right, r.Bottom);
+                y += 62 * u;
+                g.DrawString(range, fSmall, sub, pad, y);
+                y += 18 * u;
+            }
+            foreach (var l in lines)
+            {
+                g.DrawString(l, fSmall, l.StartsWith("•") ? text : sub, new RectangleF(pad, y, w, 18 * u), new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap });
+                y += 18 * u;
+            }
+        }
+        using (var p = new Pen(Theme.Border, 1)) g.DrawRectangle(p, 0, 0, ClientSize.Width - 1, ClientSize.Height - 1);
+    }
+}
+
+// A copy of the bar on another monitor's taskbar.
+class MirrorBar : Form
+{
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);
+    readonly StatsBar bar;
+    readonly DibSurface surface = new DibSurface();
+    public StatsBar.BarLayout Last; public int H, X, Y;
+
+    public MirrorBar(StatsBar bar) { this.bar = bar; FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; StartPosition = FormStartPosition.Manual; }
+
+    protected override CreateParams CreateParams
+    {
+        get { var cp = base.CreateParams; cp.ExStyle |= 0x80000 | 0x80 | 0x8 | 0x08000000; return cp; } // LAYERED | TOOLWINDOW | TOPMOST | NOACTIVATE
+    }
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    public void Push(StatsBar.BarLayout L, int height, int x, int y)
+    {
+        Last = L; H = height; X = x; Y = y;
+        var bmp = surface.Canvas(L.Width, height);
+        using (var g = Graphics.FromImage(bmp)) bar.PaintBar(g, L, height);
+        surface.Push(Handle, x, y);
+        ShowWindow(Handle, 8); // SW_SHOWNA
+        SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10);
+    }
+
+    public void HideNow() { if (IsHandleCreated) ShowWindow(Handle, 0); Last = null; }
+
+    protected override void OnMouseUp(MouseEventArgs e) { bar.Clicked(e.Button); base.OnMouseUp(e); }
+    protected override void Dispose(bool disposing) { surface.Dispose(); base.Dispose(disposing); }
 }
 
 // ======================================================================= Wi-Fi signal
@@ -2942,47 +4128,299 @@ static class WifiSignal
 // opens the release page in the browser, where the user downloads it themselves.
 static class Updates
 {
-    const string Api = "https://api.github.com/repos/WastedDesigner/Kinetik/releases/latest";
+    const string Repo = "https://api.github.com/repos/WastedDesigner/Kinetik/releases";
     const string Page = "https://github.com/WastedDesigner/Kinetik/releases/latest";
+    const string Downloads = "https://github.com/WastedDesigner/Kinetik/releases/download/";
 
-    // done(latest, error) runs on the UI thread of `owner`.
-    public static void Check(Action<Version, string> done, Control owner)
+    public class Release
+    {
+        public Version Version; public string Suffix = "", Tag = "", Url = "", ZipUrl, ExeSha;
+        public string Name { get { return Version.ToString(3) + (Suffix != "" ? "-" + Suffix : ""); } }
+    }
+
+    // This build's version, including any test suffix (e.g. 2.1.0-beta.1).
+    public static string Current
+    {
+        get
+        {
+            var a = (AssemblyInformationalVersionAttribute)Attribute.GetCustomAttribute(Assembly.GetExecutingAssembly(), typeof(AssemblyInformationalVersionAttribute));
+            return a != null ? a.InformationalVersion : Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
+        }
+    }
+
+    static readonly Regex TagRx = new Regex(@"^v?(\d+(?:\.\d+){1,3})(?:-([0-9A-Za-z.]+))?$");
+
+    static bool Parse(string tag, out Version v, out string suffix)
+    {
+        v = null; suffix = "";
+        var m = TagRx.Match(tag ?? "");
+        if (!m.Success) return false;
+        v = new Version(m.Groups[1].Value); suffix = m.Groups[2].Value;
+        return true;
+    }
+
+    // Positive when a is newer than b. A test version comes before the release of the same number.
+    static int Compare(Version av, string asuf, Version bv, string bsuf)
+    {
+        int c = av.CompareTo(bv);
+        if (c != 0) return c;
+        if (asuf == bsuf) return 0;
+        if (asuf == "") return 1;
+        if (bsuf == "") return -1;
+        Func<string, int> num = x => { var m = Regex.Match(x, @"(\d+)$"); return m.Success ? int.Parse(m.Groups[1].Value) : 0; };
+        return num(asuf).CompareTo(num(bsuf));
+    }
+
+    public static bool IsNewer(Release r)
+    {
+        Version cv; string cs;
+        if (!Parse(Current, out cv, out cs)) return false;
+        return Compare(r.Version, r.Suffix, cv, cs) > 0;
+    }
+
+    static string Get(string url, int limit, string accept)
+    {
+        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
+        req.UserAgent = "Kinetik/" + Current;
+        req.Accept = accept;
+        req.Timeout = req.ReadWriteTimeout = 15000;
+        using (var resp = req.GetResponse())
+        using (var st = resp.GetResponseStream())
+        using (var ms = new MemoryStream())
+        {
+            var buf = new byte[8192]; int n;
+            while ((n = st.Read(buf, 0, buf.Length)) > 0) { ms.Write(buf, 0, n); if (ms.Length > limit) throw new IOException("Response too large"); }
+            return Encoding.UTF8.GetString(ms.ToArray());
+        }
+    }
+
+    static byte[] GetBytes(string url, int limit)
+    {
+        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
+        var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
+        req.UserAgent = "Kinetik/" + Current;
+        req.Timeout = req.ReadWriteTimeout = 30000;
+        using (var resp = (System.Net.HttpWebResponse)req.GetResponse())
+        {
+            if (resp.ResponseUri.Scheme != "https") throw new IOException("Not a secure download");
+            using (var st = resp.GetResponseStream())
+            using (var ms = new MemoryStream())
+            {
+                var buf = new byte[65536]; int n;
+                while ((n = st.Read(buf, 0, buf.Length)) > 0) { ms.Write(buf, 0, n); if (ms.Length > limit) throw new IOException("Download too large"); }
+                return ms.ToArray();
+            }
+        }
+    }
+
+    // done(newest release, error) runs on the UI thread of `owner`. Test versions only when beta is set.
+    public static void Check(bool beta, Action<Release, string> done, Control owner)
     {
         ThreadPool.QueueUserWorkItem(_ =>
         {
-            Version v = null; string err = null;
+            Release best = null; string err = null;
             try
             {
-                System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
-                var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(Api);
-                req.UserAgent = "Kinetik/" + Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
-                req.Accept = "application/vnd.github+json";
-                req.Timeout = req.ReadWriteTimeout = 10000;
-                req.AllowAutoRedirect = true;
-                string body;
-                using (var resp = req.GetResponse())
-                using (var st = resp.GetResponseStream())
-                using (var ms = new MemoryStream())
+                var json = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 4 << 20 };
+                var body = Get(beta ? Repo + "?per_page=15" : Repo + "/latest", 4 << 20, "application/vnd.github+json");
+                var list = beta ? ((object[])json.DeserializeObject(body)).Cast<Dictionary<string, object>>() : new[] { (Dictionary<string, object>)json.DeserializeObject(body) };
+                foreach (var d in list)
                 {
-                    var buf = new byte[8192]; int n;
-                    while ((n = st.Read(buf, 0, buf.Length)) > 0) { ms.Write(buf, 0, n); if (ms.Length > 1 << 20) throw new IOException("Response too large"); }
-                    body = Encoding.UTF8.GetString(ms.ToArray());
+                    if (d.ContainsKey("draft") && true.Equals(d["draft"])) continue;
+                    if (!beta && d.ContainsKey("prerelease") && true.Equals(d["prerelease"])) continue;
+                    Version v; string suf;
+                    if (!Parse(d["tag_name"] as string, out v, out suf)) continue;
+                    var r = new Release { Version = v, Suffix = suf, Tag = (string)d["tag_name"], Url = d["html_url"] as string ?? Page };
+                    var notes = d.ContainsKey("body") ? d["body"] as string ?? "" : "";
+                    var m = Regex.Match(notes, @"SHA-256 of `Kinetik\.exe`:?\*?\*?\s*`([0-9A-Fa-f]{64})`");
+                    if (m.Success) r.ExeSha = m.Groups[1].Value.ToUpperInvariant();
+                    var assets = d.ContainsKey("assets") ? d["assets"] as object[] : null;
+                    if (assets != null)
+                        foreach (Dictionary<string, object> a in assets)
+                        {
+                            var url = a["browser_download_url"] as string;
+                            if ((a["name"] as string) == "Kinetik.zip" && url != null && url.StartsWith(Downloads + r.Tag + "/")) r.ZipUrl = url;
+                        }
+                    if (best == null || Compare(r.Version, r.Suffix, best.Version, best.Suffix) > 0) best = r;
                 }
-                var m = Regex.Match(body, "\"tag_name\"\\s*:\\s*\"v?(\\d+(?:\\.\\d+){1,3})\"");
-                if (!m.Success) throw new FormatException("No version in response");
-                v = new Version(m.Groups[1].Value);
+                if (best == null) throw new FormatException("No releases found");
             }
             catch (Exception e) { err = e.Message; }
-            try { owner.BeginInvoke((Action)(() => done(v, err))); } catch { }
+            try { owner.BeginInvoke((Action)(() => done(best, err))); } catch { }
         });
     }
 
-    // Opened through Explorer so the browser starts as the normal user, even when Kinetik runs as administrator.
-    public static void OpenReleasePage()
+    static readonly Regex LibEntry = new Regex(@"^lib/([A-Za-z0-9.\-_]+\.dll)$");
+
+    // Downloads the release's zip into memory, checks Kinetik.exe against the SHA-256 in its release notes, and
+    // replaces this copy's files in place. Files in use can't be overwritten, but they can be renamed, so the old
+    // ones become *.old (deleted at the next start). New files are only ever created fresh, never written through
+    // something already at that path. done(error) runs on the UI thread; on success Kinetik restarts.
+    public static void Install(Release r, Action<string> done, Control owner)
     {
-        try { Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "\"" + Page + "\"")); }
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            string err = null;
+            try
+            {
+                if (r.ZipUrl == null) throw new IOException("This release has no Kinetik.zip to install from.");
+                if (r.ExeSha == null) throw new IOException("This release doesn't list a checksum for Kinetik.exe, so it can't be checked.");
+                var zip = GetBytes(r.ZipUrl, 64 << 20);
+                var files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+                using (var za = new System.IO.Compression.ZipArchive(new MemoryStream(zip), System.IO.Compression.ZipArchiveMode.Read))
+                    foreach (var en in za.Entries)
+                    {
+                        var name = en.FullName.Replace('\\', '/');
+                        if (name.EndsWith("/")) continue;
+                        if (name != "Kinetik.exe" && name != "LICENSE" && !LibEntry.IsMatch(name)) continue; // nothing else is written
+                        if (en.Length > 32 << 20) throw new IOException(name + " is too large");
+                        using (var st = en.Open()) using (var ms = new MemoryStream()) { st.CopyTo(ms); files[name] = ms.ToArray(); }
+                    }
+                byte[] exe;
+                if (!files.TryGetValue("Kinetik.exe", out exe)) throw new IOException("The download doesn't contain Kinetik.exe.");
+                using (var sha = System.Security.Cryptography.SHA256.Create())
+                    if (BitConverter.ToString(sha.ComputeHash(exe)).Replace("-", "") != r.ExeSha)
+                        throw new IOException("The downloaded Kinetik.exe doesn't match the checksum in the release notes. Nothing was changed.");
+
+                string dir = Path.GetDirectoryName(Application.ExecutablePath), me = Application.ExecutablePath;
+                Directory.CreateDirectory(Path.Combine(dir, "lib"));
+                var moved = new List<string>(); var written = new List<string>();
+                try
+                {
+                    foreach (var f in files)
+                    {
+                        string target = f.Key == "Kinetik.exe" ? me : Path.Combine(dir, f.Key.Replace('/', '\\'));
+                        if (File.Exists(target))
+                        {
+                            string old = target + ".old";
+                            if (File.Exists(old)) File.Delete(old);
+                            File.Move(target, old);
+                            moved.Add(target);
+                        }
+                        using (var fs = new FileStream(target, FileMode.CreateNew, FileAccess.Write)) fs.Write(f.Value, 0, f.Value.Length);
+                        written.Add(target);
+                    }
+                }
+                catch
+                {
+                    foreach (var w in written) try { File.Delete(w); } catch { }
+                    foreach (var m in moved) try { File.Move(m + ".old", m); } catch { }
+                    throw;
+                }
+            }
+            catch (UnauthorizedAccessException) { err = "Kinetik can't write to its folder. Run it as administrator, or update by hand."; }
+            catch (Exception e) { err = e.Message; }
+            try
+            {
+                owner.BeginInvoke((Action)(() =>
+                {
+                    if (err != null) { done(err); return; }
+                    try { Process.Start(new ProcessStartInfo(Application.ExecutablePath, "--restart") { UseShellExecute = false }); } catch { }
+                    Application.Exit();
+                }));
+            }
+            catch { }
+        });
+    }
+
+    // Removes the files an update left behind (see Install).
+    public static void CleanUp()
+    {
+        try
+        {
+            string dir = Path.GetDirectoryName(Application.ExecutablePath);
+            foreach (var d in new[] { dir, Path.Combine(dir, "lib") })
+                if (Directory.Exists(d))
+                    foreach (var f in Directory.GetFiles(d, "*.old"))
+                        try { File.Delete(f); } catch { }
+        }
         catch { }
     }
+
+    // Opened through Explorer so the browser starts as the normal user, even when Kinetik runs as administrator.
+    public static void OpenReleasePage() { OpenUrl(Page); }
+
+    public static void OpenUrl(string url)
+    {
+        if (!url.StartsWith("https://github.com/WastedDesigner/Kinetik/")) url = Page;
+        try { Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "\"" + url + "\"")); }
+        catch { }
+    }
+}
+
+// ======================================================================= Profiles and backups
+// Settings as text: one "Name=value" line per setting, the same values as in the registry.
+static class Profiles
+{
+    public static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Kinetik", "Profiles"); } }
+
+    public static string Export(Settings c)
+    {
+        var sb = new StringBuilder("# Kinetik settings " + Updates.Current + "\r\n");
+        foreach (var f in typeof(Settings).GetFields(BindingFlags.Public | BindingFlags.Instance))
+        {
+            var v = f.GetValue(c);
+            string text = v is bool ? ((bool)v ? "1" : "0") : v is int ? ((int)v).ToString(CultureInfo.InvariantCulture)
+                        : v is float ? ((float)v).ToString(CultureInfo.InvariantCulture) : v is Color ? ((Color)v).ToArgb().ToString(CultureInfo.InvariantCulture)
+                        : v is string ? Uri.EscapeDataString((string)v) : null;
+            if (text != null) sb.Append(f.Name).Append('=').Append(text).Append("\r\n");
+        }
+        return sb.ToString();
+    }
+
+    // Applies the settings found in text and returns how many there were. Unknown or bad lines are skipped.
+    public static int Import(Settings c, string text)
+    {
+        int n = 0;
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.Trim();
+            int eq = line.IndexOf('=');
+            if (line.StartsWith("#") || eq <= 0) continue;
+            var f = Settings.Field(line.Substring(0, eq));
+            if (f == null) continue;
+            var v = line.Substring(eq + 1);
+            try
+            {
+                if (f.FieldType == typeof(bool)) f.SetValue(c, v == "1");
+                else if (f.FieldType == typeof(int)) f.SetValue(c, int.Parse(v, CultureInfo.InvariantCulture));
+                else if (f.FieldType == typeof(float)) f.SetValue(c, float.Parse(v, CultureInfo.InvariantCulture));
+                else if (f.FieldType == typeof(Color)) f.SetValue(c, Color.FromArgb(int.Parse(v, CultureInfo.InvariantCulture)));
+                else if (f.FieldType == typeof(string)) f.SetValue(c, Uri.UnescapeDataString(v));
+                else continue;
+                n++;
+            }
+            catch { }
+        }
+        c.Sanitize();
+        return n;
+    }
+
+    public static List<string> List()
+    {
+        try { return Directory.Exists(Dir) ? Directory.GetFiles(Dir, "*.kinetik").Select(Path.GetFileNameWithoutExtension).OrderBy(x => x).ToList() : new List<string>(); }
+        catch { return new List<string>(); }
+    }
+
+    public static string Clean(string name)
+    {
+        name = new string((name ?? "").Where(ch => char.IsLetterOrDigit(ch) || ch == ' ' || ch == '-' || ch == '_').ToArray()).Trim();
+        return name.Length > 40 ? name.Substring(0, 40) : name;
+    }
+
+    public static void Save(Settings c, string name) { SafeFile.Write(Path.Combine(Dir, Clean(name) + ".kinetik"), Export(c)); }
+
+    public static bool Load(Settings c, string name)
+    {
+        var path = Path.Combine(Dir, Clean(name) + ".kinetik");
+        if (!File.Exists(path)) return false;
+        Import(c, File.ReadAllText(path));
+        c.Save();
+        return true;
+    }
+
+    public static void Delete(string name) { try { File.Delete(Path.Combine(Dir, Clean(name) + ".kinetik")); } catch { } }
 }
 
 // ======================================================================= Tray icon artwork
@@ -3301,6 +4739,14 @@ class IconAnim
             case "GpuPower": return Clamp(s.GpuPower / 350);
             case "Fps": return double.IsNaN(s.Fps) ? 0 : Clamp(s.Fps / 144);
             case "BaseFps": return double.IsNaN(s.BaseFps) ? 0 : Clamp(s.BaseFps / 144);
+            case "FpsLow": case "FpsLow01": return double.IsNaN(s.FpsLow) ? 0 : Clamp(s.FpsLow / 144);
+            case "FrameTime": return double.IsNaN(s.FrameTime) ? 0 : Clamp(s.FrameTime / 33);
+            case "Latency": return double.IsNaN(s.Latency) ? 0 : Clamp(s.Latency / 60);
+            case "GpuHotspot": return Clamp((s.GpuHotspot - 30) / 70);
+            case "GpuMemTemp": return Clamp((s.GpuMemTemp - 30) / 80);
+            case "SsdTemp": return Clamp((s.SsdTemp - 25) / 50);
+            case "RamTemp": return Clamp((s.RamTemp - 25) / 60);
+            case "NetApp": return Rate(s.NetAppRate);
             case "Processes": return Clamp(s.Processes / 600.0);
             case "PcBattery": return SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online ? 0.6 : 0.1;
             case "DiskFree": return 0.1;
@@ -4177,12 +5623,12 @@ class WidgetForm : Form
     // ---- what to show
     static string Group(string id)
     {
-        if (id == "Up" || id == "Down" || id == "NetTotal" || id == "Ping" || id == "Wifi") return "Network";
+        if (id == "Up" || id == "Down" || id == "NetTotal" || id == "NetApp" || id == "Ping" || id == "Wifi" || id == "PublicIp" || id == "Vpn") return "Network";
         if (id.StartsWith("Cpu")) return "Processor";
         if (id.StartsWith("Ram")) return "Memory";
-        if (id.StartsWith("Gpu") || id == "Fps" || id == "BaseFps") return "Graphics";
-        if (id.StartsWith("Disk")) return "Storage";
-        if (id == "Processes" || id == "Uptime") return "System";
+        if (id.StartsWith("Gpu") || id.StartsWith("Fps") || id == "BaseFps" || id == "FrameTime" || id == "Latency") return "Graphics";
+        if (id.StartsWith("Disk") || id == "SsdTemp") return "Storage";
+        if (id == "Processes" || id == "Uptime" || id == "Clock" || id == "Date") return "System";
         return "Battery";
     }
 
@@ -4215,6 +5661,12 @@ class WidgetForm : Form
         r.Frac = Math.Max(0, Math.Min(1, value / 100));
         r.Warn = value >= warnAt;
         return Graph(r, value, 100, 1);
+    }
+
+    static void TempRow(Func<string, string, Item> row, string label, double t, int warnAt)
+    {
+        if (double.IsNaN(t)) { var r = row(label, "--°C"); r.Dim = true; }
+        else Pct(row(label, t.ToString("0") + "°C"), t, warnAt);
     }
 
     void AddStat(List<Item> rows, string id, Snapshot s)
@@ -4288,6 +5740,34 @@ class WidgetForm : Form
                 if (double.IsNaN(s.BaseFps)) { r = row("Base frame rate", "-- fps"); r.Dim = true; }
                 else Graph(row("Base frame rate", s.BaseFps.ToString("0") + " fps"), s.BaseFps, 0, 30);
                 break;
+            case "FpsLow": case "FpsLow01":
+            {
+                double low = id == "FpsLow" ? s.FpsLow : s.FpsLow01;
+                string label = id == "FpsLow" ? "1% low" : "0.1% low";
+                if (double.IsNaN(low)) { r = row(label, "-- fps"); r.Dim = true; }
+                else Graph(row(label, low.ToString("0") + " fps"), low, 0, 30);
+                break;
+            }
+            case "FrameTime":
+                if (double.IsNaN(s.FrameTime)) { r = row("Frame time", "-- ms"); r.Dim = true; }
+                else Graph(row("Frame time", s.FrameTime.ToString("0.0") + " ms"), s.FrameTime, 0, 5);
+                break;
+            case "Latency":
+                if (double.IsNaN(s.Latency)) { r = row("Render latency", "-- ms"); r.Dim = true; }
+                else Graph(row("Render latency", s.Latency.ToString("0") + " ms"), s.Latency, 0, 5);
+                break;
+            case "GpuHotspot": TempRow(row, "GPU hot spot", s.GpuHotspot, c.WarnGpuTemp + 15); break;
+            case "GpuMemTemp": TempRow(row, "GPU memory", s.GpuMemTemp, 100); break;
+            case "SsdTemp": TempRow(row, "Drive temperature", s.SsdTemp, 70); break;
+            case "RamTemp": TempRow(row, "RAM temperature", s.RamTemp, 85); break;
+            case "NetApp":
+                if (s.NetAppRate < 0) { r = row("Top network app", "--"); r.Dim = true; }
+                else Graph(row(s.NetAppName != "" ? "Top app (" + s.NetAppName + ")" : "Top network app", StatsBar.Speed(s.NetAppRate)), s.NetAppRate, 0, 10240);
+                break;
+            case "PublicIp": r = row("Public IP", s.PublicIp != "" ? s.PublicIp : "--"); r.Dim = s.PublicIp == ""; break;
+            case "Vpn": if (s.Vpn != null) { r = row("VPN", s.Vpn != "" ? s.Vpn : "Off"); r.Dim = s.Vpn == ""; } break;
+            case "Clock": row("Time", DateTime.Now.ToString("t")); break;
+            case "Date": row("Date", DateTime.Now.ToString("ddd d MMM")); break;
             case "Disk": if (s.Disk >= 0) Pct(row("Disk activity", s.Disk.ToString("0") + "%"), s.Disk, 95); break;
             case "DiskRead": if (s.DiskRead >= 0) Graph(row("Disk read", StatsBar.Speed(s.DiskRead)), s.DiskRead, 0, 10240); break;
             case "DiskWrite": if (s.DiskWrite >= 0) Graph(row("Disk write", StatsBar.Speed(s.DiskWrite)), s.DiskWrite, 0, 10240); break;
@@ -5810,6 +7290,9 @@ class SettingsForm : Form
         Stat("Up"); Stat("Down");
         Stat("NetTotal", "Upload and download added together");
         Stat("Wifi", "Signal strength of the Wi-Fi network you're connected to");
+        Stat("NetApp", Program.IsAdmin ? "The app using the most network right now" : "Needs admin – see General → Run as administrator");
+        Stat("Vpn", "On while a VPN connection is active");
+        Stat("PublicIp", "Your internet address. Asks api.ipify.org every 5 minutes while it's shown.");
         Stat("Ping", "Round-trip time to the address below");
         var host = new TextBox { Text = c.PingHost, Width = 170, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Font = Theme.UI(9.5f) };
         Action commit = () => { var v = host.Text.Trim(); if (v != "" && v != c.PingHost) { c.PingHost = v; Apply(); } };
@@ -5828,6 +7311,7 @@ class SettingsForm : Form
         Header("Memory");
         Stat("Ram"); Stat("RamGb");
         Stat("RamCommit", "Memory promised to apps, including the page file");
+        Stat("RamTemp", Program.IsAdmin ? "Hottest memory module, if your RAM reports it" : "Needs admin");
 
         Header("Graphics");
         bar.Sampler.RequestGpuScan();
@@ -5843,16 +7327,23 @@ class SettingsForm : Form
         }
         else Add(Icons.Gpu, c.GpuColor, "Looking for graphics cards…", null, null);
         Stat("Gpu"); Stat("GpuTemp");
+        Stat("GpuHotspot", "The hottest point on the GPU. Not every card reports it.");
+        Stat("GpuMemTemp", "Video memory temperature. Not every card reports it.");
         Stat("GpuClock", "Core clock in MHz");
         Stat("GpuFan", "Percent, or RPM when that's all the card reports");
         Stat("GpuVram"); Stat("GpuVramPct"); Stat("GpuPower");
         Stat("Fps", Program.IsAdmin ? "Frame rate of the app in front, including generated frames (DirectX, OpenGL and Vulkan)" : "Needs admin – see General → Run as administrator");
         Stat("BaseFps", Program.IsAdmin ? "Frames the game renders itself, before DLSS / FSR frame generation. Games with NVIDIA Reflex." : "Needs admin – see General → Run as administrator");
+        Stat("FpsLow", Program.IsAdmin ? "The frame rate 99% of frames beat over the last 10 seconds. Shows stutter that averages hide." : "Needs admin");
+        Stat("FpsLow01", Program.IsAdmin ? "The same for 99.9% of frames: the worst hitches" : "Needs admin");
+        Stat("FrameTime", Program.IsAdmin ? "Time per frame, with a graph of the last 3 seconds. Spikes are stutters." : "Needs admin");
+        Stat("Latency", Program.IsAdmin ? "Time from the game starting a frame to presenting it. Games with NVIDIA Reflex." : "Needs admin");
 
         Header("Storage");
         Stat("Disk", "How busy the drives are");
         Stat("DiskRead"); Stat("DiskWrite");
         Stat("DiskFree", "Turns to the warning colour when space runs low");
+        Stat("SsdTemp", Program.IsAdmin ? "The hottest of your drives" : "Needs admin");
         var drives = new List<string>();
         try { drives = DriveInfo.GetDrives().Where(d => d.DriveType == DriveType.Fixed && d.IsReady).Select(d => d.Name).ToList(); } catch { }
         var driveChoices = new List<string> { "Windows drive" };
@@ -5863,6 +7354,7 @@ class SettingsForm : Form
         Header("System");
         Stat("Processes");
         Stat("Uptime", "Time since Windows started");
+        Stat("Clock"); Stat("Date");
 
         Header("Batteries");
         Stat("Batteries", "Headphones, mice, keyboards, controllers");
@@ -5988,6 +7480,9 @@ class SettingsForm : Form
         Add(Icons.Divider, Theme.Accent, "Style", "Add dividers on the Arrange page", Combo(new[] { "Line", "Dotted line", "Dot", "Blank space" }, c.DividerStyle, i => { c.DividerStyle = i; Apply(); }, 150));
         SliderRow(Icons.Divider, Theme.Accent, "Divider height", "DividerHeight", 20, 160, "%");
 
+        Header("Hover");
+        Switch(Icons.Pulse, Theme.Accent, "Hover graphs", "BarHover", "Hover over a stat for its last minute, its range and the top processes behind it");
+
         Header("Animation");
         Switch(Icons.Fan, Theme.Accent, "Animated icons", "BarAnimate", "Icons move with activity: fans spin, arrows flow, temps rise");
         var rates = new[] { 15, 30, 60 };
@@ -6022,7 +7517,7 @@ class SettingsForm : Form
         ColourRow(Icons.Palette, "Pill colour", "PillColor");
     }
 
-    static string VersionText { get { return Assembly.GetExecutingAssembly().GetName().Version.ToString(3); } }
+    static string VersionText { get { return Updates.Current; } }
 
     // The app icon's frames are PNG-compressed, which Icon.ToBitmap garbles, so decode the PNG frame directly.
     static Bitmap LoadLogo(int size)
@@ -6059,21 +7554,35 @@ class SettingsForm : Form
         Hint("A lightweight stats overlay for the Windows taskbar.", 28);
         Add(Icons.Info, Theme.Accent, "Version", null, new Label { Text = VersionText, AutoSize = false, Size = new Size(120, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Text, BackColor = Theme.Card, Font = Theme.UI(10f) });
         Button upd = null;
-        string newer = null;
+        Updates.Release newer = null;
         upd = Btn("Check for updates", (s, e) =>
         {
-            if (newer != null) { Updates.OpenReleasePage(); return; }
+            if (newer != null)
+            {
+                if (newer.ZipUrl == null || newer.ExeSha == null) { Updates.OpenUrl(newer.Url); return; } // older releases: by hand
+                if (MessageBox.Show(this, "Download Kinetik " + newer.Name + " from GitHub and install it?\n\nKinetik checks the download against the checksum in the release notes, replaces its files and restarts.",
+                    "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                upd.Text = "Installing…"; upd.Enabled = false;
+                Updates.Install(newer, err =>
+                {
+                    if (upd.IsDisposed) return;
+                    upd.Enabled = true; upd.Text = "Install " + newer.Name;
+                    MessageBox.Show(this, "The update wasn't installed.\n\n" + err, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }, this);
+                return;
+            }
             upd.Text = "Checking…"; upd.Enabled = false;
-            Updates.Check((latest, error) =>
+            Updates.Check(c.UpdateBeta, (latest, error) =>
             {
                 if (upd.IsDisposed) return;
                 upd.Enabled = true;
                 if (error != null) upd.Text = "Couldn't check. Try again";
-                else if (latest > Assembly.GetExecutingAssembly().GetName().Version) { newer = latest.ToString(3); upd.Text = "Get version " + newer; }
+                else if (Updates.IsNewer(latest)) { newer = latest; upd.Text = latest.ZipUrl != null && latest.ExeSha != null ? "Install " + latest.Name : "Get version " + latest.Name; }
                 else upd.Text = "Up to date ✓";
             }, this);
         });
-        Add(Icons.Down, Theme.Accent, "Updates", "Looks for a newer version on GitHub", upd);
+        Add(Icons.Down, Theme.Accent, "Updates", "Looks for a newer version on GitHub, and can install it for you", upd);
+        Switch(Icons.Star, Theme.Accent, "Include test versions", "UpdateBeta", "Offer early builds marked as test versions on GitHub");
         Add(Icons.Heart, Theme.Accent, "© Akila Sella Hennedige", "Free software under the GNU General Public License v3", null);
     }
 
@@ -6171,11 +7680,19 @@ class SettingsForm : Form
 
         Header("Game overlay");
         Switch(Icons.Gamepad, Theme.Accent, "Show game overlay", "OverlayShow");
+        Switch(Icons.Gamepad, Theme.Accent, "Show automatically in games", "OverlayAuto", "Appears while a fullscreen or borderless game is in front, and hides when you leave it. Needs admin.");
         Switch(Icons.Bolt, Theme.Accent, "Hotkey: Ctrl+Shift+F10", "OverlayHotkey", "Shows or hides the overlay from inside a game");
         Switch(Icons.Mouse, Theme.Accent, "Lock position (click-through)", "OverlayLocked", "Clicks go to the game. Unlock it from the taskbar bar's menu.");
         Add(Icons.Monitor, Theme.Accent, "Position", "Drag it while unlocked. This moves it back to the top-left corner.", Btn("Reset position", (s, e) => { c.OverlayX = c.OverlayY = int.MinValue; Apply(); }));
         if (!Program.IsAdmin)
             Add(Icons.Monitor, c.GpuColor, "FPS counter needs admin", "Frame rates are read from Windows' graphics events", Btn("Restart as admin", (s, e) => Program.RestartAsAdmin(), true));
+
+        Header("Sessions and benchmarks");
+        Switch(Icons.List, Theme.Accent, "Session summary", "SessionSummary", "When a game closes: play time, average FPS, 1% low and peak temperatures, saved to a log. Needs admin.");
+        Add(Icons.List, Theme.Accent, "Session log", "Sessions.csv, one line per game session", Btn("Open folder", (s, e) => { Directory.CreateDirectory(GameWatch.DataDir); GameWatch.OpenFolder(GameWatch.DataDir); }));
+        Switch(Icons.Bolt, Theme.Accent, "Hotkey: Ctrl+Shift+F11", "BenchHotkey", "Starts and stops recording a benchmark: every stat, each update, to a CSV file");
+        var benchDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Kinetik Benchmarks");
+        Add(Icons.Pulse, Theme.Accent, "Benchmarks", "Saved in Documents\\Kinetik Benchmarks", Btn("Open folder", (s, e) => { Directory.CreateDirectory(benchDir); GameWatch.OpenFolder(benchDir); }));
 
         Header("Look");
         Add(Icons.Text, Theme.Accent, "Labels", null,
@@ -6221,6 +7738,17 @@ class SettingsForm : Form
         list.Controls.Add(arrangeList);
     }
 
+    // Applies settings loaded from a profile or backup. The window's colours are fixed when it's built, so it reopens.
+    void LoadSettings(Func<bool> load)
+    {
+        try { if (!load()) return; }
+        catch (Exception ex) { MessageBox.Show(this, "Couldn't load those settings.\n\n" + ex.Message, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        Theme.Use(c.AppBackground);
+        bar.Render(true);
+        var b = bar; var p = page;
+        BeginInvoke((Action)(() => { Close(); b.OpenSettings(p); }));
+    }
+
     void BuildGeneral()
     {
         Header("Settings window");
@@ -6242,6 +7770,7 @@ class SettingsForm : Form
         Add(Icons.Spacing, Theme.Accent, "Shift left", "Pixels between the bar and the tray icons", off);
         Switch(Icons.Chip, Theme.Accent, "Left-click opens Task Manager", "ClickTaskMgr");
         Switch(Icons.Monitor, Theme.Accent, "Hide in fullscreen apps", "HideFullscreen", "Games, videos and presentations");
+        Switch(Icons.Monitor, Theme.Accent, "Show on all taskbars", "AllTaskbars", "A copy of the bar on every monitor's taskbar, left of its clock");
         Switch(Icons.Grid, Theme.Accent, "Show tray icon", "TrayIcon", "Click it for Settings, right-click for the menu");
         Switch(Icons.Fan, Theme.Accent, "Spinning icon", "TrayAnimate", "The fan logo in the tray and taskbar spins faster the busier your CPU is");
         Switch(Icons.Monitor, Theme.Accent, "Show on the taskbar", "TaskbarButton", "A taskbar button like other running apps. Click it for Settings.");
@@ -6266,6 +7795,58 @@ class SettingsForm : Form
         SliderRow((g, r, col) => Icons.Battery(g, r, col, 20), c.BatColor, "Battery below", "WarnBattery", 5, 50, "%");
         SliderRow(Icons.Signal, c.UpColor, "Ping above", "WarnPing", 20, 500, " ms");
         SliderRow(Icons.Pie, c.DiskColor, "Free disk space below", "WarnFreePct", 1, 50, "%");
+
+        Header("Notifications");
+        Switch(Icons.Thermo, c.TempColor, "Hot CPU or GPU", "AlertTemps", "When either stays above its warning limit for 30 seconds");
+        Switch((g, r, col) => Icons.Battery(g, r, col, 20), c.BatColor, "Low batteries", "AlertBattery", "When a Bluetooth device or the laptop drops below its warning limit");
+        Switch(Icons.Pie, c.DiskColor, "Drive almost full", "AlertDisk", "When the free-space drive drops below its warning limit (at most every 6 hours)");
+        Switch(Icons.Signal, c.UpColor, "High ping", "AlertPing", "When ping stays above its warning limit or times out for 30 seconds. Pings even while ping isn't shown.");
+        Add(Icons.Info, Theme.Accent, "Test", "Notifications use Windows' own, so Focus assist and Do not disturb apply", Btn("Send a test", (s, e) => bar.Notify("Kinetik", "Notifications are working.", null)));
+
+        Header("Profiles and backup");
+        var names = Profiles.List();
+        var pick = Combo(names.Count > 0 ? names.ToArray() : new[] { "(no profiles yet)" }, 0, i => { }, 170);
+        pick.Enabled = names.Count > 0;
+        var profTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
+        pick.Margin = new Padding(0, 3, 8, 0);
+        profTools.Controls.Add(pick);
+        profTools.Controls.Add(Btn("Load", (s, e) => { if (names.Count > 0) LoadSettings(() => Profiles.Load(c, names[pick.SelectedIndex])); }));
+        var del = Btn("Delete", (s, e) =>
+        {
+            if (names.Count == 0 || MessageBox.Show(this, "Delete the profile \"" + names[pick.SelectedIndex] + "\"?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            Profiles.Delete(names[pick.SelectedIndex]); RefreshPage();
+        });
+        del.Margin = new Padding(6, 0, 0, 0);
+        profTools.Controls.Add(del);
+        Add(Icons.Layers, Theme.Accent, "Profiles", "Switch between saved setups, e.g. Gaming and Work. Also in the right-click menu.", profTools);
+        var newName = new TextBox { Width = 150, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Font = Theme.UI(9.5f) };
+        var saveTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
+        newName.Margin = new Padding(0, 4, 8, 0);
+        saveTools.Controls.Add(newName);
+        saveTools.Controls.Add(Btn("Save", (s, e) =>
+        {
+            var n = Profiles.Clean(newName.Text);
+            if (n == "") { newName.Focus(); return; }
+            try { c.Save(); Profiles.Save(c, n); RefreshPage(); }
+            catch (Exception ex) { MessageBox.Show(this, "Couldn't save the profile.\n\n" + ex.Message, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        }, true));
+        Add(Icons.Star, Theme.Accent, "Save current settings as a profile", "Give it a name", saveTools);
+        var backupTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
+        backupTools.Controls.Add(Btn("Back up…", (s, e) =>
+        {
+            using (var dlg = new SaveFileDialog { Filter = "Kinetik settings (*.kinetik)|*.kinetik", FileName = "Kinetik settings.kinetik" })
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                    try { c.Save(); File.WriteAllText(dlg.FileName, Profiles.Export(c)); }
+                    catch (Exception ex) { MessageBox.Show(this, "Couldn't save the backup.\n\n" + ex.Message, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        }));
+        var restore = Btn("Restore…", (s, e) =>
+        {
+            using (var dlg = new OpenFileDialog { Filter = "Kinetik settings (*.kinetik)|*.kinetik" })
+                if (dlg.ShowDialog(this) == DialogResult.OK) LoadSettings(() => { Profiles.Import(c, File.ReadAllText(dlg.FileName)); c.Save(); return true; });
+        });
+        restore.Margin = new Padding(6, 0, 0, 0);
+        backupTools.Controls.Add(restore);
+        Add(Icons.Gear, Theme.Accent, "Backup", "Save every setting to a file, or restore them from one", backupTools);
 
         Header("Startup & permissions");
         var startup = new Toggle { On = Program.IsStartupEnabled() };
