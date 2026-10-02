@@ -111,9 +111,13 @@ Everything about the widget is set on the **Widget** page in Settings:
 
 ## Game overlay
 
-A slim strip that stays on top of your game so you can watch your stats while you play, for example:
+A slim strip that stays on top of your game so you can watch your stats while you play.
 
-`FPS 144   CPU 38%   TEMP 71°C   GPU 97%   GTMP 68°C   RAM 52%`
+![The game overlay with text labels](screenshots/overlay-text.png)
+
+The same overlay with icons instead of text labels:
+
+![The game overlay with icons](screenshots/overlay-icons.png)
 
 Turn it on from the bar's right-click menu (**Game overlay**), in **Settings → Overlay**, or with **Ctrl+Shift+F10**, which also works from inside a game.
 
@@ -122,6 +126,10 @@ Turn it on from the bar's right-click menu (**Game overlay**), in **Settings →
 - **Your look:** text labels (`CPU`, `GPU`, `FPS`…) or icons, size, and background opacity. Text has a soft shadow so it stays readable over bright scenes.
 - **Moving it:** drag it anywhere. It snaps to the screen's edges and top centre. **Lock position** makes it click-through, so your clicks go to the game. Unlock it from the bar's right-click menu.
 - **Works in:** borderless and windowed games. Exclusive fullscreen owns the whole display, so no overlay can draw over it. Switch the game to borderless (often called "fullscreen windowed") to see it.
+
+Everything about the overlay is set on the **Overlay** page in Settings:
+
+![The Overlay page in Settings](screenshots/settings-overlay.png)
 
 ## Download and use
 
@@ -154,7 +162,7 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 <tr><td width="50%" valign="top"><img src="screenshots/settings-stats.png" alt="Stats page"><br><sub><b>Stats</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-arrange.png" alt="Arrange page"><br><sub><b>Arrange</b></sub></td></tr>
 <tr><td width="50%" valign="top"><img src="screenshots/settings-appearance.png" alt="Appearance page"><br><sub><b>Appearance</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-colours.png" alt="Colours page"><br><sub><b>Colours</b></sub></td></tr>
 <tr><td width="50%" valign="top"><img src="screenshots/settings-widget.png" alt="Widget page"><br><sub><b>Widget</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-general.png" alt="General page"><br><sub><b>General</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td><td width="50%"></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/settings-overlay.png" alt="Overlay page"><br><sub><b>Overlay</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td></tr>
 </table>
 
 ## Tips and shortcuts
