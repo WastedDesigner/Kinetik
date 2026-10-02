@@ -57,7 +57,7 @@ class Settings
     public bool Up = true, Down = true, NetTotal = false, Ping = false, Wifi = false;
     public bool Cpu = true, CpuCores = false, CpuClock = true, CpuTemp = true, CpuPower = false;
     public bool Ram = true, RamGb = true, RamCommit = false;
-    public bool Gpu = true, GpuTemp = true, GpuClock = false, GpuFan = false, GpuVram = false, GpuVramPct = false, GpuPower = false, Fps = false;
+    public bool Gpu = true, GpuTemp = true, GpuClock = false, GpuFan = false, GpuVram = false, GpuVramPct = false, GpuPower = false, Fps = false, BaseFps = false;
     public bool Disk = false, DiskRead = false, DiskWrite = false, DiskFree = false;
     public bool Processes = false, Uptime = false;
     public bool PcBattery = true, BatTime = false, Batteries = true, DeviceNames = false;
@@ -111,17 +111,17 @@ class Settings
 
     // Every stat that can appear on the bar, in default order. Dividers ("Sep1", "Sep2", ...) are added by the user.
     public const string DefaultOrder = "Up,Down,NetTotal,Ping,Wifi,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit," +
-        "Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Fps,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
+        "Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Fps,BaseFps,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
     public static readonly string[] StatIds = DefaultOrder.Split(',');
 
     // The widget has its own order (grouped by hardware) and its own set of stats that are switched on.
-    public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Fps," +
+    public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Fps,BaseFps," +
         "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Wifi,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
     public const string DefaultWidgetItems = "Cpu,CpuTemp,CpuClock,Gpu,GpuTemp,GpuVram,Ram,RamGb,Down,Up,Wifi";
     public static readonly string[] WidgetIds = DefaultWidgetOrder.Split(',');
 
     // The game overlay likewise has its own order and selection, with the frame rate first.
-    public const string DefaultOverlayOrder = "Fps,Cpu,CpuTemp,CpuPower,CpuClock,CpuCores,Gpu,GpuTemp,GpuPower,GpuClock,GpuFan,GpuVram,GpuVramPct," +
+    public const string DefaultOverlayOrder = "Fps,BaseFps,Cpu,CpuTemp,CpuPower,CpuClock,CpuCores,Gpu,GpuTemp,GpuPower,GpuClock,GpuFan,GpuVram,GpuVramPct," +
         "Ram,RamGb,RamCommit,Down,Up,NetTotal,Ping,Wifi,Disk,DiskRead,DiskWrite,DiskFree,Processes,Uptime,PcBattery,BatTime,Batteries";
     public const string DefaultOverlayItems = "Fps,Cpu,CpuTemp,Gpu,GpuTemp,Ram";
     public static readonly string[] OverlayIds = DefaultOverlayOrder.Split(',');
@@ -346,6 +346,7 @@ class Snapshot
     public double Uptime;
     public string CpuName = "", CpuTempStatus = "";
     public double Fps = double.NaN; // frame rate of the app in the foreground
+    public double BaseFps = double.NaN; // frames the game itself rendered, before frame generation (Reflex games)
     public string FpsApp = "", FpsStatus = "";
 }
 
@@ -473,6 +474,10 @@ class HwSensors
 // Frame rate of the foreground app, counted from the graphics stack's own ETW events (the ones PresentMon uses):
 // DXGI and D3D9 "Present" calls for DirectX 9–12 games, and the kernel's present events for OpenGL and Vulkan.
 // A real-time trace session needs admin. It only runs while the FPS stat is shown.
+// The base frame rate (before DLSS / FSR frame generation adds frames) comes from NVIDIA Reflex's PC Latency Stats
+// markers, which Reflex games send for every frame they simulate. While anyone listens to those, Reflex games also
+// ping themselves a few times a second to measure latency (as with NVIDIA FrameView), so that provider is only
+// switched on while the Base FPS stat is shown.
 class FpsMeter
 {
     [DllImport("advapi32.dll", CharSet = CharSet.Unicode)] static extern int StartTraceW(out ulong handle, string name, IntPtr props);
@@ -487,7 +492,10 @@ class FpsMeter
     static readonly Guid Dxgi = new Guid("ca11c036-0102-4a2d-a6ad-f03cfed5d3c9");
     static readonly Guid D3d9 = new Guid("783aca0a-790e-4d7f-8451-aa850511c6b9");
     static readonly Guid DxgKrnl = new Guid("802ec45a-1e99-4b83-9920-87c98277ba9d");
-    const int Sources = 7; // 0 DXGI present, 1 D3D9 present, 2-6 kernel blit / flip / present history / present / detailed history
+    static readonly Guid PclStats = new Guid("0d216f06-82a6-4d49-bc4f-8f38ae56efab"); // "PCLStatsTraceLoggingProvider"
+    const int Sources = 8; // 0 DXGI present, 1 D3D9 present, 2-6 kernel blit / flip / present history / present / detailed history,
+                           // 7 Reflex simulation start (one per rendered frame)
+    const int Presents = 7; // sources below this are displayed frames
 
     // Present timestamps (QPC ticks) of one process, per source, for the last couple of seconds.
     class Proc { public readonly Queue<long>[] Times = new Queue<long>[Sources]; public long Last; }
@@ -495,7 +503,7 @@ class FpsMeter
     readonly Dictionary<int, Proc> procs = new Dictionary<int, Proc>();
     readonly RecordCallback callback;
     ulong session, trace = ulong.MaxValue;
-    bool exitHooked;
+    bool exitHooked, baseOn;
     public string Error = "";
 
     public FpsMeter() { callback = OnEvent; }
@@ -559,6 +567,16 @@ class FpsMeter
     {
         if (trace != ulong.MaxValue) { CloseTrace(trace); trace = ulong.MaxValue; }
         if (session != 0) { StopSession(); session = 0; }
+        baseOn = false;
+    }
+
+    // Switches the Reflex markers on or off for the running session.
+    public void SetBase(bool on)
+    {
+        if (session == 0 || on == baseOn) return;
+        var g = PclStats;
+        EnableTraceEx2(session, ref g, on ? 1 : 0, 5, 0, 0, 0, IntPtr.Zero); // TraceLogging writes at verbose level, no keywords
+        baseOn = on;
     }
 
     // Runs on the trace thread for every event. Reads EVENT_RECORD's header directly.
@@ -570,6 +588,14 @@ class FpsMeter
         else if (provider == unchecked((int)0x802ec45a))
         {
             switch (id) { case 166: src = 2; break; case 168: src = 3; break; case 171: src = 4; break; case 184: src = 5; break; case 215: src = 6; break; default: return; }
+        }
+        else if (provider == 0x0d216f06)
+        {
+            // PCLStatsEvent (V1-V3) carry UInt32 Marker then UInt64 FrameID; the provider's other events are shorter.
+            int len = Marshal.ReadInt16(rec, 86) & 0xFFFF;
+            IntPtr data = Marshal.ReadIntPtr(rec, 96);
+            if (len < 12 || data == IntPtr.Zero || Marshal.ReadInt32(data) != 0) return; // 0 = PCLSTATS_SIMULATION_START
+            src = 7;
         }
         else return;
         int pid = Marshal.ReadInt32(rec, 12);
@@ -585,6 +611,26 @@ class FpsMeter
         }
     }
 
+    static double Rate(Queue<long> q, long f)
+    {
+        if (q == null || q.Count < 2) return double.NaN;
+        long last = q.Last(), from = last - f;
+        var recent = q.Where(t => t >= from).ToList();
+        return recent.Count < 2 ? 0 : (recent.Count - 1) * (double)f / (last - recent[0]);
+    }
+
+    // Rendered frames per second from the game's Reflex markers, or NaN for games without Reflex.
+    public double ReadBase(int pid)
+    {
+        long now = Stopwatch.GetTimestamp(), f = Stopwatch.Frequency;
+        lock (procs)
+        {
+            Proc p;
+            if (!procs.TryGetValue(pid, out p) || p.Times[7] == null || p.Times[7].Count == 0 || now - p.Times[7].Last() > 3 * f) return double.NaN;
+            return Rate(p.Times[7], f);
+        }
+    }
+
     // Frames per second over the last second of the process's presents, or NaN when it isn't presenting.
     // An app's DirectX presents are preferred; otherwise the busiest kernel event type (each fires about once per frame).
     public double Read(int pid)
@@ -596,13 +642,10 @@ class FpsMeter
             Proc p;
             if (!procs.TryGetValue(pid, out p) || now - p.Last > 3 * f) return double.NaN; // events can arrive up to a second late
             double best = double.NaN;
-            for (int src = 0; src < Sources; src++)
+            for (int src = 0; src < Presents; src++)
             {
-                var q = p.Times[src];
-                if (q == null || q.Count < 2) continue;
-                long last = q.Last(), from = last - f;
-                var recent = q.Where(t => t >= from).ToList();
-                double fps = recent.Count < 2 ? 0 : (recent.Count - 1) * (double)f / (last - recent[0]);
+                double fps = Rate(p.Times[src], f);
+                if (double.IsNaN(fps)) continue;
                 if (src <= 1 && fps > 0) return fps;
                 if (src > 1 && (double.IsNaN(best) || fps > best)) best = fps;
             }
@@ -788,7 +831,7 @@ class Sampler
 
         UpdateSensors(now);
         if (AnyGpuStat) ReadGpu(s);
-        ReadFps(s, c.Wants("Fps"));
+        ReadFps(s, c.Wants("Fps") || c.Wants("BaseFps"), c.Wants("BaseFps"));
 
         bool wantCpuSensors = c.Wants("CpuTemp") || c.Wants("CpuPower");
         if (!Program.IsAdmin) sensorStatus = "needs admin – right-click → Restart as administrator";
@@ -825,7 +868,7 @@ class Sampler
     }
 
     // The trace session starts when the FPS stat is first shown and stops when nothing shows it.
-    void ReadFps(Snapshot s, bool wanted)
+    void ReadFps(Snapshot s, bool wanted, bool wantBase)
     {
         if (!wanted)
         {
@@ -847,7 +890,9 @@ class Sampler
             fpsPid = pid; fpsApp = "";
             try { using (var p = Process.GetProcessById((int)pid)) fpsApp = p.ProcessName; } catch { }
         }
+        fpsMeter.SetBase(wantBase);
         s.Fps = fpsMeter.Read((int)pid);
+        if (wantBase) s.BaseFps = fpsMeter.ReadBase((int)pid);
         s.FpsApp = fpsApp;
     }
 
@@ -1694,6 +1739,7 @@ static class Stats
         { "GpuVramPct", new[] { "VRAM usage %", "Memory chip", "GpuColor", "VRAM" } },
         { "GpuPower", new[] { "GPU power draw", "Plug", "GpuColor", "GPWR" } },
         { "Fps", new[] { "Frame rate (FPS)", "Monitor", "GpuColor", "FPS" } },
+        { "BaseFps", new[] { "Base frame rate (without frame generation)", "Layers", "GpuColor", "BASE" } },
         { "Disk", new[] { "Disk activity", "Drive", "DiskColor", "DISK" } },
         { "DiskRead", new[] { "Disk read speed", "Drive read", "DiskColor", "RD" } },
         { "DiskWrite", new[] { "Disk write speed", "Drive write", "DiskColor", "WR" } },
@@ -2404,6 +2450,12 @@ class StatsBar : Form
                 {
                     string v = double.IsNaN(s.Fps) ? "--" : s.Fps.ToString("0");
                     add(asText ? v : v + " fps", asText ? "888" : "888 fps", double.IsNaN(s.Fps) ? dim : val); // "FPS 144", not "FPS 144 fps"
+                    break;
+                }
+                case "BaseFps":
+                {
+                    string v = double.IsNaN(s.BaseFps) ? "--" : s.BaseFps.ToString("0");
+                    add(asText ? v : v + " base", asText ? "888" : "888 base", double.IsNaN(s.BaseFps) ? dim : val);
                     break;
                 }
                 case "Disk": if (s.Disk >= 0) add(s.Disk.ToString("0") + "%", "100%", warn(s.Disk, 95)); break;
@@ -3248,6 +3300,7 @@ class IconAnim
             case "GpuVram": case "GpuVramPct": return s.VramTotal > 0 ? Clamp(s.VramUsed / s.VramTotal) : 0;
             case "GpuPower": return Clamp(s.GpuPower / 350);
             case "Fps": return double.IsNaN(s.Fps) ? 0 : Clamp(s.Fps / 144);
+            case "BaseFps": return double.IsNaN(s.BaseFps) ? 0 : Clamp(s.BaseFps / 144);
             case "Processes": return Clamp(s.Processes / 600.0);
             case "PcBattery": return SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online ? 0.6 : 0.1;
             case "DiskFree": return 0.1;
@@ -4127,7 +4180,7 @@ class WidgetForm : Form
         if (id == "Up" || id == "Down" || id == "NetTotal" || id == "Ping" || id == "Wifi") return "Network";
         if (id.StartsWith("Cpu")) return "Processor";
         if (id.StartsWith("Ram")) return "Memory";
-        if (id.StartsWith("Gpu") || id == "Fps") return "Graphics";
+        if (id.StartsWith("Gpu") || id == "Fps" || id == "BaseFps") return "Graphics";
         if (id.StartsWith("Disk")) return "Storage";
         if (id == "Processes" || id == "Uptime") return "System";
         return "Battery";
@@ -4231,6 +4284,10 @@ class WidgetForm : Form
                 else Graph(row(label, s.Fps.ToString("0") + " fps"), s.Fps, 0, 30);
                 break;
             }
+            case "BaseFps":
+                if (double.IsNaN(s.BaseFps)) { r = row("Base frame rate", "-- fps"); r.Dim = true; }
+                else Graph(row("Base frame rate", s.BaseFps.ToString("0") + " fps"), s.BaseFps, 0, 30);
+                break;
             case "Disk": if (s.Disk >= 0) Pct(row("Disk activity", s.Disk.ToString("0") + "%"), s.Disk, 95); break;
             case "DiskRead": if (s.DiskRead >= 0) Graph(row("Disk read", StatsBar.Speed(s.DiskRead)), s.DiskRead, 0, 10240); break;
             case "DiskWrite": if (s.DiskWrite >= 0) Graph(row("Disk write", StatsBar.Speed(s.DiskWrite)), s.DiskWrite, 0, 10240); break;
@@ -5789,7 +5846,8 @@ class SettingsForm : Form
         Stat("GpuClock", "Core clock in MHz");
         Stat("GpuFan", "Percent, or RPM when that's all the card reports");
         Stat("GpuVram"); Stat("GpuVramPct"); Stat("GpuPower");
-        Stat("Fps", Program.IsAdmin ? "Frame rate of the app in front (DirectX, OpenGL and Vulkan)" : "Needs admin – see General → Run as administrator");
+        Stat("Fps", Program.IsAdmin ? "Frame rate of the app in front, including generated frames (DirectX, OpenGL and Vulkan)" : "Needs admin – see General → Run as administrator");
+        Stat("BaseFps", Program.IsAdmin ? "Frames the game renders itself, before DLSS / FSR frame generation. Games with NVIDIA Reflex." : "Needs admin – see General → Run as administrator");
 
         Header("Storage");
         Stat("Disk", "How busy the drives are");
