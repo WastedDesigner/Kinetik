@@ -86,6 +86,8 @@ class Settings
     // Game overlay: a slim always-on-top strip with its own stats, for use while gaming
     public bool OverlayShow = false, OverlayLocked = false, OverlayHotkey = true, OverlayText = true;
     public bool OverlayAuto = false;     // show the overlay by itself while a game is in front
+    public bool OverlayFollow = true;    // move the overlay to the monitor the game is on
+    public bool OverlayCloseWithGame = true; // turn the overlay off when the game it was shown for closes
     public bool SessionSummary = false;  // log and announce a summary when a game closes
     public bool BenchHotkey = true;      // Ctrl+Shift+F11 records every stat to a CSV file
     public string OverlayOrder = DefaultOverlayOrder, OverlayItems = DefaultOverlayItems;
@@ -379,6 +381,7 @@ class Snapshot
     public double[] FrameGraph = new double[0];                 // worst frame time per slice of the last 3 s, 0-100
     public double Latency = double.NaN;                         // Reflex simulation start → present end, ms
     public int GamePid; public string GameName = "";            // the game in front, if one is
+    public Rectangle GameScreen;                                // and the bounds of the monitor it's on
     public double GpuHotspot = double.NaN, GpuMemTemp = double.NaN, SsdTemp = double.NaN, RamTemp = double.NaN;
     public string NetAppName = ""; public double NetAppRate = -1;
     public string PublicIp = "", Vpn = null;                    // Vpn: null = not checked, "" = none, else its name
@@ -1135,7 +1138,7 @@ class Sampler
             if (fg != IntPtr.Zero && GetWindowRect(fg, out r))
             {
                 var b = Screen.FromHandle(fg).Bounds;
-                if (r.L <= b.Left + 2 && r.T <= b.Top + 2 && r.R >= b.Right - 2 && r.B >= b.Bottom - 2) { s.GamePid = pid; s.GameName = fpsApp; }
+                if (r.L <= b.Left + 2 && r.T <= b.Top + 2 && r.R >= b.Right - 2 && r.B >= b.Bottom - 2) { s.GamePid = pid; s.GameName = fpsApp; s.GameScreen = b; }
             }
         }
 
@@ -3643,7 +3646,10 @@ class GameWatch
 
     // ---- overlay while gaming
     public bool AutoOverlay { get; private set; }
+    public Rectangle GameScreen { get; private set; }
+    public bool InGame { get { return (DateTime.UtcNow - lastGameAt).TotalSeconds <= 5; } }
     int suppressedPid;
+    int overlayGame; // the game the overlay was on for, so it can close with it
     DateTime lastGameAt = DateTime.MinValue;
 
     // The hotkey hides an automatically shown overlay until that game closes.
@@ -3667,6 +3673,7 @@ class GameWatch
         if (s.GamePid != 0)
         {
             lastGameAt = now;
+            GameScreen = s.GameScreen;
             if (c.OverlayAuto && s.GamePid != suppressedPid) AutoOverlay = true;
             if (cur == null || cur.Pid != s.GamePid)
             {
@@ -3674,6 +3681,7 @@ class GameWatch
                 cur = new Session { Pid = s.GamePid, Name = s.GameName, Start = now };
             }
             cur.LastSeen = now;
+            if (c.OverlayShow) overlayGame = s.GamePid;
             if (!double.IsNaN(s.Fps)) { cur.FpsSum += s.Fps; cur.FpsCount++; }
             if (!double.IsNaN(s.FpsLow)) { cur.LowSum += s.FpsLow; cur.LowCount++; }
             cur.PeakCpu = Max(cur.PeakCpu, s.CpuTemp);
@@ -3691,7 +3699,13 @@ class GameWatch
             try { using (var p = Process.GetProcessById(cur.Pid)) alive = !p.HasExited; }
             catch (ArgumentException) { alive = false; }
             catch { alive = true; } // not allowed to ask: assume it's still running
-            if (!alive) { End(cur); cur = null; suppressedPid = 0; }
+            if (!alive)
+            {
+                int gone = cur.Pid;
+                End(cur); cur = null; suppressedPid = 0; AutoOverlay = false; lastGameAt = DateTime.MinValue;
+                if (gone == overlayGame && c.OverlayShow && c.OverlayCloseWithGame) bar.SetOverlay(false);
+                overlayGame = 0;
+            }
         }
 
         if (writer != null) Record(s);
@@ -6150,10 +6164,31 @@ class OverlayForm : Form
         base.Dispose(disposing);
     }
 
+    // Where it's drawn: its home position, or while a game is in front on another monitor, the same spot there
+    // (by the same edges, or centred if it's centred at home).
+    Point pos;
+
+    Point Place()
+    {
+        var home = new Point(c.OverlayX, c.OverlayY);
+        if (!c.OverlayFollow || !bar.Watch.InGame || bar.Watch.GameScreen.IsEmpty) return home;
+        var game = bar.Watch.GameScreen;
+        var cur = Screen.FromRectangle(new Rectangle(home, new Size(Math.Max(1, winW), Math.Max(1, winH)))).Bounds;
+        if (cur == game) return home;
+        int reach = (int)(16 * u);
+        int left = home.X - cur.Left, right = cur.Right - (home.X + winW), top = home.Y - cur.Top, bottom = cur.Bottom - (home.Y + winH);
+        int x = Math.Abs(home.X + winW / 2 - (cur.Left + cur.Width / 2)) < reach ? game.Left + (game.Width - winW) / 2
+              : left <= right ? game.Left + left : game.Right - winW - right;
+        int y = top <= bottom ? game.Top + top : game.Bottom - winH - bottom;
+        x = Math.Max(game.Left, Math.Min(game.Right - winW, x));
+        y = Math.Max(game.Top, Math.Min(game.Bottom - winH, y));
+        return new Point(x, y);
+    }
+
     // ---- dragging (while unlocked) and the menu
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left) { dragging = true; grab = new Point(Cursor.Position.X - c.OverlayX, Cursor.Position.Y - c.OverlayY); }
+        if (e.Button == MouseButtons.Left) { dragging = true; grab = new Point(Cursor.Position.X - pos.X, Cursor.Position.Y - pos.Y); }
         base.OnMouseDown(e);
     }
 
@@ -6163,7 +6198,7 @@ class OverlayForm : Form
         if (dragging)
         {
             var p = Snap(new Point(Cursor.Position.X - grab.X, Cursor.Position.Y - grab.Y));
-            c.OverlayX = p.X; c.OverlayY = p.Y;
+            c.OverlayX = p.X; c.OverlayY = p.Y; pos = p; // where it's dropped becomes its home
             SetWindowPos(Handle, IntPtr.Zero, p.X, p.Y, 0, 0, 0x1 | 0x4 | 0x10); // NOSIZE | NOZORDER | NOACTIVATE
         }
         base.OnMouseMove(e);
@@ -6253,7 +6288,8 @@ class OverlayForm : Form
         EnsurePosition();
 
         var k = new StringBuilder();
-        k.Append(winW).Append('x').Append(winH).Append(c.OverlayOpacity).Append(c.OverlayX).Append(',').Append(c.OverlayY);
+        if (!dragging) pos = Place();
+        k.Append(winW).Append('x').Append(winH).Append(c.OverlayOpacity).Append(pos.X).Append(',').Append(pos.Y);
         foreach (var seg in segs)
         {
             k.Append('|').Append(seg.Label).Append(seg.IconColor.ToArgb());
@@ -6330,7 +6366,7 @@ class OverlayForm : Form
                 x += seg.W + segGap;
             }
         }
-        surface.Push(Handle, c.OverlayX, c.OverlayY);
+        surface.Push(Handle, pos.X, pos.Y);
     }
 }
 
@@ -7681,6 +7717,8 @@ class SettingsForm : Form
         Header("Game overlay");
         Switch(Icons.Gamepad, Theme.Accent, "Show game overlay", "OverlayShow");
         Switch(Icons.Gamepad, Theme.Accent, "Show automatically in games", "OverlayAuto", "Appears while a fullscreen or borderless game is in front, and hides when you leave it. Needs admin.");
+        Switch(Icons.Monitor, Theme.Accent, "Move to the game's monitor", "OverlayFollow", "Jumps to the same spot on whichever monitor the game is on, and back afterwards. Needs admin.");
+        Switch(Icons.Gamepad, Theme.Accent, "Close with the game", "OverlayCloseWithGame", "Turns the overlay off when the game it was showing for closes. Needs admin.");
         Switch(Icons.Bolt, Theme.Accent, "Hotkey: Ctrl+Shift+F10", "OverlayHotkey", "Shows or hides the overlay from inside a game");
         Switch(Icons.Mouse, Theme.Accent, "Lock position (click-through)", "OverlayLocked", "Clicks go to the game. Unlock it from the taskbar bar's menu.");
         Add(Icons.Monitor, Theme.Accent, "Position", "Drag it while unlocked. This moves it back to the top-left corner.", Btn("Reset position", (s, e) => { c.OverlayX = c.OverlayY = int.MinValue; Apply(); }));
