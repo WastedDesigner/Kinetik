@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("3.0.0.0")]
-[assembly: AssemblyFileVersion("3.0.0.0")]
-[assembly: AssemblyInformationalVersion("3.0.0")]
+[assembly: AssemblyVersion("3.0.1.0")]
+[assembly: AssemblyFileVersion("3.0.1.0")]
+[assembly: AssemblyInformationalVersion("3.0.1")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -207,6 +207,7 @@ class Settings
     // True when the bar, the widget or the overlay shows this stat, i.e. when it needs measuring.
     public bool Wants(string id)
     {
+        if (StatsShare.Wants(id)) return true; // a companion app needs it
         if (IsOn(id) || (WidgetShow && WidgetIsOn(id)) || ((OverlayShow || OverlayAuto) && OverlayIsOn(id))) return true;
         if (AlertTemps && (id == "CpuTemp" || id == "GpuTemp")) return true;
         if (AlertDisk && id == "DiskFree") return true;
@@ -3373,7 +3374,7 @@ class StatsBar : Form
         if (widget != null) { if (fullscreen && (fsScreen == null || widget.IsOnScreen(fsScreen))) widget.HideNow(); else widget.Render(force); }
         var snap = Sampler.Snap;
         bool freshSnap = snap != watched;
-        if (freshSnap) { watched = snap; Watch.OnSample(snap); RecordHover(snap); }
+        if (freshSnap) { watched = snap; Watch.OnSample(snap); RecordHover(snap); StatsShare.Publish(snap, Watch.InGame); }
         tip.Active = !Cfg.BarHover;
         if (!Cfg.BarHover && hover != null && hover.Visible) HideHover();
         SyncMirrors(fullscreen, fsScreen);
@@ -4087,6 +4088,172 @@ class MirrorBar : Form
 
     protected override void OnMouseUp(MouseEventArgs e) { bar.Clicked(e.Button); base.OnMouseUp(e); }
     protected override void Dispose(bool disposing) { surface.Dispose(); base.Dispose(disposing); }
+}
+
+// ======================================================================= Sharing readings with companion apps
+// A companion app (like Kinetik Screen, for USB sensor panels) reads Kinetik's readings instead of measuring
+// everything again. It checks in under HKCU\Software\Kinetik\Companion with the stats it needs; while it has done
+// so in the last 30 seconds, Kinetik measures those stats and writes each sample to a shared memory block that
+// only this Windows account can read. Kinetik never reads anything back from it.
+static class StatsShare
+{
+    public const string MapName = "Local\\Kinetik.Stats";
+    public const string CompanionKey = @"Software\Kinetik\Companion";
+    const int Size = 1 << 16;
+
+    static System.IO.MemoryMappedFiles.MemoryMappedFile map;
+    static long seq;
+    static volatile HashSet<string> wants = new HashSet<string>();
+    static DateTime checkedAt = DateTime.MinValue, seenAt = DateTime.MinValue;
+    static readonly object gate = new object();
+
+    public static bool Active { get { Refresh(); return (DateTime.UtcNow - seenAt).TotalSeconds < 30; } }
+
+    // Re-reads the companion's check-in, at most every 2 seconds. Only known stat ids are accepted.
+    static void Refresh()
+    {
+        lock (gate)
+        {
+            if ((DateTime.UtcNow - checkedAt).TotalSeconds < 2) return;
+            checkedAt = DateTime.UtcNow;
+            try
+            {
+                using (var k = Registry.CurrentUser.OpenSubKey(CompanionKey))
+                {
+                    if (k == null) { seenAt = DateTime.MinValue; return; }
+                    long ticks = Convert.ToInt64(k.GetValue("Seen", 0L));
+                    seenAt = ticks > 0 && ticks < DateTime.UtcNow.AddMinutes(1).Ticks ? new DateTime(ticks, DateTimeKind.Utc) : DateTime.MinValue;
+                    wants = new HashSet<string>(((k.GetValue("Wants") as string) ?? "").Split(',').Where(id => Settings.StatIds.Contains(id)));
+                }
+            }
+            catch { seenAt = DateTime.MinValue; }
+        }
+    }
+
+    public static bool Wants(string id) { return Active && wants.Contains(id); }
+
+    // Writes the sample as "Field=value" lines. A sequence number of -1 marks a write in progress.
+    public static void Publish(Snapshot s, bool inGame)
+    {
+        if (!Active) { Close(); return; }
+        try
+        {
+            if (map == null)
+            {
+                var sec = new System.IO.MemoryMappedFiles.MemoryMappedFileSecurity();
+                sec.AddAccessRule(new System.Security.AccessControl.AccessRule<System.IO.MemoryMappedFiles.MemoryMappedFileRights>(
+                    WindowsIdentity.GetCurrent().User, System.IO.MemoryMappedFiles.MemoryMappedFileRights.Read, System.Security.AccessControl.AccessControlType.Allow));
+                map = System.IO.MemoryMappedFiles.MemoryMappedFile.CreateOrOpen(MapName, Size, System.IO.MemoryMappedFiles.MemoryMappedFileAccess.ReadWrite,
+                    System.IO.MemoryMappedFiles.MemoryMappedFileOptions.None, sec, HandleInheritability.None);
+            }
+            var bytes = Encoding.UTF8.GetBytes(Serialize(s, inGame));
+            if (bytes.Length > Size - 16) return;
+            using (var v = map.CreateViewAccessor())
+            {
+                long n = ++seq;
+                v.Write(0, -1L);
+                v.Write(8, bytes.Length);
+                v.WriteArray(12, bytes, 0, bytes.Length);
+                v.Write(0, n);
+            }
+        }
+        catch { }
+    }
+
+    public static void Close()
+    {
+        if (map == null) return;
+        try { map.Dispose(); } catch { }
+        map = null;
+    }
+
+    static string Serialize(Snapshot s, bool inGame)
+    {
+        var ci = CultureInfo.InvariantCulture;
+        var sb = new StringBuilder();
+        sb.Append("InGame=").Append(inGame ? "1" : "0").Append('\n');
+        foreach (var f in typeof(Snapshot).GetFields(BindingFlags.Public | BindingFlags.Instance))
+        {
+            var v = f.GetValue(s);
+            string text = null;
+            if (v is double) text = ((double)v).ToString("R", ci);
+            else if (v is int || v is uint || v is long) text = Convert.ToString(v, ci);
+            else if (v is bool) text = (bool)v ? "1" : "0";
+            else if (v is string) text = Uri.EscapeDataString((string)v);
+            else if (v is double[]) text = string.Join(",", ((double[])v).Select(d => d.ToString("R", ci)));
+            else if (v is Rectangle) { var r = (Rectangle)v; text = r.X + "," + r.Y + "," + r.Width + "," + r.Height; }
+            if (text != null) sb.Append(f.Name).Append('=').Append(text).Append('\n');
+        }
+        return sb.ToString();
+    }
+
+    // ---- the companion's side
+    static long readSeq;
+    public static bool InGame;
+
+    // The newest sample, or null when Kinetik hasn't written one since the last call (or isn't running).
+    public static Snapshot Read()
+    {
+        try
+        {
+            using (var m = System.IO.MemoryMappedFiles.MemoryMappedFile.OpenExisting(MapName, System.IO.MemoryMappedFiles.MemoryMappedFileRights.Read))
+            using (var v = m.CreateViewAccessor(0, 0, System.IO.MemoryMappedFiles.MemoryMappedFileAccess.Read))
+            {
+                long n = v.ReadInt64(0);
+                if (n <= 0 || n == readSeq) return null;
+                int len = v.ReadInt32(8);
+                if (len <= 0 || len > Size - 16) return null;
+                var bytes = new byte[len];
+                v.ReadArray(12, bytes, 0, len);
+                if (v.ReadInt64(0) != n) return null; // written over while reading: take the next one
+                readSeq = n;
+                return Parse(Encoding.UTF8.GetString(bytes));
+            }
+        }
+        catch { return null; }
+    }
+
+    static Snapshot Parse(string text)
+    {
+        var ci = CultureInfo.InvariantCulture;
+        var s = new Snapshot();
+        foreach (var line in text.Split('\n'))
+        {
+            int eq = line.IndexOf('=');
+            if (eq <= 0) continue;
+            string name = line.Substring(0, eq), v = line.Substring(eq + 1);
+            if (name == "InGame") { InGame = v == "1"; continue; }
+            var f = typeof(Snapshot).GetField(name);
+            if (f == null) continue;
+            try
+            {
+                if (f.FieldType == typeof(double)) f.SetValue(s, double.Parse(v, ci));
+                else if (f.FieldType == typeof(int)) f.SetValue(s, int.Parse(v, ci));
+                else if (f.FieldType == typeof(uint)) f.SetValue(s, uint.Parse(v, ci));
+                else if (f.FieldType == typeof(long)) f.SetValue(s, long.Parse(v, ci));
+                else if (f.FieldType == typeof(bool)) f.SetValue(s, v == "1");
+                else if (f.FieldType == typeof(string)) f.SetValue(s, Uri.UnescapeDataString(v));
+                else if (f.FieldType == typeof(double[])) f.SetValue(s, v == "" ? new double[0] : v.Split(',').Select(x => double.Parse(x, ci)).ToArray());
+                else if (f.FieldType == typeof(Rectangle)) { var p = v.Split(',').Select(x => int.Parse(x, ci)).ToArray(); f.SetValue(s, new Rectangle(p[0], p[1], p[2], p[3])); }
+            }
+            catch { }
+        }
+        return s;
+    }
+
+    // Checks in with Kinetik: "I'm here, and these are the stats I need".
+    public static void CheckIn(IEnumerable<string> ids)
+    {
+        try
+        {
+            using (var k = Registry.CurrentUser.CreateSubKey(CompanionKey))
+            {
+                k.SetValue("Seen", DateTime.UtcNow.Ticks, RegistryValueKind.QWord);
+                k.SetValue("Wants", string.Join(",", ids));
+            }
+        }
+        catch { }
+    }
 }
 
 // ======================================================================= Wi-Fi signal
