@@ -4140,9 +4140,15 @@ static class StatsShare
         {
             if (map == null)
             {
+                // This account may read it. Elevated, Kinetik writes through the Administrators group, so programs running
+                // as the account (not elevated) can't change it; otherwise the account itself needs to write.
                 var sec = new System.IO.MemoryMappedFiles.MemoryMappedFileSecurity();
+                var rw = System.IO.MemoryMappedFiles.MemoryMappedFileRights.ReadWrite;
                 sec.AddAccessRule(new System.Security.AccessControl.AccessRule<System.IO.MemoryMappedFiles.MemoryMappedFileRights>(
-                    WindowsIdentity.GetCurrent().User, System.IO.MemoryMappedFiles.MemoryMappedFileRights.Read, System.Security.AccessControl.AccessControlType.Allow));
+                    WindowsIdentity.GetCurrent().User, Program.IsAdmin ? System.IO.MemoryMappedFiles.MemoryMappedFileRights.Read : rw, System.Security.AccessControl.AccessControlType.Allow));
+                if (Program.IsAdmin)
+                    sec.AddAccessRule(new System.Security.AccessControl.AccessRule<System.IO.MemoryMappedFiles.MemoryMappedFileRights>(
+                        new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), rw, System.Security.AccessControl.AccessControlType.Allow));
                 map = System.IO.MemoryMappedFiles.MemoryMappedFile.CreateOrOpen(MapName, Size, System.IO.MemoryMappedFiles.MemoryMappedFileAccess.ReadWrite,
                     System.IO.MemoryMappedFiles.MemoryMappedFileOptions.None, sec, HandleInheritability.None);
             }
