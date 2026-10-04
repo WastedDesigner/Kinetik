@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("3.0.1.0")]
-[assembly: AssemblyFileVersion("3.0.1.0")]
-[assembly: AssemblyInformationalVersion("3.0.1")]
+[assembly: AssemblyVersion("3.1.0.0")]
+[assembly: AssemblyFileVersion("3.1.0.0")]
+[assembly: AssemblyInformationalVersion("3.1.0")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -93,6 +93,11 @@ class Settings
     public string OverlayOrder = DefaultOverlayOrder, OverlayItems = DefaultOverlayItems;
     public int OverlayX = int.MinValue, OverlayY = int.MinValue; // int.MinValue = top-left corner of the main screen
     public int OverlayScale = 100, OverlayOpacity = 60;
+
+    // Live dashboard: a window with graphs of every reading, and the same as a web page (Dash, WebDash)
+    public bool Dashboard = false, DashboardHotkey = true, WebDashboard = false, WebLan = false;
+    public int DashMinutes = 5, DashW = 1180, DashH = 760, WebPort = 8484;
+    public string WebKey = ""; // the secret in the web dashboard's link; made when it's first switched on
 
     // Appearance
     public string FontName = DefaultFont();
@@ -208,6 +213,7 @@ class Settings
     public bool Wants(string id)
     {
         if (StatsShare.Wants(id)) return true; // a companion app needs it
+        if (Dash.Viewing && Dash.WantIds.Contains(id)) return true; // the dashboard is open
         if (IsOn(id) || (WidgetShow && WidgetIsOn(id)) || ((OverlayShow || OverlayAuto) && OverlayIsOn(id))) return true;
         if (AlertTemps && (id == "CpuTemp" || id == "GpuTemp")) return true;
         if (AlertDisk && id == "DiskFree") return true;
@@ -281,6 +287,7 @@ class Settings
         GapStats = cl(GapStats, 0, 400); GapIcon = cl(GapIcon, 0, 400); EdgePad = cl(EdgePad, 0, 400);
         IconScale = cl(IconScale, 20, 400); RowGap = cl(RowGap, 0, 50);
         DividerStyle = cl(DividerStyle, 0, 3); DividerHeight = cl(DividerHeight, 10, 400);
+        DashMinutes = cl(DashMinutes, 1, 10); DashW = cl(DashW, 420, 4000); DashH = cl(DashH, 360, 3000); WebPort = cl(WebPort, 1024, 65535);
         TrayStyle = cl(TrayStyle, 0, TrayIconArt.Styles.Length - 1); AppBackground = cl(AppBackground, 0, Theme.Backgrounds.Length - 1);
         if (float.IsNaN(FontSize) || FontSize < 0 || FontSize > 72) FontSize = 0;
         if (string.IsNullOrWhiteSpace(FontName) || FontName.Length > 100) FontName = DefaultFont();
@@ -2179,6 +2186,7 @@ static class Program
             Application.SetCompatibleTextRenderingDefault(false);
             Application.ThreadException += (s, e) => Log(e.Exception);
             var bar = new StatsBar();
+            if (args.Contains("--dashboard")) bar.Load += (s, e) => bar.BeginInvoke((Action)(() => { bar.Cfg.Dashboard = true; bar.OpenDashboard(); }));
             int si = Array.IndexOf(args, "--settings");
             if (si >= 0)
             {
@@ -2566,6 +2574,10 @@ class StatsBar : Form
         overlayItem.Click += (s, e) => ToggleOverlay();
         var benchItem = new ToolStripMenuItem("Record benchmark");
         benchItem.Click += (s, e) => Watch.ToggleRecording();
+        var dashItem = new ToolStripMenuItem("Live dashboard");
+        dashItem.Click += (s, e) => OpenDashboard();
+        var webItem = new ToolStripMenuItem("Web dashboard in browser");
+        webItem.Click += (s, e) => WebDash.Open(Cfg);
         var unlockOverlay = new ToolStripMenuItem("Unlock game overlay");
         unlockOverlay.Click += (s, e) => { Cfg.OverlayLocked = false; Cfg.Save(); Render(true); NotifySettings("Overlay"); };
         menu.Items.Add(widgetItem);
@@ -2573,6 +2585,8 @@ class StatsBar : Form
         menu.Items.Add(overlayItem);
         menu.Items.Add(unlockOverlay);
         menu.Items.Add(benchItem);
+        menu.Items.Add(dashItem);
+        menu.Items.Add(webItem);
         var profilesItem = new ToolStripMenuItem("Profiles");
         menu.Items.Add(profilesItem);
         menu.Opening += (s, e) =>
@@ -2581,6 +2595,8 @@ class StatsBar : Form
             overlayItem.Checked = Cfg.OverlayShow || Watch.AutoOverlay; overlayItem.ShortcutKeyDisplayString = Cfg.OverlayHotkey ? "Ctrl+Shift+F10" : null;
             benchItem.Checked = Watch.IsRecording; benchItem.Text = Watch.IsRecording ? "Stop recording benchmark" : "Record benchmark";
             benchItem.ShortcutKeyDisplayString = Cfg.BenchHotkey ? "Ctrl+Shift+F11" : null;
+            dashItem.Visible = Cfg.Dashboard; dashItem.ShortcutKeyDisplayString = Cfg.DashboardHotkey ? "Ctrl+Shift+F9" : null;
+            webItem.Visible = Cfg.WebDashboard && WebDash.Status == "" && Cfg.WebKey != "";
             profilesItem.DropDownItems.Clear();
             foreach (var name in Profiles.List())
             {
@@ -2642,6 +2658,8 @@ class StatsBar : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.Close(); // flushes unsaved settings
+        if (dash != null) dash.Close();
+        WebDash.Stop();
         if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; } // otherwise a dead icon lingers until hovered
         if (taskButton != null) { taskButton.Dispose(); taskButton = null; }
         base.OnFormClosing(e);
@@ -3374,12 +3392,18 @@ class StatsBar : Form
         if (widget != null) { if (fullscreen && (fsScreen == null || widget.IsOnScreen(fsScreen))) widget.HideNow(); else widget.Render(force); }
         var snap = Sampler.Snap;
         bool freshSnap = snap != watched;
-        if (freshSnap) { watched = snap; Watch.OnSample(snap); RecordHover(snap); StatsShare.Publish(snap, Watch.InGame); }
+        if (freshSnap)
+        {
+            watched = snap; Watch.OnSample(snap); RecordHover(snap); StatsShare.Publish(snap, Watch.InGame);
+            Dash.Record(snap);
+            if (dash != null) dash.Invalidate();
+        }
         tip.Active = !Cfg.BarHover;
         if (!Cfg.BarHover && hover != null && hover.Visible) HideHover();
         SyncMirrors(fullscreen, fsScreen);
         SyncOverlay();
         if (overlay != null) overlay.Render(force); // made for games, so it stays up in fullscreen
+        SyncDashboard();
         SyncHotkey();
         SyncTaskbarButton();
         SyncTray();
@@ -3509,7 +3533,39 @@ class StatsBar : Form
         BeginInvoke((Action)(() => { Render(true); NotifySettings("Overlay"); }));
     }
 
-    bool benchKeyOn;
+    bool benchKeyOn, dashKeyOn;
+
+    // ---- Live dashboard: a window made when it's opened and gone when it's closed, plus the web dashboard's server.
+    DashboardForm dash;
+
+    void SyncDashboard()
+    {
+        if (dash != null && !Cfg.Dashboard) dash.Close();
+        WebDash.Sync(this, Cfg);
+    }
+
+    public void OpenDashboard()
+    {
+        if (!Cfg.Dashboard) return;
+        if (dash == null)
+        {
+            dash = new DashboardForm(this);
+            dash.FormClosed += (s, e) => { dash = null; Dash.WindowOpen = false; TrimSoon(1500); };
+            Dash.WindowOpen = true;
+        }
+        dash.Show();
+        if (dash.WindowState == FormWindowState.Minimized) dash.WindowState = FormWindowState.Normal;
+        dash.Activate();
+    }
+
+    // The hotkey opens the dashboard, or closes it when it's already the window in front.
+    void ToggleDashboard()
+    {
+        if (dash != null && dash.Handle == GetForegroundWindow()) dash.Close();
+        else OpenDashboard();
+    }
+
+    public void RefreshDashboard() { if (dash != null) dash.Invalidate(); }
 
     // Ctrl+Shift+F10 shows or hides the overlay, Ctrl+Shift+F11 starts or stops a benchmark recording.
     void SyncHotkey()
@@ -3517,8 +3573,10 @@ class StatsBar : Form
         if (!IsHandleCreated) return;
         SyncKey(1, Keys.F10, Cfg.OverlayHotkey, ref hotkeyOn);
         SyncKey(2, Keys.F11, Cfg.BenchHotkey, ref benchKeyOn);
+        SyncKey(3, Keys.F9, Cfg.Dashboard && Cfg.DashboardHotkey, ref dashKeyOn);
         if (Cfg.OverlayHotkey && !hotkeyOn) Cfg.OverlayHotkey = false; // another app already has it
         if (Cfg.BenchHotkey && !benchKeyOn) Cfg.BenchHotkey = false;
+        if (Cfg.Dashboard && Cfg.DashboardHotkey && !dashKeyOn) Cfg.DashboardHotkey = false;
     }
 
     void SyncKey(int id, Keys key, bool want, ref bool on)
@@ -3540,6 +3598,7 @@ class StatsBar : Form
         {
             if (m.WParam.ToInt32() == 1) ToggleOverlay();
             else if (m.WParam.ToInt32() == 2) Watch.ToggleRecording();
+            else if (m.WParam.ToInt32() == 3) ToggleDashboard();
             return;
         }
         base.WndProc(ref m);
@@ -4262,6 +4321,461 @@ static class StatsShare
     }
 }
 
+// ======================================================================= Live dashboard
+// Every reading with up to ten minutes of history, for the dashboard window and the web dashboard. History is only
+// kept, and the extra readings only measured, while one of them is actually being looked at.
+class DashCard
+{
+    public string Title, Color, Big, BigLabel, Name;
+    public string[] Graph, Cols;
+    public KeyValuePair<string, string>[] Rows;
+    public bool Pct, Cores;
+
+    // graph and cols are comma lists; rows are "Label=Id;Label=Id".
+    public DashCard(string title, string color, string big, string bigLabel, string name, string graph, string cols, bool pct, string rows)
+    {
+        Title = title; Color = color; Big = big; BigLabel = bigLabel; Name = name; Pct = pct;
+        Graph = graph == "" ? new string[0] : graph.Split(',');
+        Cols = cols == "" ? new string[0] : cols.Split(',');
+        Rows = rows == "" ? new KeyValuePair<string, string>[0]
+            : rows.Split(';').Select(r => { var p = r.Split('='); return new KeyValuePair<string, string>(p[0], p[1]); }).ToArray();
+    }
+}
+
+static class Dash
+{
+    public static readonly DashCard[] Cards =
+    {
+        new DashCard("CPU", "cpu", "Cpu", "Usage", "cpu", "Cpu", "cpu", true, "Temperature=CpuTemp;Power=CpuPower;Clock=CpuClock;Processes=Processes"),
+        new DashCard("GPU", "gpu", "Gpu", "Usage", "gpu", "Gpu", "gpu", true, "Temperature=GpuTemp;Hot spot=GpuHotspot;Power=GpuPower;Clock=GpuClock;Fan=GpuFan;VRAM=GpuVram"),
+        new DashCard("Memory", "ram", "Ram", "RAM", "", "Ram,GpuVramPct", "ram,gpu", true, "RAM used=RamGb;Committed=RamCommit;VRAM=GpuVram"),
+        new DashCard("Network", "down", "Down", "Download", "", "Down,Up", "down,up", false, "Upload=Up;Ping=Ping;Wi-Fi=Wifi"),
+        new DashCard("Disk", "disk", "Disk", "Activity", "", "DiskRead,DiskWrite", "disk,up", false, "Read=DiskRead;Write=DiskWrite;Free space=DiskFree;Drive temp=SsdTemp"),
+        new DashCard("Temperatures", "temp", "CpuTemp", "CPU", "", "CpuTemp,GpuTemp", "temp,gpu", false, "GPU=GpuTemp;GPU hot spot=GpuHotspot;GPU memory=GpuMemTemp;Drive=SsdTemp;RAM=RamTemp"),
+        new DashCard("Power", "cpu", "TotalPower", "CPU + GPU", "", "CpuPower,GpuPower", "cpu,gpu", false, "CPU=CpuPower;GPU=GpuPower"),
+        new DashCard("Game", "gpu", "Fps", "FPS", "game", "Fps", "gpu", false, "1% low=FpsLow;0.1% low=FpsLow01;Frame time=FrameTime;Status=FpsNote"),
+        new DashCard("CPU cores", "cpu", "", "", "", "", "", true, "") { Cores = true },
+    };
+
+    // Short names for graph legends.
+    public static readonly Dictionary<string, string> Short = new Dictionary<string, string>
+    {
+        { "Cpu", "CPU" }, { "Gpu", "GPU" }, { "Ram", "RAM" }, { "GpuVramPct", "VRAM" }, { "Down", "Download" }, { "Up", "Upload" },
+        { "DiskRead", "Read" }, { "DiskWrite", "Write" }, { "CpuTemp", "CPU" }, { "GpuTemp", "GPU" }, { "CpuPower", "CPU" }, { "GpuPower", "GPU" }, { "Fps", "FPS" },
+    };
+
+    public static readonly string[] Graphed = Cards.SelectMany(d => d.Graph).Distinct().ToArray();
+    static readonly string[] TextIds = Cards.SelectMany(d => new[] { d.Big }.Concat(d.Rows.Select(r => r.Value))).Where(id => id != "").Concat(new[] { "Uptime" }).Distinct().ToArray();
+    // What the dashboard needs measured while it's being looked at.
+    public static readonly HashSet<string> WantIds = new HashSet<string>(TextIds.Concat(Graphed).Concat(new[] { "CpuCores" }).Where(id => Settings.StatIds.Contains(id)));
+    static readonly string[] ColorKeys = { "cpu", "gpu", "ram", "down", "up", "disk", "temp" };
+
+    public const int Capacity = 600; // samples kept: ten minutes at the default one-second interval
+
+    static readonly object gate = new object();
+    static readonly Dictionary<string, double[]> hist = new Dictionary<string, double[]>();
+    static int head, count, seq;
+    static volatile bool windowOpen;
+    static long webSeen;
+
+    public static bool WindowOpen { get { return windowOpen; } set { windowOpen = value; } }
+    public static void WebPolled() { Interlocked.Exchange(ref webSeen, DateTime.UtcNow.Ticks); }
+
+    // True while the window is open, or a browser asked for readings in the last 15 seconds.
+    public static bool Viewing { get { return windowOpen || DateTime.UtcNow.Ticks - Interlocked.Read(ref webSeen) < 15 * TimeSpan.TicksPerSecond; } }
+
+    public static void Record(Snapshot s)
+    {
+        lock (gate)
+        {
+            if (!Viewing) { if (hist.Count > 0) { hist.Clear(); count = head = 0; } return; } // nobody's looking: keep nothing
+            if (hist.Count == 0) foreach (var id in Graphed) hist[id] = new double[Capacity];
+            foreach (var id in Graphed) hist[id][head] = StatsBar.Num(id, s);
+            head = (head + 1) % Capacity;
+            if (count < Capacity) count++;
+            seq++;
+        }
+    }
+
+    // The last n samples of one reading, oldest first; NaN where it wasn't available.
+    public static double[] History(string id, int n)
+    {
+        lock (gate)
+        {
+            double[] h;
+            if (!hist.TryGetValue(id, out h)) return new double[0];
+            n = Math.Min(n, count);
+            var r = new double[n];
+            for (int i = 0; i < n; i++) r[i] = h[(head - n + i + 2 * Capacity) % Capacity];
+            return r;
+        }
+    }
+
+    public static Color ColorOf(string key, Settings c)
+    {
+        switch (key)
+        {
+            case "cpu": return c.CpuColor;
+            case "gpu": return c.GpuColor;
+            case "ram": return c.RamColor;
+            case "down": return c.DownColor;
+            case "up": return c.UpColor;
+            case "disk": return c.DiskColor;
+            case "temp": return c.TempColor;
+            default: return Theme.Accent;
+        }
+    }
+
+    public static string NameOf(string key, Snapshot s)
+    {
+        if (key == "cpu") return s.CpuName;
+        if (key == "gpu") return s.HasGpu ? s.GpuName : "";
+        if (key == "game") return s.GameName != "" ? s.GameName : s.FpsApp;
+        return "";
+    }
+
+    // A reading as the dashboard shows it, or null when there isn't one.
+    public static string Text(string id, Snapshot s)
+    {
+        switch (id)
+        {
+            case "RamGb": return s.RamTotal > 0 ? s.RamUsed.ToString("0.0") + " / " + s.RamTotal.ToString("0") + " GB" : null;
+            case "GpuVram": return s.HasGpu && s.VramTotal > 0 ? s.VramUsed.ToString("0.0") + " / " + s.VramTotal.ToString("0") + " GB" : null;
+            case "DiskFree": return s.FreeGb >= 0 ? StatsBar.SizeGb(s.FreeGb) + (s.FreeName != "" ? " (" + s.FreeName + ")" : "") : null;
+            case "Uptime": return StatsBar.Duration(s.Uptime);
+            case "FpsNote": return !double.IsNaN(s.Fps) ? null : Program.IsAdmin ? "No game in front" : "Needs admin";
+            case "TotalPower":
+            {
+                double t = (double.IsNaN(s.CpuPower) ? 0 : s.CpuPower) + (s.HasGpu && !double.IsNaN(s.GpuPower) ? s.GpuPower : 0);
+                return t > 0 ? t.ToString("0") + " W" : null;
+            }
+        }
+        double v = StatsBar.Num(id, s);
+        return double.IsNaN(v) ? null : StatsBar.FormatValue(id, v, s);
+    }
+
+    static string N(double v) { return double.IsNaN(v) || double.IsInfinity(v) ? "null" : v.ToString("0.###", CultureInfo.InvariantCulture); }
+
+    // A JSON string. <, > and & are escaped too, so nothing in a name can break out of the page.
+    static string Js(string t)
+    {
+        if (t == null) return "null";
+        var sb = new StringBuilder("\"");
+        foreach (var ch in t)
+        {
+            if (ch == '"' || ch == '\\') sb.Append('\\').Append(ch);
+            else if (ch < 0x20 || ch == '<' || ch == '>' || ch == '&' || ch == '\u2028' || ch == '\u2029') sb.Append("\\u").Append(((int)ch).ToString("x4"));
+            else sb.Append(ch);
+        }
+        return sb.Append('"').ToString();
+    }
+
+    // The readings for the web dashboard. full adds the cards' layout and the history so far.
+    public static string Json(Snapshot s, Settings c, bool full)
+    {
+        var sb = new StringBuilder(full ? 65536 : 2048);
+        int sq; lock (gate) sq = seq;
+        sb.Append("{\"seq\":").Append(sq).Append(",\"interval\":").Append(Math.Max(250, c.Interval)).Append(",\"cap\":").Append(Capacity).Append(",\"minutes\":").Append(c.DashMinutes);
+        sb.Append(",\"names\":{\"cpu\":").Append(Js(NameOf("cpu", s))).Append(",\"gpu\":").Append(Js(NameOf("gpu", s))).Append(",\"game\":").Append(Js(NameOf("game", s))).Append('}');
+        sb.Append(",\"colors\":{");
+        for (int i = 0; i < ColorKeys.Length; i++)
+        {
+            var col = ColorOf(ColorKeys[i], c);
+            sb.Append(i > 0 ? "," : "").Append('"').Append(ColorKeys[i]).Append("\":\"#").Append(col.R.ToString("x2")).Append(col.G.ToString("x2")).Append(col.B.ToString("x2")).Append('"');
+        }
+        sb.Append("},\"text\":{");
+        bool first = true;
+        foreach (var id in TextIds)
+        {
+            var t = Text(id, s);
+            if (t == null) continue;
+            sb.Append(first ? "" : ",").Append('"').Append(id).Append("\":").Append(Js(t));
+            first = false;
+        }
+        sb.Append("},\"v\":{");
+        for (int i = 0; i < Graphed.Length; i++) sb.Append(i > 0 ? "," : "").Append('"').Append(Graphed[i]).Append("\":").Append(N(StatsBar.Num(Graphed[i], s)));
+        sb.Append("},\"cores\":[").Append(string.Join(",", s.Cores.Select(v => N(v)))).Append(']');
+        if (full)
+        {
+            sb.Append(",\"short\":{").Append(string.Join(",", Short.Select(kv => Js(kv.Key) + ":" + Js(kv.Value)))).Append('}');
+            sb.Append(",\"cards\":[");
+            for (int i = 0; i < Cards.Length; i++)
+            {
+                var d = Cards[i];
+                sb.Append(i > 0 ? "," : "").Append("{\"t\":").Append(Js(d.Title)).Append(",\"c\":").Append(Js(d.Color)).Append(",\"b\":").Append(Js(d.Big))
+                  .Append(",\"bl\":").Append(Js(d.BigLabel)).Append(",\"n\":").Append(Js(d.Name)).Append(",\"p\":").Append(d.Pct ? "true" : "false")
+                  .Append(",\"k\":").Append(d.Cores ? "true" : "false").Append(",\"g\":[").Append(string.Join(",", d.Graph.Select(x => Js(x))))
+                  .Append("],\"gc\":[").Append(string.Join(",", d.Cols.Select(x => Js(x)))).Append("],\"r\":[")
+                  .Append(string.Join(",", d.Rows.Select(r => "[" + Js(r.Key) + "," + Js(r.Value) + "]"))).Append("]}");
+            }
+            sb.Append("],\"hist\":{");
+            for (int i = 0; i < Graphed.Length; i++)
+                sb.Append(i > 0 ? "," : "").Append('"').Append(Graphed[i]).Append("\":[").Append(string.Join(",", History(Graphed[i], Capacity).Select(v => N(v)))).Append(']');
+            sb.Append('}');
+        }
+        return sb.Append('}').ToString();
+    }
+}
+
+// Serves the dashboard as a web page over plain HTTP. Every request needs the secret key from the link in Settings,
+// so other devices on the network, and web pages trying to reach this PC, can't read anything without it.
+static class WebDash
+{
+    static System.Net.Sockets.TcpListener listener;
+    static string running = "", failed = "";
+    static int busy;
+    static StatsBar bar;
+    public static string Status = "";
+
+    // Starts, restarts or stops the server to match the settings. Runs on every update, so it does nothing unless they changed.
+    public static void Sync(StatsBar b, Settings c)
+    {
+        bar = b;
+        string want = c.WebDashboard ? c.WebPort + "|" + c.WebLan : "";
+        if (want == running) return;
+        Stop();
+        if (want == "") { failed = ""; Status = ""; return; }
+        if (want == failed) return; // these settings already failed; wait until they change
+        if (string.IsNullOrEmpty(c.WebKey)) { c.WebKey = NewKey(); c.Save(); }
+        try
+        {
+            var l = new System.Net.Sockets.TcpListener(c.WebLan ? System.Net.IPAddress.Any : System.Net.IPAddress.Loopback, c.WebPort);
+            l.Start(16);
+            listener = l; running = want; failed = ""; Status = "";
+            new Thread(() => Accept(l)) { IsBackground = true, Name = "Web dashboard" }.Start();
+        }
+        catch (Exception e) { failed = want; Status = "Couldn't start on port " + c.WebPort + ": " + e.Message; }
+    }
+
+    public static void Stop()
+    {
+        var l = listener; listener = null; running = "";
+        if (l != null) try { l.Stop(); } catch { }
+    }
+
+    public static string NewKey()
+    {
+        const string abc = "abcdefghjkmnpqrstuvwxyz23456789";
+        var bytes = new byte[16];
+        using (var rng = new System.Security.Cryptography.RNGCryptoServiceProvider()) rng.GetBytes(bytes);
+        return new string(bytes.Select(x => abc[x % abc.Length]).ToArray());
+    }
+
+    // The link to share: this PC's network address when other devices are allowed, otherwise this PC only.
+    public static string Link(Settings c)
+    {
+        string host = c.WebLan ? (LanAddress() ?? "127.0.0.1") : "127.0.0.1";
+        return "http://" + host + ":" + c.WebPort + "/?k=" + c.WebKey;
+    }
+
+    // Opens the dashboard in the default browser, through Explorer so it isn't elevated along with Kinetik.
+    public static void Open(Settings c)
+    {
+        if (string.IsNullOrEmpty(c.WebKey) || c.WebKey.Any(ch => !char.IsLetterOrDigit(ch))) return;
+        try { Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "\"http://127.0.0.1:" + c.WebPort + "/?k=" + c.WebKey + "\"")); }
+        catch { }
+    }
+
+    // This PC's address on the local network: a physical adapter with a gateway and a private address wins over VPNs and virtual switches.
+    public static string LanAddress()
+    {
+        string best = null; int bestScore = int.MinValue;
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback || ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel) continue;
+                var p = ni.GetIPProperties();
+                bool gateway = p.GatewayAddresses.Any(gw => gw.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !gw.Address.Equals(System.Net.IPAddress.Any));
+                bool physical = ni.NetworkInterfaceType == NetworkInterfaceType.Ethernet || ni.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 || ni.NetworkInterfaceType == NetworkInterfaceType.GigabitEthernet;
+                string desc = (ni.Description + " " + ni.Name).ToLowerInvariant();
+                bool virt = new[] { "virtual", "vpn", "wireguard", "hyper-v", "vethernet", "tailscale", "zerotier", "vmware", "virtualbox", "tap-" }.Any(desc.Contains);
+                foreach (var a in p.UnicastAddresses)
+                {
+                    if (a.Address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) continue;
+                    var b = a.Address.GetAddressBytes();
+                    if (b[0] == 169 && b[1] == 254) continue; // link-local
+                    bool priv = b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168);
+                    int score = (gateway ? 4 : 0) + (physical ? 2 : 0) + (priv ? 1 : 0) - (virt ? 8 : 0);
+                    if (score > bestScore) { bestScore = score; best = a.Address.ToString(); }
+                }
+            }
+        }
+        catch { }
+        return best;
+    }
+
+    static void Accept(System.Net.Sockets.TcpListener l)
+    {
+        while (true)
+        {
+            System.Net.Sockets.TcpClient client;
+            try { client = l.AcceptTcpClient(); } catch { return; } // stopped
+            if (Interlocked.Increment(ref busy) > 8) { Interlocked.Decrement(ref busy); client.Close(); continue; }
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try { Handle(client); } catch { }
+                finally { try { client.Close(); } catch { } Interlocked.Decrement(ref busy); }
+            });
+        }
+    }
+
+    static void Handle(System.Net.Sockets.TcpClient client)
+    {
+        client.ReceiveTimeout = 5000; client.SendTimeout = 5000;
+        var stream = client.GetStream();
+        var buf = new byte[8192]; int n = 0;
+        while (n < buf.Length)
+        {
+            int r = stream.Read(buf, n, buf.Length - n);
+            if (r <= 0) break;
+            n += r;
+            if (Encoding.ASCII.GetString(buf, 0, n).Contains("\r\n\r\n")) break;
+        }
+        var head = Encoding.ASCII.GetString(buf, 0, n);
+        int eol = head.IndexOf("\r\n", StringComparison.Ordinal);
+        if (eol <= 0) return;
+        var parts = head.Substring(0, eol).Split(' ');
+        if (parts.Length < 3 || parts[0] != "GET") { Send(stream, 405, "text/plain", "Only GET is supported."); return; }
+        string target = parts[1], path = target, key = "";
+        bool wantHist = false;
+        int q = target.IndexOf('?');
+        if (q >= 0)
+        {
+            path = target.Substring(0, q);
+            foreach (var kv in target.Substring(q + 1).Split('&'))
+            {
+                int eq = kv.IndexOf('=');
+                string name = eq < 0 ? kv : kv.Substring(0, eq), val = eq < 0 ? "" : kv.Substring(eq + 1);
+                if (name == "k") key = Uri.UnescapeDataString(val);
+                else if (name == "hist") wantHist = true;
+            }
+        }
+        var c = bar.Cfg;
+        if (path == "/favicon.ico") { Send(stream, 404, "text/plain", ""); return; }
+        if (string.IsNullOrEmpty(c.WebKey) || !Same(key, c.WebKey))
+        {
+            Send(stream, 403, "text/html; charset=utf-8", "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><body style='font:16px system-ui;background:#141418;color:#ececf0;padding:24px'><h2>Kinetik</h2><p>This link isn't valid any more. Get the current one from Kinetik: Settings, Dashboard.</p>");
+            return;
+        }
+        if (path == "/") Send(stream, 200, "text/html; charset=utf-8", Page);
+        else if (path == "/data") { Dash.WebPolled(); Send(stream, 200, "application/json; charset=utf-8", Dash.Json(bar.Sampler.Snap, c, wantHist)); }
+        else Send(stream, 404, "text/plain", "Not found");
+    }
+
+    static bool Same(string a, string b)
+    {
+        if (a.Length != b.Length) return false;
+        int d = 0;
+        for (int i = 0; i < a.Length; i++) d |= a[i] ^ b[i];
+        return d == 0;
+    }
+
+    static void Send(Stream s, int code, string type, string body)
+    {
+        var b = Encoding.UTF8.GetBytes(body);
+        string reason = code == 200 ? "OK" : code == 403 ? "Forbidden" : code == 404 ? "Not Found" : "Method Not Allowed";
+        var h = "HTTP/1.1 " + code + " " + reason + "\r\nContent-Type: " + type + "\r\nContent-Length: " + b.Length +
+            "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Frame-Options: DENY" +
+            "\r\nContent-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'" +
+            "\r\nConnection: close\r\n\r\n";
+        var hb = Encoding.ASCII.GetBytes(h);
+        s.Write(hb, 0, hb.Length);
+        s.Write(b, 0, b.Length);
+    }
+
+    // The page itself: no external files, so it works offline and leaks nothing. It polls /data once per update.
+    const string Page = @"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<meta name='theme-color' content='#141418'><title>Kinetik dashboard</title>
+<style>
+:root{--bg:#141418;--card:#1e1e24;--line:#2c2c34;--text:#ececf0;--sub:#9696a2}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:14px/1.35 'Segoe UI',system-ui,-apple-system,Roboto,sans-serif}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 16px 4px}
+h1{font-size:18px;margin:0}
+#meta{color:var(--sub);font-size:13px;flex:1;min-width:200px}
+#rng{display:flex;gap:4px}
+#rng button{background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer}
+#rng button.on{color:var(--text);border-color:#4cc2ff}
+#off{display:none;color:#ff6e6e;padding:6px 16px 0}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding:10px 16px 20px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:220px;display:flex;flex-direction:column}
+.t{display:flex;align-items:center;gap:8px;color:var(--sub);font-weight:600;font-size:13px}
+.t i{width:10px;height:10px;border-radius:3px;flex:none}
+.t .n{margin-left:auto;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62%}
+.top{display:flex;gap:14px;margin:6px 0 8px}
+.lft{min-width:42%}
+.big{font-size:30px;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+.bl,.st{color:var(--sub);font-size:12px}
+.rows{flex:1;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:13px;align-content:start;margin-top:4px}
+.rows b{color:var(--sub);font-weight:400;white-space:nowrap}
+.rows span{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.leg{display:flex;gap:12px;font-size:12px;color:var(--sub);margin:0 0 4px}
+.leg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
+canvas{width:100%;height:96px;display:block;margin-top:auto}
+.cores{display:flex;gap:3px;align-items:flex-end;height:130px;margin-top:12px}
+.cores div{flex:1;background:#2a2a32;border-radius:3px;position:relative;height:100%;min-width:2px}
+.cores div i{position:absolute;left:0;right:0;bottom:0;border-radius:3px}
+.note{color:var(--sub);font-size:12px;margin-top:8px}
+</style></head><body>
+<header><h1>Kinetik</h1><div id='meta'></div><div id='rng'></div></header>
+<div id='off'></div>
+<main id='grid'></main>
+<script>
+const key=new URLSearchParams(location.search).get('k')||'';
+const $=id=>document.getElementById(id);
+let cards=null,short={},colors={},hist={},cap=600,interval=1000,minutes=0,fails=0,needHist=true,last=null,seq=-1,dead=false;
+const els={};
+function el(tag,cls,parent){const e=document.createElement(tag);if(cls)e.className=cls;if(parent)parent.appendChild(e);return e}
+function build(){const g=$('grid');g.textContent='';for(const c of cards){const s=el('section','card',g),t=el('div','t',s),o={dot:el('i','',t)};el('span','',t).textContent=c.t;o.n=el('span','n',t);
+ if(c.k){o.cores=el('div','cores',s);o.note=el('div','note',s)}else{const top=el('div','top',s),l=el('div','lft',top);o.big=el('div','big',l);o.bl=el('div','bl',l);o.st=el('div','st',l);o.rows=el('div','rows',top);if(c.g.length>1)o.leg=el('div','leg',s);o.cv=el('canvas','',s)}els[c.t]=o}}
+function rng(){const r=$('rng');r.textContent='';for(const m of [1,2,5,10]){const b=el('button',m===minutes?'on':'',r);b.textContent=m+' min';b.onclick=()=>{minutes=m;try{localStorage.setItem('kinetik-min',m)}catch(e){}rng();render()}}}
+function span(){return Math.max(2,Math.min(cap,Math.round(minutes*60000/interval)))}
+function fmt(id,v){if(v==null||isNaN(v))return '--';
+ if(/^(Down|Up|DiskRead|DiskWrite)$/.test(id)){if(v>=1073741824)return (v/1073741824).toFixed(2)+' GB/s';if(v>=1048576)return (v/1048576).toFixed(v>=104857600?0:v>=10485760?1:2)+' MB/s';if(v>=1024)return Math.round(v/1024)+' KB/s';return Math.round(v)+' B/s'}
+ if(/Temp/.test(id))return Math.round(v)+'°C';if(/Power/.test(id))return Math.round(v)+' W';if(/^Fps/.test(id))return Math.round(v)+' fps';return Math.round(v)+'%'}
+function plot(cv,ids,cols,pct){const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;
+ if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr)}
+ const x=cv.getContext('2d');x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);
+ const n=span(),data=ids.map(id=>(hist[id]||[]).slice(-n));let max=pct?100:0;
+ if(!pct){for(const d of data)for(const v of d)if(v!=null&&v>max)max=v;max=max>0?max*1.15:1}
+ x.strokeStyle='#2c2c34';x.lineWidth=1;for(let i=1;i<4;i++){const y=Math.round(h*i/4)+.5;x.beginPath();x.moveTo(0,y);x.lineTo(w,y);x.stroke()}
+ for(let k=data.length-1;k>=0;k--){const d=data[k],col=cols[k];let seg=[];
+  const flush=()=>{if(seg.length>1){if(k===0){const gr=x.createLinearGradient(0,0,0,h);gr.addColorStop(0,col+'59');gr.addColorStop(1,col+'05');x.beginPath();x.moveTo(seg[0][0],h);for(const p of seg)x.lineTo(p[0],p[1]);x.lineTo(seg[seg.length-1][0],h);x.closePath();x.fillStyle=gr;x.fill()}
+   x.beginPath();x.moveTo(seg[0][0],seg[0][1]);for(const p of seg)x.lineTo(p[0],p[1]);x.strokeStyle=col;x.lineWidth=1.6;x.lineJoin='round';x.stroke()}seg=[]};
+  d.forEach((v,i)=>{if(v==null){flush();return}seg.push([w-(d.length-1-i)*w/(n-1),h-1-(h-2)*Math.min(1,Math.max(0,v/max))])});flush()}}
+function render(){if(!cards||!last)return;const d=last;
+ $('meta').textContent=[d.names.cpu,d.names.gpu,d.text.Uptime?'up '+d.text.Uptime:''].filter(Boolean).join('  ·  ');
+ for(const c of cards){const o=els[c.t],col=colors[c.c]||'#4cc2ff';o.dot.style.background=col;o.n.textContent=d.names[c.n]||'';
+  if(c.k){const cores=d.cores||[];if(o.cores.childElementCount!==cores.length){o.cores.textContent='';for(let i=0;i<cores.length;i++)el('i','',el('div','',o.cores))}
+   cores.forEach((v,i)=>{const b=o.cores.children[i].firstChild;b.style.height=Math.max(0,Math.min(100,v||0))+'%';b.style.background=col});
+   o.note.textContent=cores.length?cores.length+' threads  ·  busiest '+Math.round(Math.max(...cores))+'%  ·  average '+Math.round(cores.reduce((a,b)=>a+b,0)/cores.length)+'%':'Waiting for readings…';continue}
+  o.big.textContent=d.text[c.b]||'--';o.bl.textContent=c.bl;
+  const h=(hist[c.b]||[]).slice(-span()).filter(v=>v!=null);
+  o.st.textContent=h.length>1?'avg '+fmt(c.b,h.reduce((a,b)=>a+b,0)/h.length)+'  ·  peak '+fmt(c.b,Math.max(...h)):'';
+  o.rows.textContent='';let shown=0;for(const r of c.r){const v=d.text[r[1]];if(v==null||shown>=5)continue;el('b','',o.rows).textContent=r[0];el('span','',o.rows).textContent=v;shown++}
+  const cols=c.gc.map(k=>colors[k]||col);
+  if(o.leg){o.leg.textContent='';c.g.forEach((id,i)=>{const s=el('span','',o.leg);el('i','',s).style.background=cols[i];s.appendChild(document.createTextNode(short[id]||id))})}
+  plot(o.cv,c.g,cols,c.p)}}
+async function poll(){if(dead)return;let wait=interval;
+ if(document.hidden){needHist=true;setTimeout(poll,2000);return}
+ try{const r=await fetch('data?k='+encodeURIComponent(key)+(needHist?'&hist=1':''),{cache:'no-store'});
+  if(r.status===403){dead=true;$('off').textContent='This link isn\'t valid any more. Get the current one from Kinetik: Settings, Dashboard.';$('off').style.display='block';return}
+  if(!r.ok)throw new Error(r.status);
+  const d=await r.json();interval=d.interval||1000;cap=d.cap||600;colors=d.colors||colors;
+  if(!minutes){let m=0;try{m=+localStorage.getItem('kinetik-min')}catch(e){}minutes=[1,2,5,10].includes(m)?m:(d.minutes||5);rng()}
+  if(d.cards&&!cards){cards=d.cards;short=d.short||{};build()}
+  if(d.hist){hist=d.hist;needHist=false}
+  else if(d.seq!==seq){if(d.seq-seq>3)needHist=true;for(const id in d.v){const a=hist[id]||(hist[id]=[]);a.push(d.v[id]);if(a.length>cap)a.splice(0,a.length-cap)}}
+  seq=d.seq;last=d;fails=0;$('off').style.display='none';render()}
+ catch(e){fails++;needHist=true;if(fails>1){$('off').textContent='Lost contact with Kinetik. Retrying…';$('off').style.display='block'}wait=Math.min(10000,interval*fails)}
+ setTimeout(poll,wait)}
+window.addEventListener('resize',render);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)render()});
+poll();
+</script></body></html>";
+}
+
 // ======================================================================= Wi-Fi signal
 // Signal quality of the connected Wi-Fi network, straight from Windows' Native Wifi API (no netsh, no polling a process).
 static class WifiSignal
@@ -4559,6 +5073,7 @@ static class Profiles
         var sb = new StringBuilder("# Kinetik settings " + Updates.Current + "\r\n");
         foreach (var f in typeof(Settings).GetFields(BindingFlags.Public | BindingFlags.Instance))
         {
+            if (f.Name == "WebKey") continue; // a profile may be shared; the dashboard link's secret stays on this PC
             var v = f.GetValue(c);
             string text = v is bool ? ((bool)v ? "1" : "0") : v is int ? ((int)v).ToString(CultureInfo.InvariantCulture)
                         : v is float ? ((float)v).ToString(CultureInfo.InvariantCulture) : v is Color ? ((Color)v).ToArgb().ToString(CultureInfo.InvariantCulture)
@@ -6555,6 +7070,229 @@ class OverlayForm : Form
     }
 }
 
+// ======================================================================= Live dashboard window
+// Cards with the current readings and graphs of the last few minutes, laid out to fit the window. Only exists while open.
+class DashboardForm : Form
+{
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int v, int size);
+
+    readonly StatsBar bar;
+    readonly List<KeyValuePair<RectangleF, int>> rangeHits = new List<KeyValuePair<RectangleF, int>>();
+    static readonly int[] Ranges = { 1, 2, 5, 10 };
+    readonly Font fHead = Theme.UI(13f, FontStyle.Bold), fTitle = Theme.UI(10f, FontStyle.Bold), fBig = Theme.UI(22f, FontStyle.Bold),
+        fBigSmall = Theme.UI(16f, FontStyle.Bold), fRow = Theme.UI(9.5f), fSmall = Theme.UI(8.5f);
+
+    public DashboardForm(StatsBar bar)
+    {
+        this.bar = bar;
+        var c = bar.Cfg;
+        Text = "Kinetik dashboard";
+        Icon = TrayIconArt.Frame(c.TrayStyle, SystemInformation.IconSize.Width, 0);
+        using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("icon.ico"))
+            if (st != null) Icon = new Icon(st);
+        BackColor = Theme.Bg; ForeColor = Theme.Text;
+        DoubleBuffered = true; ResizeRedraw = true; AutoScroll = true;
+        StartPosition = FormStartPosition.CenterScreen;
+        float k = DeviceDpi / 96f;
+        ClientSize = new Size((int)(c.DashW * k), (int)(c.DashH * k));
+        MinimumSize = new Size((int)(420 * k), (int)(360 * k));
+        FormClosing += (s, e) =>
+        {
+            if (WindowState != FormWindowState.Normal) return;
+            c.DashW = (int)(ClientSize.Width / k); c.DashH = (int)(ClientSize.Height / k);
+            c.Sanitize(); c.Save();
+        };
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        int one = 1; DwmSetWindowAttribute(Handle, 20, ref one, 4); // dark title bar
+    }
+
+    static void Str(Graphics g, string t, Font f, Color c, float x, float y) { using (var b = new SolidBrush(c)) g.DrawString(t, f, b, x, y); }
+    static void StrRight(Graphics g, string t, Font f, Color c, float right, float y) { Str(g, t, f, c, right - g.MeasureString(t, f).Width, y); }
+
+    static void StrFit(Graphics g, string t, Font f, Color c, RectangleF r, bool right)
+    {
+        using (var b = new SolidBrush(c))
+        using (var sf = new StringFormat(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter, Alignment = right ? StringAlignment.Far : StringAlignment.Near })
+            g.DrawString(t, f, b, r, sf);
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+        float k = DeviceDpi / 96f;
+        var s = bar.Sampler.Snap; var c = bar.Cfg;
+        g.TranslateTransform(AutoScrollPosition.X, AutoScrollPosition.Y);
+        float W = ClientSize.Width, pad = 16 * k, gap = 12 * k;
+
+        // Header: title, hardware and uptime, and the graph length buttons
+        Str(g, "Live dashboard", fHead, Theme.Text, pad, 12 * k);
+        rangeHits.Clear();
+        float bx = W - pad;
+        for (int i = Ranges.Length - 1; i >= 0; i--)
+        {
+            string t = Ranges[i] + " min";
+            var sz = g.MeasureString(t, fRow);
+            var br = new RectangleF(bx - sz.Width - 12 * k, 13 * k, sz.Width + 12 * k, 26 * k);
+            bool on = c.DashMinutes == Ranges[i];
+            Theme.FillRound(g, br, 6 * k, on ? Theme.CardHover : Theme.Card);
+            if (on) Theme.StrokeRound(g, br, 6 * k, Theme.Accent, 1);
+            Str(g, t, fRow, on ? Theme.Text : Theme.Sub, br.X + 6 * k, br.Y + (br.Height - sz.Height) / 2);
+            rangeHits.Add(new KeyValuePair<RectangleF, int>(br, Ranges[i]));
+            bx = br.X - 6 * k;
+        }
+        string meta = string.Join("  ·  ", new[] { s.CpuName, s.HasGpu ? s.GpuName : "", "up " + StatsBar.Duration(s.Uptime) }.Where(x => x != ""));
+        StrFit(g, meta, fRow, Theme.Sub, new RectangleF(pad, 38 * k, W - 2 * pad, 20 * k), false);
+
+        // Cards, as many columns as fit
+        float top = 66 * k;
+        int cols = Math.Max(1, Math.Min(4, (int)((W - 2 * pad + gap) / (310 * k + gap))));
+        float cw = (W - 2 * pad - (cols - 1) * gap) / cols, ch = 244 * k;
+        int n = Math.Max(2, Math.Min(Dash.Capacity, c.DashMinutes * 60000 / Math.Max(250, c.Interval)));
+        int col = 0; float y = top;
+        foreach (var card in Dash.Cards)
+        {
+            DrawCard(g, new RectangleF(pad + col * (cw + gap), y, cw, ch), card, s, c, n, k);
+            if (++col == cols) { col = 0; y += ch + gap; }
+        }
+        if (col > 0) y += ch + gap;
+        var min = new Size(0, (int)(y - gap + pad));
+        if (AutoScrollMinSize != min) AutoScrollMinSize = min;
+    }
+
+    void DrawCard(Graphics g, RectangleF r, DashCard d, Snapshot s, Settings c, int n, float k)
+    {
+        Theme.FillRound(g, r, 10 * k, Theme.Card);
+        Color col = Dash.ColorOf(d.Color, c);
+        float x = r.X + 14 * k, y = r.Y + 12 * k, right = r.Right - 14 * k;
+        Theme.FillRound(g, new RectangleF(x, y + 4 * k, 10 * k, 10 * k), 3 * k, col);
+        Str(g, d.Title, fTitle, Theme.Sub, x + 16 * k, y);
+        float tw = g.MeasureString(d.Title, fTitle).Width;
+        string name = Dash.NameOf(d.Name, s);
+        if (name != "") StrFit(g, name, fSmall, Theme.Sub, new RectangleF(x + 24 * k + tw, y + 2 * k, right - (x + 24 * k + tw), 18 * k), true);
+        if (d.Cores) { DrawCores(g, new RectangleF(x, y + 32 * k, right - x, r.Bottom - 12 * k - (y + 32 * k)), s, col, k); return; }
+
+        // Left: the main reading, what it is, and its average and peak over the graph's span
+        float half = r.Width * 0.44f;
+        string big = Dash.Text(d.Big, s) ?? "--";
+        var fb = g.MeasureString(big, fBig).Width > half ? fBigSmall : fBig;
+        Str(g, big, fb, Theme.Text, x - 3 * k, y + 22 * k);
+        Str(g, d.BigLabel, fSmall, Theme.Sub, x, y + 60 * k);
+        var h = Dash.History(d.Big, n).Where(v => !double.IsNaN(v)).ToArray();
+        if (h.Length > 1 && d.Graph.Contains(d.Big))
+        {
+            Str(g, "avg " + StatsBar.FormatValue(d.Big, h.Average(), s), fSmall, Theme.Sub, x, y + 76 * k);
+            Str(g, "peak " + StatsBar.FormatValue(d.Big, h.Max(), s), fSmall, Theme.Sub, x, y + 92 * k);
+        }
+
+        // Right: up to five more readings (ones this PC doesn't have are left out)
+        float rx = r.X + half + 14 * k, ry = y + 24 * k;
+        int shown = 0;
+        foreach (var row in d.Rows)
+        {
+            if (shown == 5) break;
+            string v = Dash.Text(row.Value, s);
+            if (v == null) continue;
+            Str(g, row.Key, fRow, Theme.Sub, rx, ry);
+            StrRight(g, v, fRow, Theme.Text, right + 2 * k, ry);
+            ry += 17 * k; shown++;
+        }
+
+        var gr = new RectangleF(x, r.Y + 144 * k, right - x, r.Bottom - 12 * k - (r.Y + 144 * k));
+        DrawGraph(g, gr, d, c, n, k);
+    }
+
+    void DrawGraph(Graphics g, RectangleF r, DashCard d, Settings c, int n, float k)
+    {
+        using (var p = new Pen(Theme.Border)) for (int i = 1; i < 4; i++) { float yy = (float)Math.Round(r.Y + r.Height * i / 4) + 0.5f; g.DrawLine(p, r.X, yy, r.Right, yy); }
+        var series = d.Graph.Select(id => Dash.History(id, n)).ToArray();
+        double max = d.Pct ? 100 : 0;
+        if (!d.Pct) { foreach (var h in series) foreach (var v in h) if (!double.IsNaN(v) && v > max) max = v; max = max > 0 ? max * 1.15 : 1; }
+        for (int i = series.Length - 1; i >= 0; i--) Line(g, r, series[i], n, max, Dash.ColorOf(d.Cols[i], c), i == 0, k);
+        if (d.Graph.Length > 1)
+        {
+            float lx = r.X;
+            for (int i = 0; i < d.Graph.Length; i++)
+            {
+                string label; if (!Dash.Short.TryGetValue(d.Graph[i], out label)) label = d.Graph[i];
+                Theme.FillRound(g, new RectangleF(lx, r.Y - 13 * k, 8 * k, 8 * k), 2 * k, Dash.ColorOf(d.Cols[i], c));
+                Str(g, label, fSmall, Theme.Sub, lx + 10 * k, r.Y - 17 * k);
+                lx += 18 * k + g.MeasureString(label, fSmall).Width;
+            }
+        }
+        if (series.Length > 0 && series[0].Length == 0) Str(g, "Collecting…", fSmall, Theme.Sub, r.X + 2 * k, r.Bottom - 16 * k);
+    }
+
+    static void Line(Graphics g, RectangleF r, double[] h, int n, double max, Color col, bool fill, float k)
+    {
+        var seg = new List<PointF>();
+        Action flush = () =>
+        {
+            if (seg.Count >= 2)
+            {
+                var pts = seg.ToArray();
+                if (fill)
+                    using (var path = new GraphicsPath())
+                    {
+                        path.AddLines(pts);
+                        path.AddLine(pts[pts.Length - 1].X, r.Bottom, pts[0].X, r.Bottom);
+                        path.CloseFigure();
+                        using (var b = new LinearGradientBrush(new RectangleF(r.X, r.Y - 1, r.Width, r.Height + 2), Color.FromArgb(80, col), Color.FromArgb(4, col), 90f)) g.FillPath(b, path);
+                    }
+                using (var p = new Pen(col, 1.6f * k) { LineJoin = LineJoin.Round }) g.DrawLines(p, pts);
+            }
+            seg.Clear();
+        };
+        for (int i = 0; i < h.Length; i++)
+        {
+            if (double.IsNaN(h[i])) { flush(); continue; }
+            float px = r.Right - (h.Length - 1 - i) * r.Width / (n - 1);
+            float py = r.Bottom - 1 - (r.Height - 2) * (float)Math.Min(1, Math.Max(0, h[i] / max));
+            seg.Add(new PointF(px, py));
+        }
+        flush();
+    }
+
+    void DrawCores(Graphics g, RectangleF r, Snapshot s, Color col, float k)
+    {
+        var cores = s.Cores;
+        if (cores.Length == 0) { Str(g, "Waiting for readings…", fRow, Theme.Sub, r.X, r.Y); return; }
+        int count = cores.Length;
+        float gapc = Math.Max(1, Math.Min(4 * k, r.Width / count * 0.25f)), bw = (r.Width - gapc * (count - 1)) / count, bh = r.Height - 22 * k;
+        float rad = Math.Min(3 * k, bw / 2);
+        for (int i = 0; i < count; i++)
+        {
+            var br = new RectangleF(r.X + i * (bw + gapc), r.Y, bw, bh);
+            Theme.FillRound(g, br, rad, Theme.CardHover);
+            float fh = bh * (float)Math.Max(0, Math.Min(100, cores[i])) / 100;
+            if (fh >= 1) Theme.FillRound(g, new RectangleF(br.X, br.Bottom - fh, bw, fh), Math.Min(rad, fh / 2), col);
+        }
+        Str(g, count + " threads  ·  busiest " + cores.Max().ToString("0") + "%  ·  average " + cores.Average().ToString("0") + "%", fSmall, Theme.Sub, r.X, r.Bottom - 15 * k);
+    }
+
+    protected override void OnMouseClick(MouseEventArgs e)
+    {
+        var p = new PointF(e.X - AutoScrollPosition.X, e.Y - AutoScrollPosition.Y);
+        foreach (var hit in rangeHits)
+            if (hit.Key.Contains(p)) { bar.Cfg.DashMinutes = hit.Value; bar.Cfg.Save(); Invalidate(); return; }
+        base.OnMouseClick(e);
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        var p = new PointF(e.X - AutoScrollPosition.X, e.Y - AutoScrollPosition.Y);
+        Cursor = rangeHits.Any(h => h.Key.Contains(p)) ? Cursors.Hand : Cursors.Default;
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnScroll(ScrollEventArgs se) { base.OnScroll(se); Invalidate(); }
+    protected override void OnMouseWheel(MouseEventArgs e) { base.OnMouseWheel(e); Invalidate(); }
+}
+
 // ======================================================================= Settings UI
 static class Theme
 {
@@ -7322,7 +8060,7 @@ class SettingsForm : Form
         var brand = new Label { Text = "Kinetik", Font = Theme.UI(13f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Height = 64, Dock = DockStyle.Top, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var version = new Label { Text = "v" + VersionText, Font = Theme.UI(8.5f), ForeColor = Theme.Sub, AutoSize = false, Height = 36, Dock = DockStyle.Bottom, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
         var navList = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(10, 0, 10, 0), BackColor = Theme.Nav };
-        foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "Widget", "Overlay", "General", "About" }) navList.Controls.Add(NavItem(p));
+        foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "Widget", "Overlay", "Dashboard", "General", "About" }) navList.Controls.Add(NavItem(p));
         nav.Controls.Add(navList); nav.Controls.Add(brand); nav.Controls.Add(version);
 
         var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
@@ -7350,7 +8088,7 @@ class SettingsForm : Form
 
     static readonly Dictionary<string, IconFn> navIcons = new Dictionary<string, IconFn>
     {
-        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "Widget", Icons.Monitor }, { "Overlay", Icons.Gamepad }, { "General", Icons.Gear }, { "About", Icons.Info }
+        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "Widget", Icons.Monitor }, { "Overlay", Icons.Gamepad }, { "Dashboard", Icons.Pulse }, { "General", Icons.Gear }, { "About", Icons.Info }
     };
 
     Label NavItem(string name)
@@ -7480,6 +8218,7 @@ class SettingsForm : Form
         else if (name == "Colours") BuildColours();
         else if (name == "Widget") BuildWidget();
         else if (name == "Overlay") BuildOverlay();
+        else if (name == "Dashboard") BuildDashboard();
         else if (name == "General") BuildGeneral();
         else BuildAbout();
 
@@ -7958,6 +8697,53 @@ class SettingsForm : Form
         };
         arrangeList.IconClicked += ShowIconPicker;
         list.Controls.Add(arrangeList);
+    }
+
+    void BuildDashboard()
+    {
+        Hint("Live graphs of every reading: CPU, GPU, memory, network, disk, temperatures, power, FPS and each CPU core. Switched off, they cost nothing. Switched on, the extra readings are only measured while the dashboard is open or a browser is showing it.", 64);
+
+        Header("Dashboard window");
+        Switch(Icons.Pulse, Theme.Accent, "Dashboard window", "Dashboard", "Open it from the bar's or tray icon's right-click menu, or with the hotkey");
+        Switch(Icons.Bolt, Theme.Accent, "Hotkey: Ctrl+Shift+F9", "DashboardHotkey", "Opens the dashboard, or closes it when it's in front");
+        Add(Icons.Monitor, Theme.Accent, "Open the dashboard", "Switches the window on if it's off", Btn("Open", (s, e) =>
+        {
+            if (!c.Dashboard) { c.Dashboard = true; Apply(); RefreshPage(); }
+            bar.OpenDashboard();
+        }, true));
+        var mins = new[] { 1, 2, 5, 10 };
+        Add(Icons.Clock, Theme.Accent, "Graph length", "How far back the graphs go. History starts when the dashboard opens.",
+            Combo(mins.Select(m => m + (m == 1 ? " minute" : " minutes")).ToArray(), Math.Max(0, Array.IndexOf(mins, c.DashMinutes)), i => { c.DashMinutes = mins[i]; Apply(); bar.RefreshDashboard(); }, 130));
+
+        Header("Web dashboard");
+        var web = new Toggle { On = c.WebDashboard };
+        web.Changed += (s, e) => { c.WebDashboard = web.On; Apply(); BeginInvoke((Action)RefreshPage); };
+        Add(Icons.Globe, Theme.Accent, "Web dashboard", "The same dashboard as a web page, for a browser on this PC or your phone", web);
+        var lan = new Toggle { On = c.WebLan };
+        lan.Changed += (s, e) => { c.WebLan = lan.On; Apply(); BeginInvoke((Action)RefreshPage); };
+        Add(Icons.Wifi, Theme.Accent, "Allow other devices on my network", "Phones, tablets and PCs on the same network can open it with the link below. Windows may ask to let Kinetik through its firewall.", lan);
+        var port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = Math.Max(1024, Math.Min(65535, c.WebPort)), Width = 90, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle };
+        port.ValueChanged += (s, e) => { c.WebPort = (int)port.Value; Apply(); };
+        Add(Icons.Spacing, Theme.Accent, "Port", "Change it if another app already uses this one", port);
+        if (!c.WebDashboard) return;
+
+        bar.Render(true); // starts the server, and makes the link's secret if there isn't one yet
+        if (WebDash.Status != "") Add(Icons.Info, Theme.WarnText, "Not running", WebDash.Status, null);
+        Header("Link");
+        var box = new TextBox { Text = WebDash.Link(c), ReadOnly = true, Width = RowW - 4, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Font = Theme.UI(10f), Margin = new Padding(2, 2, 0, 6) };
+        list.Controls.Add(box);
+        var tools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 2, 0, 4) };
+        var open = Btn("Open in browser", (s, e) => WebDash.Open(c), true); open.Margin = new Padding(0, 0, 8, 0);
+        var copy = Btn("Copy link", (s, e) => { try { Clipboard.SetText(WebDash.Link(c)); } catch { } }); copy.Margin = new Padding(0, 0, 8, 0);
+        var renew = Btn("New link", (s, e) =>
+        {
+            if (MessageBox.Show(this, "Make a new link? The old one stops working, so devices using it will need the new one.", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            c.WebKey = WebDash.NewKey(); Apply(); RefreshPage();
+        });
+        tools.Controls.Add(open); tools.Controls.Add(copy); tools.Controls.Add(renew);
+        list.Controls.Add(tools);
+        Hint(c.WebLan ? "Open this link on your phone or another PC on the same network. Anyone with the link can see your readings, so only share it with devices you trust. New link makes the old one stop working."
+                      : "This link works in a browser on this PC. Switch on \"Allow other devices\" to open the dashboard on your phone.", 56);
     }
 
     // Applies settings loaded from a profile or backup. The window's colours are fixed when it's built, so it reopens.
