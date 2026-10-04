@@ -97,6 +97,7 @@ class Settings
     // Live dashboard: a window with graphs of every reading, and the same as a web page (Dash, WebDash)
     public bool Dashboard = false, DashboardHotkey = true, WebDashboard = false, WebLan = false;
     public int DashMinutes = 5, DashW = 1180, DashH = 760, WebPort = 8484;
+    public int DashTheme = 0; // see Dash.Themes
     public string WebKey = ""; // the secret in the web dashboard's link; made when it's first switched on
 
     // Appearance
@@ -287,7 +288,7 @@ class Settings
         GapStats = cl(GapStats, 0, 400); GapIcon = cl(GapIcon, 0, 400); EdgePad = cl(EdgePad, 0, 400);
         IconScale = cl(IconScale, 20, 400); RowGap = cl(RowGap, 0, 50);
         DividerStyle = cl(DividerStyle, 0, 3); DividerHeight = cl(DividerHeight, 10, 400);
-        DashMinutes = cl(DashMinutes, 1, 10); DashW = cl(DashW, 420, 4000); DashH = cl(DashH, 360, 3000); WebPort = cl(WebPort, 1024, 65535);
+        DashMinutes = cl(DashMinutes, 1, 10); DashTheme = cl(DashTheme, 0, Dash.Themes.Length - 1); DashW = cl(DashW, 420, 4000); DashH = cl(DashH, 360, 3000); WebPort = cl(WebPort, 1024, 65535);
         TrayStyle = cl(TrayStyle, 0, TrayIconArt.Styles.Length - 1); AppBackground = cl(AppBackground, 0, Theme.Backgrounds.Length - 1);
         if (float.IsNaN(FontSize) || FontSize < 0 || FontSize > 72) FontSize = 0;
         if (string.IsNullOrWhiteSpace(FontName) || FontName.Length > 100) FontName = DefaultFont();
@@ -4369,6 +4370,7 @@ static class Dash
     // What the dashboard needs measured while it's being looked at.
     public static readonly HashSet<string> WantIds = new HashSet<string>(TextIds.Concat(Graphed).Concat(new[] { "CpuCores" }).Where(id => Settings.StatIds.Contains(id)));
     static readonly string[] ColorKeys = { "cpu", "gpu", "ram", "down", "up", "disk", "temp" };
+    public static readonly string[] Themes = { "Modern", "Terminal", "Amber terminal" };
 
     public const int Capacity = 600; // samples kept: ten minutes at the default one-second interval
 
@@ -4475,7 +4477,7 @@ static class Dash
     {
         var sb = new StringBuilder(full ? 65536 : 2048);
         int sq; lock (gate) sq = seq;
-        sb.Append("{\"seq\":").Append(sq).Append(",\"interval\":").Append(Math.Max(250, c.Interval)).Append(",\"cap\":").Append(Capacity).Append(",\"minutes\":").Append(c.DashMinutes);
+        sb.Append("{\"seq\":").Append(sq).Append(",\"interval\":").Append(Math.Max(250, c.Interval)).Append(",\"cap\":").Append(Capacity).Append(",\"minutes\":").Append(c.DashMinutes).Append(",\"theme\":").Append(c.DashTheme);
         sb.Append(",\"names\":{\"cpu\":").Append(Js(NameOf("cpu", s))).Append(",\"gpu\":").Append(Js(NameOf("gpu", s))).Append(",\"game\":").Append(Js(NameOf("game", s))).Append('}');
         sb.Append(",\"colors\":{");
         for (int i = 0; i < ColorKeys.Length; i++)
@@ -4497,6 +4499,7 @@ static class Dash
         sb.Append("},\"cores\":[").Append(string.Join(",", s.Cores.Select(v => N(v)))).Append(']');
         if (full)
         {
+            sb.Append(",\"themes\":[").Append(string.Join(",", Themes.Select(x => Js(x)))).Append(']');
             sb.Append(",\"short\":{").Append(string.Join(",", Short.Select(kv => Js(kv.Key) + ":" + Js(kv.Value)))).Append('}');
             sb.Append(",\"cards\":[");
             for (int i = 0; i < Cards.Length; i++)
@@ -4688,73 +4691,114 @@ static class WebDash
     const string Page = @"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <meta name='theme-color' content='#141418'><title>Kinetik dashboard</title>
 <style>
-:root{--bg:#141418;--card:#1e1e24;--line:#2c2c34;--text:#ececf0;--sub:#9696a2}
+:root{--bg:#141418;--card:#1e1e24;--line:#2c2c34;--text:#ececf0;--sub:#9696a2;--dim:#2a2a32;--alt:#4cc2ff}
+body.term{--bg:#030a05;--card:#030a05;--line:#228c3e;--text:#5aff78;--sub:#2eaa50;--dim:rgba(90,255,120,.22);--alt:#cdffd7}
+body.amber{--bg:#0c0700;--card:#0c0700;--line:#965c0c;--text:#ffb628;--sub:#b97616;--dim:rgba(255,182,40,.22);--alt:#ffe8b4}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.35 'Segoe UI',system-ui,-apple-system,Roboto,sans-serif}
+body.mono{font-family:'Cascadia Mono',Consolas,'Courier New',monospace;font-size:13px}
 header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 16px 4px}
 h1{font-size:18px;margin:0}
+body.mono h1{font-size:15px}
+.cur{display:inline-block;width:.6em;height:1.05em;background:var(--text);vertical-align:-.15em;margin-left:2px;animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
 #meta{color:var(--sub);font-size:13px;flex:1;min-width:200px}
 #rng{display:flex;gap:4px}
-#rng button{background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer}
+#rng button,#theme{background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer}
+#theme{color:var(--text)}
 #rng button.on{color:var(--text);border-color:#4cc2ff}
+body.mono #rng button,body.mono #theme{border-radius:0;background:var(--bg);color:var(--text)}
+body.mono #rng button.on{background:var(--text);color:var(--bg);border-color:var(--text)}
 #off{display:none;color:#ff6e6e;padding:6px 16px 0}
 main{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding:10px 16px 20px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:220px;display:flex;flex-direction:column}
+body.mono main{gap:18px 12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:220px;display:flex;flex-direction:column;position:relative}
+body.mono .card{border-radius:0;padding-top:16px}
 .t{display:flex;align-items:center;gap:8px;color:var(--sub);font-weight:600;font-size:13px}
 .t i{width:10px;height:10px;border-radius:3px;flex:none}
 .t .n{margin-left:auto;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62%}
+body.mono .t{position:absolute;top:-.75em;left:8px;right:8px;color:var(--text);font-weight:700}
+body.mono .t i{display:none}
+body.mono .tt,body.mono .t .n{background:var(--bg);padding:0 4px}
+body.mono .tt::before{content:'[ '}
+body.mono .tt::after{content:' ]'}
+body.mono .tt,body.mono .t .n,body.mono .bl,body.mono .st,body.mono .rows b,body.mono .leg,body.mono .note{text-transform:lowercase}
+body.mono .t .n{color:var(--sub);font-weight:400}
 .top{display:flex;gap:14px;margin:6px 0 8px}
 .lft{min-width:42%}
 .big{font-size:30px;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+body.mono .big{font-size:27px}
 .bl,.st{color:var(--sub);font-size:12px}
-.rows{flex:1;display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:13px;align-content:start;margin-top:4px}
+.rows{flex:1;display:grid;grid-template-columns:auto 1fr auto;gap:2px 6px;font-size:13px;align-content:start;margin-top:4px}
 .rows b{color:var(--sub);font-weight:400;white-space:nowrap}
 .rows span{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rows u{text-decoration:none}
+body.mono .rows u{align-self:end;border-bottom:1px dotted var(--dim);margin-bottom:5px}
 .leg{display:flex;gap:12px;font-size:12px;color:var(--sub);margin:0 0 4px}
 .leg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
+body.mono .leg i{border-radius:0}
+body.mono .leg span+span i{background:transparent!important;border:1px solid var(--alt)}
 canvas{width:100%;height:96px;display:block;margin-top:auto}
 .cores{display:flex;gap:3px;align-items:flex-end;height:130px;margin-top:12px}
-.cores div{flex:1;background:#2a2a32;border-radius:3px;position:relative;height:100%;min-width:2px}
+.cores div{flex:1;background:var(--dim);border-radius:3px;position:relative;height:100%;min-width:2px}
 .cores div i{position:absolute;left:0;right:0;bottom:0;border-radius:3px}
+body.mono .cores div{border-radius:0;background:repeating-linear-gradient(0deg,var(--dim) 0 4px,transparent 4px 6px)}
+body.mono .cores div i{border-radius:0;background:repeating-linear-gradient(0deg,var(--text) 0 4px,transparent 4px 6px)}
 .note{color:var(--sub);font-size:12px;margin-top:8px}
+body.mono::after{content:'';position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
 </style></head><body>
-<header><h1>Kinetik</h1><div id='meta'></div><div id='rng'></div></header>
+<header><h1 id='h1'>Kinetik</h1><div id='meta'></div><select id='theme' aria-label='Theme'></select><div id='rng'></div></header>
 <div id='off'></div>
 <main id='grid'></main>
 <script>
 const key=new URLSearchParams(location.search).get('k')||'';
 const $=id=>document.getElementById(id);
-let cards=null,short={},colors={},hist={},cap=600,interval=1000,minutes=0,fails=0,needHist=true,last=null,seq=-1,dead=false;
+let cards=null,short={},colors={},hist={},cap=600,interval=1000,minutes=0,theme=-1,fails=0,needHist=true,last=null,seq=-1,dead=false;
 const els={};
 function el(tag,cls,parent){const e=document.createElement(tag);if(cls)e.className=cls;if(parent)parent.appendChild(e);return e}
-function build(){const g=$('grid');g.textContent='';for(const c of cards){const s=el('section','card',g),t=el('div','t',s),o={dot:el('i','',t)};el('span','',t).textContent=c.t;o.n=el('span','n',t);
+function css(v){return getComputedStyle(document.body).getPropertyValue(v).trim()}
+function mono(){return theme===1||theme===2}
+function save(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+function load(k){try{return localStorage.getItem(k)}catch(e){return null}}
+function build(){const g=$('grid');g.textContent='';for(const c of cards){const s=el('section','card',g),t=el('div','t',s),o={dot:el('i','',t)};el('span','tt',t).textContent=c.t;o.n=el('span','n',t);
  if(c.k){o.cores=el('div','cores',s);o.note=el('div','note',s)}else{const top=el('div','top',s),l=el('div','lft',top);o.big=el('div','big',l);o.bl=el('div','bl',l);o.st=el('div','st',l);o.rows=el('div','rows',top);if(c.g.length>1)o.leg=el('div','leg',s);o.cv=el('canvas','',s)}els[c.t]=o}}
-function rng(){const r=$('rng');r.textContent='';for(const m of [1,2,5,10]){const b=el('button',m===minutes?'on':'',r);b.textContent=m+' min';b.onclick=()=>{minutes=m;try{localStorage.setItem('kinetik-min',m)}catch(e){}rng();render()}}}
+function rng(){const r=$('rng');r.textContent='';for(const m of [1,2,5,10]){const b=el('button',m===minutes?'on':'',r);b.textContent=mono()?m+'m':m+' min';b.onclick=()=>{minutes=m;save('kinetik-min',m);rng();render()}}}
+function applyTheme(t){theme=t;document.body.className=t===1?'mono term':t===2?'mono amber':'';$('theme').value=t;save('kinetik-theme',t);
+ const h=$('h1');h.textContent=t?'kinetik:~$ dashboard --live':'Kinetik';if(t)el('span','cur',h);
+ document.querySelector('meta[name=theme-color]').setAttribute('content',css('--bg'));rng();render()}
 function span(){return Math.max(2,Math.min(cap,Math.round(minutes*60000/interval)))}
 function fmt(id,v){if(v==null||isNaN(v))return '--';
  if(/^(Down|Up|DiskRead|DiskWrite)$/.test(id)){if(v>=1073741824)return (v/1073741824).toFixed(2)+' GB/s';if(v>=1048576)return (v/1048576).toFixed(v>=104857600?0:v>=10485760?1:2)+' MB/s';if(v>=1024)return Math.round(v/1024)+' KB/s';return Math.round(v)+' B/s'}
  if(/Temp/.test(id))return Math.round(v)+'°C';if(/Power/.test(id))return Math.round(v)+' W';if(/^Fps/.test(id))return Math.round(v)+' fps';return Math.round(v)+'%'}
 function plot(cv,ids,cols,pct){const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;
  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr)}
- const x=cv.getContext('2d');x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);
+ const x=cv.getContext('2d'),m=mono();x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);
  const n=span(),data=ids.map(id=>(hist[id]||[]).slice(-n));let max=pct?100:0;
  if(!pct){for(const d of data)for(const v of d)if(v!=null&&v>max)max=v;max=max>0?max*1.15:1}
- x.strokeStyle='#2c2c34';x.lineWidth=1;for(let i=1;i<4;i++){const y=Math.round(h*i/4)+.5;x.beginPath();x.moveTo(0,y);x.lineTo(w,y);x.stroke()}
- for(let k=data.length-1;k>=0;k--){const d=data[k],col=cols[k];let seg=[];
+ x.strokeStyle=m?css('--dim'):css('--line');x.lineWidth=1;x.setLineDash(m?[1,3]:[]);
+ for(let i=1;i<4;i++){const y=Math.round(h*i/4)+.5;x.beginPath();x.moveTo(0,y);x.lineTo(w,y);x.stroke()}
+ x.setLineDash([]);if(m){x.strokeStyle=css('--line');x.beginPath();x.moveTo(0,h-.5);x.lineTo(w,h-.5);x.stroke()}
+ const px=(i,len)=>w-(len-1-i)*w/(n-1),py=v=>h-1-(h-2)*Math.min(1,Math.max(0,v/max));
+ for(let k=data.length-1;k>=0;k--){const d=data[k],col=cols[k];
+  if(m&&k===0){const cw=w/(n-1);d.forEach((v,i)=>{if(v==null)return;const x1=px(i,d.length),x0=Math.max(0,x1-cw),y=py(v),bw=Math.max(1,cw>=4?x1-x0-1:x1-x0);
+   x.globalAlpha=.38;x.fillStyle=col;x.fillRect(x0,y,bw,h-y);x.globalAlpha=1;x.fillRect(x0,y,bw,1.5)});continue}
+  let seg=[];
   const flush=()=>{if(seg.length>1){if(k===0){const gr=x.createLinearGradient(0,0,0,h);gr.addColorStop(0,col+'59');gr.addColorStop(1,col+'05');x.beginPath();x.moveTo(seg[0][0],h);for(const p of seg)x.lineTo(p[0],p[1]);x.lineTo(seg[seg.length-1][0],h);x.closePath();x.fillStyle=gr;x.fill()}
-   x.beginPath();x.moveTo(seg[0][0],seg[0][1]);for(const p of seg)x.lineTo(p[0],p[1]);x.strokeStyle=col;x.lineWidth=1.6;x.lineJoin='round';x.stroke()}seg=[]};
-  d.forEach((v,i)=>{if(v==null){flush();return}seg.push([w-(d.length-1-i)*w/(n-1),h-1-(h-2)*Math.min(1,Math.max(0,v/max))])});flush()}}
-function render(){if(!cards||!last)return;const d=last;
- $('meta').textContent=[d.names.cpu,d.names.gpu,d.text.Uptime?'up '+d.text.Uptime:''].filter(Boolean).join('  ·  ');
- for(const c of cards){const o=els[c.t],col=colors[c.c]||'#4cc2ff';o.dot.style.background=col;o.n.textContent=d.names[c.n]||'';
+   x.beginPath();x.moveTo(seg[0][0],seg[0][1]);for(const p of seg)x.lineTo(p[0],p[1]);x.strokeStyle=col;x.lineWidth=m?1.3:1.6;x.lineJoin='round';x.stroke()}seg=[]};
+  d.forEach((v,i)=>{if(v==null){flush();return}seg.push([px(i,d.length),py(v)])});flush()}}
+function render(){if(!cards||!last)return;const d=last,m=mono(),text=css('--text'),alt=css('--alt');
+ const parts=[d.names.cpu,d.names.gpu,d.text.Uptime?'up '+d.text.Uptime:''].filter(Boolean);
+ $('meta').textContent=m?'# '+parts.join(' | '):parts.join('  ·  ');
+ for(const c of cards){const o=els[c.t],col=m?text:(colors[c.c]||'#4cc2ff');o.dot.style.background=col;o.n.textContent=d.names[c.n]||'';o.n.style.display=o.n.textContent?'':'none';
   if(c.k){const cores=d.cores||[];if(o.cores.childElementCount!==cores.length){o.cores.textContent='';for(let i=0;i<cores.length;i++)el('i','',el('div','',o.cores))}
-   cores.forEach((v,i)=>{const b=o.cores.children[i].firstChild;b.style.height=Math.max(0,Math.min(100,v||0))+'%';b.style.background=col});
-   o.note.textContent=cores.length?cores.length+' threads  ·  busiest '+Math.round(Math.max(...cores))+'%  ·  average '+Math.round(cores.reduce((a,b)=>a+b,0)/cores.length)+'%':'Waiting for readings…';continue}
+   cores.forEach((v,i)=>{const b=o.cores.children[i].firstChild;b.style.height=Math.max(0,Math.min(100,v||0))+'%';b.style.background=m?'':col});
+   const mx=cores.length?Math.round(Math.max(...cores)):0,av=cores.length?Math.round(cores.reduce((a,b)=>a+b,0)/cores.length):0;
+   o.note.textContent=!cores.length?'Waiting for readings…':m?cores.length+' threads | max '+mx+'% | avg '+av+'%':cores.length+' threads  ·  busiest '+mx+'%  ·  average '+av+'%';continue}
   o.big.textContent=d.text[c.b]||'--';o.bl.textContent=c.bl;
   const h=(hist[c.b]||[]).slice(-span()).filter(v=>v!=null);
-  o.st.textContent=h.length>1?'avg '+fmt(c.b,h.reduce((a,b)=>a+b,0)/h.length)+'  ·  peak '+fmt(c.b,Math.max(...h)):'';
-  o.rows.textContent='';let shown=0;for(const r of c.r){const v=d.text[r[1]];if(v==null||shown>=5)continue;el('b','',o.rows).textContent=r[0];el('span','',o.rows).textContent=v;shown++}
-  const cols=c.gc.map(k=>colors[k]||col);
+  o.st.textContent=h.length>1?'avg '+fmt(c.b,h.reduce((a,b)=>a+b,0)/h.length)+(m?'  ·  max ':'  ·  peak ')+fmt(c.b,Math.max(...h)):'';
+  o.rows.textContent='';let shown=0;for(const r of c.r){const v=d.text[r[1]];if(v==null||shown>=5)continue;el('b','',o.rows).textContent=r[0];el('u','',o.rows);el('span','',o.rows).textContent=m&&r[1]==='FpsNote'?v.toLowerCase():v;shown++}
+  const cols=m?[text,alt]:c.gc.map(k=>colors[k]||col);
   if(o.leg){o.leg.textContent='';c.g.forEach((id,i)=>{const s=el('span','',o.leg);el('i','',s).style.background=cols[i];s.appendChild(document.createTextNode(short[id]||id))})}
   plot(o.cv,c.g,cols,c.p)}}
 async function poll(){if(dead)return;let wait=interval;
@@ -4763,11 +4807,13 @@ async function poll(){if(dead)return;let wait=interval;
   if(r.status===403){dead=true;$('off').textContent='This link isn\'t valid any more. Get the current one from Kinetik: Settings, Dashboard.';$('off').style.display='block';return}
   if(!r.ok)throw new Error(r.status);
   const d=await r.json();interval=d.interval||1000;cap=d.cap||600;colors=d.colors||colors;
-  if(!minutes){let m=0;try{m=+localStorage.getItem('kinetik-min')}catch(e){}minutes=[1,2,5,10].includes(m)?m:(d.minutes||5);rng()}
   if(d.cards&&!cards){cards=d.cards;short=d.short||{};build()}
+  if(d.themes&&!$('theme').options.length){d.themes.forEach((t,i)=>{const o=el('option','',$('theme'));o.value=i;o.textContent=t});$('theme').onchange=e=>applyTheme(+e.target.value)}
   if(d.hist){hist=d.hist;needHist=false}
   else if(d.seq!==seq){if(d.seq-seq>3)needHist=true;for(const id in d.v){const a=hist[id]||(hist[id]=[]);a.push(d.v[id]);if(a.length>cap)a.splice(0,a.length-cap)}}
-  seq=d.seq;last=d;fails=0;$('off').style.display='none';render()}
+  seq=d.seq;last=d;fails=0;$('off').style.display='none';
+  if(!minutes){const m=+load('kinetik-min');minutes=[1,2,5,10].includes(m)?m:(d.minutes||5)}
+  if(theme<0){const t=load('kinetik-theme');applyTheme(t!==null&&+t>=0&&+t<(d.themes||[]).length?+t:(d.theme||0))}else render()}
  catch(e){fails++;needHist=true;if(fails>1){$('off').textContent='Lost contact with Kinetik. Retrying…';$('off').style.display='block'}wait=Math.min(10000,interval*fails)}
  setTimeout(poll,wait)}
 window.addEventListener('resize',render);
@@ -7072,15 +7118,43 @@ class OverlayForm : Form
 
 // ======================================================================= Live dashboard window
 // Cards with the current readings and graphs of the last few minutes, laid out to fit the window. Only exists while open.
+// Themes (Dash.Themes): Modern, rounded cards in the stat colours; Terminal and Amber, a monochrome text terminal.
 class DashboardForm : Form
 {
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int v, int size);
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] static extern int SetWindowTheme(IntPtr h, string app, string idList);
+
+    // One theme's colours. Term themes are monochrome: every reading uses Text, and a second graph line uses Alt.
+    class Look
+    {
+        public bool Term;
+        public Color Bg, Card, Edge, Text, Sub, Dim, Grid, Alt;
+    }
+
+    static Look LookFor(int theme)
+    {
+        if (theme == 1 || theme == 2)
+        {
+            bool amber = theme == 2;
+            Color t = amber ? Color.FromArgb(255, 182, 40) : Color.FromArgb(90, 255, 120);
+            Color bg = amber ? Color.FromArgb(12, 7, 0) : Color.FromArgb(3, 10, 5);
+            return new Look
+            {
+                Term = true, Bg = bg, Card = bg, Text = t,
+                Edge = amber ? Color.FromArgb(150, 92, 12) : Color.FromArgb(34, 140, 62), Sub = amber ? Color.FromArgb(185, 118, 22) : Color.FromArgb(46, 170, 80),
+                Dim = Color.FromArgb(55, t), Grid = Color.FromArgb(40, t), Alt = amber ? Color.FromArgb(255, 232, 180) : Color.FromArgb(205, 255, 215)
+            };
+        }
+        return new Look { Bg = Theme.Bg, Card = Theme.Card, Edge = Theme.Border, Text = Theme.Text, Sub = Theme.Sub, Dim = Theme.CardHover, Grid = Theme.Border, Alt = Theme.Accent };
+    }
 
     readonly StatsBar bar;
     readonly List<KeyValuePair<RectangleF, int>> rangeHits = new List<KeyValuePair<RectangleF, int>>();
+    RectangleF themeHit;
     static readonly int[] Ranges = { 1, 2, 5, 10 };
-    readonly Font fHead = Theme.UI(13f, FontStyle.Bold), fTitle = Theme.UI(10f, FontStyle.Bold), fBig = Theme.UI(22f, FontStyle.Bold),
-        fBigSmall = Theme.UI(16f, FontStyle.Bold), fRow = Theme.UI(9.5f), fSmall = Theme.UI(8.5f);
+    Font fHead, fTitle, fBig, fBigSmall, fRow, fSmall;
+    readonly List<Font> owned = new List<Font>(); // the terminal's monospace fonts; the modern ones are Theme's shared fonts
+    int fontsFor = -1;
 
     public DashboardForm(StatsBar bar)
     {
@@ -7090,7 +7164,7 @@ class DashboardForm : Form
         Icon = TrayIconArt.Frame(c.TrayStyle, SystemInformation.IconSize.Width, 0);
         using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("icon.ico"))
             if (st != null) Icon = new Icon(st);
-        BackColor = Theme.Bg; ForeColor = Theme.Text;
+        BackColor = LookFor(c.DashTheme).Bg; ForeColor = Theme.Text;
         DoubleBuffered = true; ResizeRedraw = true; AutoScroll = true;
         StartPosition = FormStartPosition.CenterScreen;
         float k = DeviceDpi / 96f;
@@ -7102,12 +7176,32 @@ class DashboardForm : Form
             c.DashW = (int)(ClientSize.Width / k); c.DashH = (int)(ClientSize.Height / k);
             c.Sanitize(); c.Save();
         };
+        FormClosed += (s, e) => { foreach (var f in owned) f.Dispose(); owned.Clear(); };
     }
 
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
         int one = 1; DwmSetWindowAttribute(Handle, 20, ref one, 4); // dark title bar
+        SetWindowTheme(Handle, "DarkMode_Explorer", null);          // and dark scroll bars
+    }
+
+    void EnsureFonts(bool term)
+    {
+        if (fontsFor == (term ? 1 : 0)) return;
+        foreach (var f in owned) f.Dispose();
+        owned.Clear();
+        fontsFor = term ? 1 : 0;
+        if (!term)
+        {
+            fHead = Theme.UI(13f, FontStyle.Bold); fTitle = Theme.UI(10f, FontStyle.Bold); fBig = Theme.UI(22f, FontStyle.Bold);
+            fBigSmall = Theme.UI(16f, FontStyle.Bold); fRow = Theme.UI(9.5f); fSmall = Theme.UI(8.5f);
+            return;
+        }
+        string fam = FontList.Has("Cascadia Mono") ? "Cascadia Mono" : "Consolas";
+        Func<float, FontStyle, Font> mk = (sz, st) => { var f = new Font(fam, sz, st); owned.Add(f); return f; };
+        fHead = mk(12f, FontStyle.Bold); fTitle = mk(9.5f, FontStyle.Bold); fBig = mk(21f, FontStyle.Bold);
+        fBigSmall = mk(15f, FontStyle.Bold); fRow = mk(9f, FontStyle.Regular); fSmall = mk(8f, FontStyle.Regular);
     }
 
     static void Str(Graphics g, string t, Font f, Color c, float x, float y) { using (var b = new SolidBrush(c)) g.DrawString(t, f, b, x, y); }
@@ -7120,76 +7214,134 @@ class DashboardForm : Form
             g.DrawString(t, f, b, r, sf);
     }
 
+    static string Case(Look L, string t) { return L.Term ? t.ToLowerInvariant() : t; }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+        var c = bar.Cfg; var s = bar.Sampler.Snap;
+        var L = LookFor(c.DashTheme);
+        if (BackColor != L.Bg) BackColor = L.Bg;
+        EnsureFonts(L.Term);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = L.Term ? TextRenderingHint.AntiAliasGridFit : TextRenderingHint.ClearTypeGridFit;
+        g.Clear(L.Bg);
         float k = DeviceDpi / 96f;
-        var s = bar.Sampler.Snap; var c = bar.Cfg;
         g.TranslateTransform(AutoScrollPosition.X, AutoScrollPosition.Y);
         float W = ClientSize.Width, pad = 16 * k, gap = 12 * k;
 
-        // Header: title, hardware and uptime, and the graph length buttons
-        Str(g, "Live dashboard", fHead, Theme.Text, pad, 12 * k);
+        // Header: a title (a shell prompt in the terminal), the hardware and uptime, then the graph length and theme buttons
+        if (L.Term)
+        {
+            string prompt = "kinetik@" + Environment.MachineName.ToLowerInvariant() + ":~$ dashboard --live";
+            Str(g, prompt, fHead, L.Text, pad, 12 * k);
+            if (DateTime.Now.Second % 2 == 0) // a blinking cursor (the window repaints with every update)
+                using (var b = new SolidBrush(L.Text)) g.FillRectangle(b, pad + g.MeasureString(prompt, fHead).Width, 15 * k, 9 * k, 16 * k);
+        }
+        else Str(g, "Live dashboard", fHead, L.Text, pad, 12 * k);
         rangeHits.Clear();
         float bx = W - pad;
         for (int i = Ranges.Length - 1; i >= 0; i--)
         {
-            string t = Ranges[i] + " min";
-            var sz = g.MeasureString(t, fRow);
-            var br = new RectangleF(bx - sz.Width - 12 * k, 13 * k, sz.Width + 12 * k, 26 * k);
-            bool on = c.DashMinutes == Ranges[i];
-            Theme.FillRound(g, br, 6 * k, on ? Theme.CardHover : Theme.Card);
-            if (on) Theme.StrokeRound(g, br, 6 * k, Theme.Accent, 1);
-            Str(g, t, fRow, on ? Theme.Text : Theme.Sub, br.X + 6 * k, br.Y + (br.Height - sz.Height) / 2);
+            var br = Button(g, L, L.Term ? Ranges[i] + "m" : Ranges[i] + " min", bx, 13 * k, c.DashMinutes == Ranges[i], false, k);
             rangeHits.Add(new KeyValuePair<RectangleF, int>(br, Ranges[i]));
             bx = br.X - 6 * k;
         }
-        string meta = string.Join("  ·  ", new[] { s.CpuName, s.HasGpu ? s.GpuName : "", "up " + StatsBar.Duration(s.Uptime) }.Where(x => x != ""));
-        StrFit(g, meta, fRow, Theme.Sub, new RectangleF(pad, 38 * k, W - 2 * pad, 20 * k), false);
+        themeHit = Button(g, L, L.Term ? "theme: " + Dash.Themes[c.DashTheme].ToLowerInvariant() : Dash.Themes[c.DashTheme], bx - 10 * k, 13 * k, false, true, k);
+        var parts = new[] { s.CpuName, s.HasGpu ? s.GpuName : "", "up " + StatsBar.Duration(s.Uptime) }.Where(x => x != "");
+        string meta = L.Term ? "# " + string.Join(" | ", parts) : string.Join("  ·  ", parts);
+        StrFit(g, meta, fRow, L.Sub, new RectangleF(pad, 40 * k, W - 2 * pad, 20 * k), false);
 
         // Cards, as many columns as fit
-        float top = 66 * k;
+        float top = 68 * k;
         int cols = Math.Max(1, Math.Min(4, (int)((W - 2 * pad + gap) / (310 * k + gap))));
         float cw = (W - 2 * pad - (cols - 1) * gap) / cols, ch = 244 * k;
         int n = Math.Max(2, Math.Min(Dash.Capacity, c.DashMinutes * 60000 / Math.Max(250, c.Interval)));
         int col = 0; float y = top;
         foreach (var card in Dash.Cards)
         {
-            DrawCard(g, new RectangleF(pad + col * (cw + gap), y, cw, ch), card, s, c, n, k);
+            DrawCard(g, L, new RectangleF(pad + col * (cw + gap), y, cw, ch), card, s, c, n, k);
             if (++col == cols) { col = 0; y += ch + gap; }
         }
         if (col > 0) y += ch + gap;
+
+        if (L.Term) // scanlines over the whole window
+        {
+            g.ResetTransform();
+            using (var p = new Pen(Color.FromArgb(55, 0, 0, 0))) for (int yy = 0; yy < ClientSize.Height; yy += 3) g.DrawLine(p, 0, yy, ClientSize.Width, yy);
+        }
         var min = new Size(0, (int)(y - gap + pad));
         if (AutoScrollMinSize != min) AutoScrollMinSize = min;
     }
 
-    void DrawCard(Graphics g, RectangleF r, DashCard d, Snapshot s, Settings c, int n, float k)
+    // A header button, right-aligned at right. Returns where it was drawn.
+    RectangleF Button(Graphics g, Look L, string t, float right, float y, bool on, bool chevron, float k)
     {
-        Theme.FillRound(g, r, 10 * k, Theme.Card);
-        Color col = Dash.ColorOf(d.Color, c);
+        var sz = g.MeasureString(t, fRow);
+        float w = sz.Width + 12 * k + (chevron ? 14 * k : 0);
+        var r = new RectangleF(right - w, y, w, 26 * k);
+        if (L.Term)
+        {
+            if (on) using (var b = new SolidBrush(L.Text)) g.FillRectangle(b, r);
+            else using (var p = new Pen(L.Edge)) g.DrawRectangle(p, r.X, r.Y, r.Width, r.Height);
+        }
+        else
+        {
+            Theme.FillRound(g, r, 6 * k, on ? Theme.CardHover : Theme.Card);
+            if (on) Theme.StrokeRound(g, r, 6 * k, Theme.Accent, 1);
+        }
+        var col = L.Term ? (on ? L.Bg : L.Text) : on || chevron ? L.Text : L.Sub;
+        Str(g, t, fRow, col, r.X + 6 * k, r.Y + (r.Height - sz.Height) / 2);
+        if (chevron) Theme.Chevron(g, new RectangleF(r.Right - 18 * k, r.Y, 14 * k, r.Height), false, col);
+        return r;
+    }
+
+    void DrawCard(Graphics g, Look L, RectangleF r, DashCard d, Snapshot s, Settings c, int n, float k)
+    {
+        Color col = L.Term ? L.Text : Dash.ColorOf(d.Color, c);
         float x = r.X + 14 * k, y = r.Y + 12 * k, right = r.Right - 14 * k;
-        Theme.FillRound(g, new RectangleF(x, y + 4 * k, 10 * k, 10 * k), 3 * k, col);
-        Str(g, d.Title, fTitle, Theme.Sub, x + 16 * k, y);
-        float tw = g.MeasureString(d.Title, fTitle).Width;
         string name = Dash.NameOf(d.Name, s);
-        if (name != "") StrFit(g, name, fSmall, Theme.Sub, new RectangleF(x + 24 * k + tw, y + 2 * k, right - (x + 24 * k + tw), 18 * k), true);
-        if (d.Cores) { DrawCores(g, new RectangleF(x, y + 32 * k, right - x, r.Bottom - 12 * k - (y + 32 * k)), s, col, k); return; }
+        if (L.Term)
+        {
+            // A box-drawn panel with its title, and the hardware name, set into the top edge
+            using (var p = new Pen(L.Edge)) g.DrawRectangle(p, r.X, r.Y + 8 * k, r.Width - 1, r.Height - 8 * k - 1);
+            string t = "[ " + d.Title.ToLowerInvariant() + " ]";
+            float tw = g.MeasureString(t, fTitle).Width;
+            using (var b = new SolidBrush(L.Bg)) g.FillRectangle(b, r.X + 10 * k, r.Y, tw, 17 * k);
+            Str(g, t, fTitle, L.Text, r.X + 10 * k, r.Y);
+            if (name != "")
+            {
+                var nr = new RectangleF(r.X + 20 * k + tw, r.Y + 1 * k, r.Right - 10 * k - (r.X + 20 * k + tw), 16 * k);
+                float nw = Math.Min(nr.Width, g.MeasureString(name.ToLowerInvariant(), fSmall).Width);
+                using (var b = new SolidBrush(L.Bg)) g.FillRectangle(b, nr.Right - nw, r.Y, nw, 17 * k);
+                StrFit(g, name.ToLowerInvariant(), fSmall, L.Sub, nr, true);
+            }
+            y += 6 * k;
+        }
+        else
+        {
+            Theme.FillRound(g, r, 10 * k, L.Card);
+            Theme.FillRound(g, new RectangleF(x, y + 4 * k, 10 * k, 10 * k), 3 * k, col);
+            Str(g, d.Title, fTitle, L.Sub, x + 16 * k, y);
+            float tw = g.MeasureString(d.Title, fTitle).Width;
+            if (name != "") StrFit(g, name, fSmall, L.Sub, new RectangleF(x + 24 * k + tw, y + 2 * k, right - (x + 24 * k + tw), 18 * k), true);
+        }
+        if (d.Cores) { DrawCores(g, L, new RectangleF(x, y + 30 * k, right - x, r.Bottom - 12 * k - (y + 30 * k)), s, col, k); return; }
 
         // Left: the main reading, what it is, and its average and peak over the graph's span
         float half = r.Width * 0.44f;
         string big = Dash.Text(d.Big, s) ?? "--";
         var fb = g.MeasureString(big, fBig).Width > half ? fBigSmall : fBig;
-        Str(g, big, fb, Theme.Text, x - 3 * k, y + 22 * k);
-        Str(g, d.BigLabel, fSmall, Theme.Sub, x, y + 60 * k);
+        Str(g, big, fb, L.Text, x - 3 * k, y + 22 * k);
+        Str(g, Case(L, d.BigLabel), fSmall, L.Sub, x, y + 60 * k);
         var h = Dash.History(d.Big, n).Where(v => !double.IsNaN(v)).ToArray();
         if (h.Length > 1 && d.Graph.Contains(d.Big))
         {
-            Str(g, "avg " + StatsBar.FormatValue(d.Big, h.Average(), s), fSmall, Theme.Sub, x, y + 76 * k);
-            Str(g, "peak " + StatsBar.FormatValue(d.Big, h.Max(), s), fSmall, Theme.Sub, x, y + 92 * k);
+            Str(g, "avg " + StatsBar.FormatValue(d.Big, h.Average(), s), fSmall, L.Sub, x, y + 76 * k);
+            Str(g, (L.Term ? "max " : "peak ") + StatsBar.FormatValue(d.Big, h.Max(), s), fSmall, L.Sub, x, y + 92 * k);
         }
 
-        // Right: up to five more readings (ones this PC doesn't have are left out)
+        // Right: up to five more readings (ones this PC doesn't have are left out); the terminal joins them with dot leaders
         float rx = r.X + half + 14 * k, ry = y + 24 * k;
         int shown = 0;
         foreach (var row in d.Rows)
@@ -7197,35 +7349,59 @@ class DashboardForm : Form
             if (shown == 5) break;
             string v = Dash.Text(row.Value, s);
             if (v == null) continue;
-            Str(g, row.Key, fRow, Theme.Sub, rx, ry);
-            StrRight(g, v, fRow, Theme.Text, right + 2 * k, ry);
+            if (row.Value == "FpsNote") v = Case(L, v);
+            string label = Case(L, row.Key);
+            Str(g, label, fRow, L.Sub, rx, ry);
+            StrRight(g, v, fRow, L.Text, right + 2 * k, ry);
+            if (L.Term)
+            {
+                float lx = rx + g.MeasureString(label, fRow).Width + 2 * k, vx = right - g.MeasureString(v, fRow).Width - 2 * k, ly = ry + 12 * k;
+                if (vx > lx) using (var p = new Pen(L.Dim, 1) { DashStyle = DashStyle.Dot }) g.DrawLine(p, lx, ly, vx, ly);
+            }
             ry += 17 * k; shown++;
         }
 
         var gr = new RectangleF(x, r.Y + 144 * k, right - x, r.Bottom - 12 * k - (r.Y + 144 * k));
-        DrawGraph(g, gr, d, c, n, k);
+        DrawGraph(g, L, gr, d, c, n, k);
     }
 
-    void DrawGraph(Graphics g, RectangleF r, DashCard d, Settings c, int n, float k)
+    void DrawGraph(Graphics g, Look L, RectangleF r, DashCard d, Settings c, int n, float k)
     {
-        using (var p = new Pen(Theme.Border)) for (int i = 1; i < 4; i++) { float yy = (float)Math.Round(r.Y + r.Height * i / 4) + 0.5f; g.DrawLine(p, r.X, yy, r.Right, yy); }
+        using (var p = new Pen(L.Grid) { DashStyle = L.Term ? DashStyle.Dot : DashStyle.Solid })
+            for (int i = 1; i < 4; i++) { float yy = (float)Math.Round(r.Y + r.Height * i / 4) + 0.5f; g.DrawLine(p, r.X, yy, r.Right, yy); }
+        if (L.Term) using (var p = new Pen(L.Edge)) g.DrawLine(p, r.X, r.Bottom, r.Right, r.Bottom);
         var series = d.Graph.Select(id => Dash.History(id, n)).ToArray();
         double max = d.Pct ? 100 : 0;
         if (!d.Pct) { foreach (var h in series) foreach (var v in h) if (!double.IsNaN(v) && v > max) max = v; max = max > 0 ? max * 1.15 : 1; }
-        for (int i = series.Length - 1; i >= 0; i--) Line(g, r, series[i], n, max, Dash.ColorOf(d.Cols[i], c), i == 0, k);
+        Func<int, Color> colOf = i => L.Term ? (i == 0 ? L.Text : L.Alt) : Dash.ColorOf(d.Cols[i], c);
+        for (int i = series.Length - 1; i >= 0; i--)
+        {
+            if (L.Term && i == 0) Columns(g, r, series[i], n, max, colOf(i), k);
+            else Line(g, r, series[i], n, max, colOf(i), i == 0, k);
+        }
         if (d.Graph.Length > 1)
         {
             float lx = r.X;
             for (int i = 0; i < d.Graph.Length; i++)
             {
                 string label; if (!Dash.Short.TryGetValue(d.Graph[i], out label)) label = d.Graph[i];
-                Theme.FillRound(g, new RectangleF(lx, r.Y - 13 * k, 8 * k, 8 * k), 2 * k, Dash.ColorOf(d.Cols[i], c));
-                Str(g, label, fSmall, Theme.Sub, lx + 10 * k, r.Y - 17 * k);
+                label = Case(L, label);
+                var box = new RectangleF(lx, r.Y - 13 * k, 8 * k, 8 * k);
+                if (L.Term)
+                {
+                    if (i == 0) using (var b = new SolidBrush(colOf(i))) g.FillRectangle(b, box);
+                    else using (var p = new Pen(colOf(i))) g.DrawRectangle(p, box.X, box.Y, box.Width, box.Height);
+                }
+                else Theme.FillRound(g, box, 2 * k, colOf(i));
+                Str(g, label, fSmall, L.Sub, lx + 10 * k, r.Y - 17 * k);
                 lx += 18 * k + g.MeasureString(label, fSmall).Width;
             }
         }
-        if (series.Length > 0 && series[0].Length == 0) Str(g, "Collecting…", fSmall, Theme.Sub, r.X + 2 * k, r.Bottom - 16 * k);
+        if (series.Length > 0 && series[0].Length == 0) Str(g, L.Term ? "collecting…" : "Collecting…", fSmall, L.Sub, r.X + 2 * k, r.Bottom - 16 * k);
     }
+
+    static float Px(RectangleF r, int i, int len, int n) { return r.Right - (len - 1 - i) * r.Width / (n - 1); }
+    static float Py(RectangleF r, double v, double max) { return r.Bottom - 1 - (r.Height - 2) * (float)Math.Min(1, Math.Max(0, v / max)); }
 
     static void Line(Graphics g, RectangleF r, double[] h, int n, double max, Color col, bool fill, float k)
     {
@@ -7250,19 +7426,53 @@ class DashboardForm : Form
         for (int i = 0; i < h.Length; i++)
         {
             if (double.IsNaN(h[i])) { flush(); continue; }
-            float px = r.Right - (h.Length - 1 - i) * r.Width / (n - 1);
-            float py = r.Bottom - 1 - (r.Height - 2) * (float)Math.Min(1, Math.Max(0, h[i] / max));
-            seg.Add(new PointF(px, py));
+            seg.Add(new PointF(Px(r, i, h.Length, n), Py(r, h[i], max)));
         }
         flush();
     }
 
-    void DrawCores(Graphics g, RectangleF r, Snapshot s, Color col, float k)
+    // The terminal's graph: a column per sample with a bright top edge, like a text-mode bar chart.
+    static void Columns(Graphics g, RectangleF r, double[] h, int n, double max, Color col, float k)
+    {
+        float cw = r.Width / (n - 1);
+        var old = g.SmoothingMode; g.SmoothingMode = SmoothingMode.None;
+        using (var fillB = new SolidBrush(Color.FromArgb(95, col)))
+        using (var capB = new SolidBrush(col))
+            for (int i = 0; i < h.Length; i++)
+            {
+                if (double.IsNaN(h[i])) continue;
+                float x1 = Px(r, i, h.Length, n), x0 = Math.Max(r.X, x1 - cw), y = Py(r, h[i], max);
+                float w = Math.Max(1, cw >= 4 ? x1 - x0 - 1 : x1 - x0);
+                g.FillRectangle(fillB, x0, y, w, r.Bottom - y);
+                g.FillRectangle(capB, x0, y, w, Math.Max(1.5f, 1.5f * k));
+            }
+        g.SmoothingMode = old;
+    }
+
+    void DrawCores(Graphics g, Look L, RectangleF r, Snapshot s, Color col, float k)
     {
         var cores = s.Cores;
-        if (cores.Length == 0) { Str(g, "Waiting for readings…", fRow, Theme.Sub, r.X, r.Y); return; }
+        if (cores.Length == 0) { Str(g, Case(L, "Waiting for readings…"), fRow, L.Sub, r.X, r.Y); return; }
         int count = cores.Length;
         float gapc = Math.Max(1, Math.Min(4 * k, r.Width / count * 0.25f)), bw = (r.Width - gapc * (count - 1)) / count, bh = r.Height - 22 * k;
+        if (L.Term)
+        {
+            // LED segments: lit from the bottom up to the core's load
+            float sh = 4 * k, sg = 2 * k;
+            int segs = Math.Max(1, (int)((bh + sg) / (sh + sg)));
+            var old = g.SmoothingMode; g.SmoothingMode = SmoothingMode.None;
+            using (var on = new SolidBrush(L.Text))
+            using (var off = new SolidBrush(L.Dim))
+                for (int i = 0; i < count; i++)
+                {
+                    int lit = (int)Math.Round(segs * Math.Max(0, Math.Min(100, cores[i])) / 100);
+                    float bx = r.X + i * (bw + gapc);
+                    for (int j = 0; j < segs; j++) g.FillRectangle(j < lit ? on : off, bx, r.Y + bh - (j + 1) * (sh + sg) + sg, bw, sh);
+                }
+            g.SmoothingMode = old;
+            Str(g, count + " threads | max " + cores.Max().ToString("0") + "% | avg " + cores.Average().ToString("0") + "%", fSmall, L.Sub, r.X, r.Bottom - 15 * k);
+            return;
+        }
         float rad = Math.Min(3 * k, bw / 2);
         for (int i = 0; i < count; i++)
         {
@@ -7271,21 +7481,36 @@ class DashboardForm : Form
             float fh = bh * (float)Math.Max(0, Math.Min(100, cores[i])) / 100;
             if (fh >= 1) Theme.FillRound(g, new RectangleF(br.X, br.Bottom - fh, bw, fh), Math.Min(rad, fh / 2), col);
         }
-        Str(g, count + " threads  ·  busiest " + cores.Max().ToString("0") + "%  ·  average " + cores.Average().ToString("0") + "%", fSmall, Theme.Sub, r.X, r.Bottom - 15 * k);
+        Str(g, count + " threads  ·  busiest " + cores.Max().ToString("0") + "%  ·  average " + cores.Average().ToString("0") + "%", fSmall, L.Sub, r.X, r.Bottom - 15 * k);
+    }
+
+    void ShowThemeMenu()
+    {
+        var m = new ContextMenuStrip { Renderer = new DarkMenuRenderer() };
+        for (int i = 0; i < Dash.Themes.Length; i++)
+        {
+            int t = i;
+            var item = new ToolStripMenuItem(Dash.Themes[i]) { Checked = bar.Cfg.DashTheme == i };
+            item.Click += (s, e) => { bar.Cfg.DashTheme = t; bar.Cfg.Save(); Invalidate(); bar.NotifySettings("Dashboard"); };
+            m.Items.Add(item);
+        }
+        m.Closed += (s, e) => BeginInvoke((Action)m.Dispose);
+        m.Show(this, new Point((int)(themeHit.X + AutoScrollPosition.X), (int)(themeHit.Bottom + AutoScrollPosition.Y + 2)));
     }
 
     protected override void OnMouseClick(MouseEventArgs e)
     {
         var p = new PointF(e.X - AutoScrollPosition.X, e.Y - AutoScrollPosition.Y);
+        if (themeHit.Contains(p)) { ShowThemeMenu(); return; }
         foreach (var hit in rangeHits)
-            if (hit.Key.Contains(p)) { bar.Cfg.DashMinutes = hit.Value; bar.Cfg.Save(); Invalidate(); return; }
+            if (hit.Key.Contains(p)) { bar.Cfg.DashMinutes = hit.Value; bar.Cfg.Save(); Invalidate(); bar.NotifySettings("Dashboard"); return; }
         base.OnMouseClick(e);
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
         var p = new PointF(e.X - AutoScrollPosition.X, e.Y - AutoScrollPosition.Y);
-        Cursor = rangeHits.Any(h => h.Key.Contains(p)) ? Cursors.Hand : Cursors.Default;
+        Cursor = themeHit.Contains(p) || rangeHits.Any(h => h.Key.Contains(p)) ? Cursors.Hand : Cursors.Default;
         base.OnMouseMove(e);
     }
 
@@ -8714,6 +8939,8 @@ class SettingsForm : Form
         var mins = new[] { 1, 2, 5, 10 };
         Add(Icons.Clock, Theme.Accent, "Graph length", "How far back the graphs go. History starts when the dashboard opens.",
             Combo(mins.Select(m => m + (m == 1 ? " minute" : " minutes")).ToArray(), Math.Max(0, Array.IndexOf(mins, c.DashMinutes)), i => { c.DashMinutes = mins[i]; Apply(); bar.RefreshDashboard(); }, 130));
+        Add(Icons.Palette, Theme.Accent, "Theme", "Modern, or a text terminal in green or amber. The window's header and the web page have a theme picker too.",
+            Combo(Dash.Themes, c.DashTheme, i => { c.DashTheme = i; Apply(); bar.RefreshDashboard(); }, 150));
 
         Header("Web dashboard");
         var web = new Toggle { On = c.WebDashboard };
