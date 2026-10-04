@@ -2172,12 +2172,21 @@ static class Program
         Updates.CleanUp();
         bool created;
         MigrateLegacy();
-        using (var mutex = new Mutex(true, AppName, out created))
+        string signal = AppName + (args.Contains("--dashboard") ? ".Dashboard" : ".Show");
+        Mutex held;
+        try { held = new Mutex(true, AppName, out created); }
+        catch (UnauthorizedAccessException)
+        {
+            // An elevated copy owns it, out of this copy's reach: it's running, so just ask it to show itself.
+            try { EventWaitHandle.OpenExisting(signal).Set(); } catch { }
+            return;
+        }
+        using (var mutex = held)
         {
             // When relaunching (e.g. elevated), wait for the previous instance to exit.
             if (!created && !args.Contains("--restart"))
             {
-                try { EventWaitHandle.OpenExisting(AppName + ".Show").Set(); } catch { }
+                try { EventWaitHandle.OpenExisting(signal).Set(); } catch { }
                 return;
             }
             if (!created && !Wait(mutex)) return;
@@ -2625,16 +2634,41 @@ class StatsBar : Form
         animTimer.Start();
     }
 
-    // Launching Kinetik again (e.g. from the desktop shortcut) signals this event, and the running copy opens Settings.
+    // Launching Kinetik again (e.g. from the desktop shortcut) signals one of these events, and the running copy opens
+    // Settings, or with --dashboard, the dashboard.
     void ListenForShow()
     {
-        var ev = new EventWaitHandle(false, EventResetMode.AutoReset, Program.AppName + ".Show");
+        var show = Signal(Program.AppName + ".Show");
+        var dashEv = Signal(Program.AppName + ".Dashboard");
         var t = new Thread(() =>
         {
-            while (ev.WaitOne())
-                try { BeginInvoke((Action)(() => OpenSettings(null))); } catch { return; }
+            var both = new WaitHandle[] { show, dashEv };
+            while (true)
+            {
+                int i = WaitHandle.WaitAny(both);
+                try
+                {
+                    BeginInvoke(i == 0 ? (Action)(() => OpenSettings(null))
+                                       : (Action)(() => { if (!Cfg.Dashboard) { Cfg.Dashboard = true; Cfg.Save(); NotifySettings("Dashboard"); } OpenDashboard(); }));
+                }
+                catch { return; }
+            }
         }) { IsBackground = true };
         t.Start();
+    }
+
+    // A named event this user can signal even from a copy without admin rights: an elevated Kinetik's objects would
+    // otherwise be out of reach (Windows doesn't let a normal process write to a higher-integrity one).
+    static EventWaitHandle Signal(string name)
+    {
+        try
+        {
+            var sec = new System.Security.AccessControl.EventWaitHandleSecurity();
+            sec.SetSecurityDescriptorSddlForm("D:(A;;0x1F0003;;;SY)(A;;0x1F0003;;;BA)(A;;0x1F0003;;;" + WindowsIdentity.GetCurrent().User.Value + ")S:(ML;;NW;;;ME)");
+            bool created;
+            return new EventWaitHandle(false, EventResetMode.AutoReset, name, out created, sec);
+        }
+        catch { return new EventWaitHandle(false, EventResetMode.AutoReset, name); }
     }
 
     // Trims memory once things have settled (a one-shot timer, so it never runs mid-interaction).
@@ -7117,7 +7151,8 @@ class OverlayForm : Form
 }
 
 // ======================================================================= Live dashboard window
-// Cards with the current readings and graphs of the last few minutes, laid out to fit the window. Only exists while open.
+// Cards with the current readings and graphs of the last few minutes. The cards are laid out to fit the window: the grid
+// with the most room per card wins, and the text and graphs scale with it. Only exists while open.
 // Themes (Dash.Themes): Modern, rounded cards in the stat colours; Terminal and Amber, a monochrome text terminal.
 class DashboardForm : Form
 {
@@ -7148,13 +7183,16 @@ class DashboardForm : Form
         return new Look { Bg = Theme.Bg, Card = Theme.Card, Edge = Theme.Border, Text = Theme.Text, Sub = Theme.Sub, Dim = Theme.CardHover, Grid = Theme.Border, Alt = Theme.Accent };
     }
 
+    // A card's natural size (at 100% scale) and how far it may shrink or grow to fit the window.
+    const float CardW = 320, CardH = 244, MinScale = 0.78f, MaxScale = 1.6f;
+
     readonly StatsBar bar;
     readonly List<KeyValuePair<RectangleF, int>> rangeHits = new List<KeyValuePair<RectangleF, int>>();
     RectangleF themeHit;
     static readonly int[] Ranges = { 1, 2, 5, 10 };
-    Font fHead, fTitle, fBig, fBigSmall, fRow, fSmall;
+    Font fHead, fBtn, fTitle, fBig, fBigSmall, fRow, fSmall;
     readonly List<Font> owned = new List<Font>(); // the terminal's monospace fonts; the modern ones are Theme's shared fonts
-    int fontsFor = -1;
+    string fontsFor = "";
 
     public DashboardForm(StatsBar bar)
     {
@@ -7186,22 +7224,29 @@ class DashboardForm : Form
         SetWindowTheme(Handle, "DarkMode_Explorer", null);          // and dark scroll bars
     }
 
-    void EnsureFonts(bool term)
+    // Fonts for the theme, with the cards' text at scale (in steps of 5%, so resizing doesn't make a font per pixel).
+    void EnsureFonts(bool term, float scale)
     {
-        if (fontsFor == (term ? 1 : 0)) return;
+        scale = (float)Math.Round(scale * 20) / 20;
+        string key = (term ? "t" : "m") + scale.ToString(CultureInfo.InvariantCulture);
+        if (fontsFor == key) return;
         foreach (var f in owned) f.Dispose();
         owned.Clear();
-        fontsFor = term ? 1 : 0;
-        if (!term)
+        fontsFor = key;
+        Func<float, FontStyle, Font> mk;
+        if (term)
         {
-            fHead = Theme.UI(13f, FontStyle.Bold); fTitle = Theme.UI(10f, FontStyle.Bold); fBig = Theme.UI(22f, FontStyle.Bold);
-            fBigSmall = Theme.UI(16f, FontStyle.Bold); fRow = Theme.UI(9.5f); fSmall = Theme.UI(8.5f);
+            string fam = FontList.Has("Cascadia Mono") ? "Cascadia Mono" : "Consolas";
+            mk = (sz, st) => { var f = new Font(fam, sz, st); owned.Add(f); return f; };
+            fHead = mk(12f, FontStyle.Bold); fBtn = mk(9f, FontStyle.Regular);
+            fTitle = mk(9.5f * scale, FontStyle.Bold); fBig = mk(21f * scale, FontStyle.Bold); fBigSmall = mk(15f * scale, FontStyle.Bold);
+            fRow = mk(9f * scale, FontStyle.Regular); fSmall = mk(8f * scale, FontStyle.Regular);
             return;
         }
-        string fam = FontList.Has("Cascadia Mono") ? "Cascadia Mono" : "Consolas";
-        Func<float, FontStyle, Font> mk = (sz, st) => { var f = new Font(fam, sz, st); owned.Add(f); return f; };
-        fHead = mk(12f, FontStyle.Bold); fTitle = mk(9.5f, FontStyle.Bold); fBig = mk(21f, FontStyle.Bold);
-        fBigSmall = mk(15f, FontStyle.Bold); fRow = mk(9f, FontStyle.Regular); fSmall = mk(8f, FontStyle.Regular);
+        mk = (sz, st) => Theme.UI((float)Math.Round(sz * 2) / 2, st); // half-point steps keep Theme's cache small
+        fHead = Theme.UI(13f, FontStyle.Bold); fBtn = Theme.UI(9.5f);
+        fTitle = mk(10f * scale, FontStyle.Bold); fBig = mk(22f * scale, FontStyle.Bold); fBigSmall = mk(16f * scale, FontStyle.Bold);
+        fRow = mk(9.5f * scale, FontStyle.Regular); fSmall = mk(8.5f * scale, FontStyle.Regular);
     }
 
     static void Str(Graphics g, string t, Font f, Color c, float x, float y) { using (var b = new SolidBrush(c)) g.DrawString(t, f, b, x, y); }
@@ -7222,13 +7267,38 @@ class DashboardForm : Form
         var c = bar.Cfg; var s = bar.Sampler.Snap;
         var L = LookFor(c.DashTheme);
         if (BackColor != L.Bg) BackColor = L.Bg;
-        EnsureFonts(L.Term);
+        float k = DeviceDpi / 96f;
+        float W = ClientSize.Width, H = ClientSize.Height, pad = 16 * k, gap = 12 * k, top = 68 * k;
+
+        // The grid: try every column count and keep the one whose cards get the most room. If even the best can't
+        // keep cards at MinScale, fall back to as many natural-size columns as fit, and scroll.
+        int count = Dash.Cards.Length, cols = 1;
+        float best = 0;
+        for (int tc = 1; tc <= count; tc++)
+        {
+            int tr = (count + tc - 1) / tc;
+            float tw = (W - 2 * pad - (tc - 1) * gap) / tc, th = (H - top - pad - (tr - 1) * gap) / tr;
+            float sc = Math.Min(tw / (CardW * k), th / (CardH * k));
+            if (sc > best) { best = sc; cols = tc; }
+        }
+        bool fits = best >= MinScale;
+        float scale;
+        if (fits) scale = Math.Min(MaxScale, best);
+        else
+        {
+            scale = 1;
+            cols = Math.Max(1, Math.Min(count, (int)((W - 2 * pad + gap) / (CardW * MinScale * k + gap))));
+        }
+        int rows = (count + cols - 1) / cols;
+        float cw = (W - 2 * pad - (cols - 1) * gap) / cols;
+        float ch = fits ? (H - top - pad - (rows - 1) * gap) / rows : CardH * k;
+        if (fits) ch = Math.Min(ch, CardH * k * MaxScale * 1.25f); // very tall windows: leave space below rather than stretch cards absurdly
+        EnsureFonts(L.Term, Math.Max(MinScale, Math.Min(scale, Math.Min(MaxScale, cw / (CardW * k)))));
+
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = L.Term ? TextRenderingHint.AntiAliasGridFit : TextRenderingHint.ClearTypeGridFit;
         g.Clear(L.Bg);
-        float k = DeviceDpi / 96f;
         g.TranslateTransform(AutoScrollPosition.X, AutoScrollPosition.Y);
-        float W = ClientSize.Width, pad = 16 * k, gap = 12 * k;
 
         // Header: a title (a shell prompt in the terminal), the hardware and uptime, then the graph length and theme buttons
         if (L.Term)
@@ -7250,34 +7320,29 @@ class DashboardForm : Form
         themeHit = Button(g, L, L.Term ? "theme: " + Dash.Themes[c.DashTheme].ToLowerInvariant() : Dash.Themes[c.DashTheme], bx - 10 * k, 13 * k, false, true, k);
         var parts = new[] { s.CpuName, s.HasGpu ? s.GpuName : "", "up " + StatsBar.Duration(s.Uptime) }.Where(x => x != "");
         string meta = L.Term ? "# " + string.Join(" | ", parts) : string.Join("  ·  ", parts);
-        StrFit(g, meta, fRow, L.Sub, new RectangleF(pad, 40 * k, W - 2 * pad, 20 * k), false);
+        StrFit(g, meta, fBtn, L.Sub, new RectangleF(pad, 40 * k, W - 2 * pad, 20 * k), false);
 
-        // Cards, as many columns as fit
-        float top = 68 * k;
-        int cols = Math.Max(1, Math.Min(4, (int)((W - 2 * pad + gap) / (310 * k + gap))));
-        float cw = (W - 2 * pad - (cols - 1) * gap) / cols, ch = 244 * k;
         int n = Math.Max(2, Math.Min(Dash.Capacity, c.DashMinutes * 60000 / Math.Max(250, c.Interval)));
-        int col = 0; float y = top;
-        foreach (var card in Dash.Cards)
+        float u = k * Math.Max(MinScale, Math.Min(MaxScale, Math.Min(ch / (CardH * k), cw / (CardW * k)))); // the cards' layout unit
+        for (int i = 0; i < count; i++)
         {
-            DrawCard(g, L, new RectangleF(pad + col * (cw + gap), y, cw, ch), card, s, c, n, k);
-            if (++col == cols) { col = 0; y += ch + gap; }
+            int col = i % cols, row = i / cols;
+            DrawCard(g, L, new RectangleF(pad + col * (cw + gap), top + row * (ch + gap), cw, ch), Dash.Cards[i], s, c, n, u);
         }
-        if (col > 0) y += ch + gap;
 
         if (L.Term) // scanlines over the whole window
         {
             g.ResetTransform();
             using (var p = new Pen(Color.FromArgb(55, 0, 0, 0))) for (int yy = 0; yy < ClientSize.Height; yy += 3) g.DrawLine(p, 0, yy, ClientSize.Width, yy);
         }
-        var min = new Size(0, (int)(y - gap + pad));
+        var min = fits ? Size.Empty : new Size(0, (int)(top + rows * (ch + gap) - gap + pad));
         if (AutoScrollMinSize != min) AutoScrollMinSize = min;
     }
 
     // A header button, right-aligned at right. Returns where it was drawn.
     RectangleF Button(Graphics g, Look L, string t, float right, float y, bool on, bool chevron, float k)
     {
-        var sz = g.MeasureString(t, fRow);
+        var sz = g.MeasureString(t, fBtn);
         float w = sz.Width + 12 * k + (chevron ? 14 * k : 0);
         var r = new RectangleF(right - w, y, w, 26 * k);
         if (L.Term)
@@ -7291,81 +7356,99 @@ class DashboardForm : Form
             if (on) Theme.StrokeRound(g, r, 6 * k, Theme.Accent, 1);
         }
         var col = L.Term ? (on ? L.Bg : L.Text) : on || chevron ? L.Text : L.Sub;
-        Str(g, t, fRow, col, r.X + 6 * k, r.Y + (r.Height - sz.Height) / 2);
+        Str(g, t, fBtn, col, r.X + 6 * k, r.Y + (r.Height - sz.Height) / 2);
         if (chevron) Theme.Chevron(g, new RectangleF(r.Right - 18 * k, r.Y, 14 * k, r.Height), false, col);
         return r;
     }
 
-    void DrawCard(Graphics g, Look L, RectangleF r, DashCard d, Snapshot s, Settings c, int n, float k)
+    // u is the layout unit: one pixel at 96 DPI and 100% card scale.
+    void DrawCard(Graphics g, Look L, RectangleF r, DashCard d, Snapshot s, Settings c, int n, float u)
     {
         Color col = L.Term ? L.Text : Dash.ColorOf(d.Color, c);
-        float x = r.X + 14 * k, y = r.Y + 12 * k, right = r.Right - 14 * k;
+        float x = r.X + 14 * u, y = r.Y + 12 * u, right = r.Right - 14 * u, bottom = r.Bottom - 12 * u;
         string name = Dash.NameOf(d.Name, s);
+        float titleH = g.MeasureString("Ag", fTitle).Height;
         if (L.Term)
         {
             // A box-drawn panel with its title, and the hardware name, set into the top edge
-            using (var p = new Pen(L.Edge)) g.DrawRectangle(p, r.X, r.Y + 8 * k, r.Width - 1, r.Height - 8 * k - 1);
+            float edge = r.Y + titleH / 2;
+            using (var p = new Pen(L.Edge)) g.DrawRectangle(p, r.X, edge, r.Width - 1, r.Bottom - edge - 1);
             string t = "[ " + d.Title.ToLowerInvariant() + " ]";
             float tw = g.MeasureString(t, fTitle).Width;
-            using (var b = new SolidBrush(L.Bg)) g.FillRectangle(b, r.X + 10 * k, r.Y, tw, 17 * k);
-            Str(g, t, fTitle, L.Text, r.X + 10 * k, r.Y);
+            using (var b = new SolidBrush(L.Bg)) g.FillRectangle(b, r.X + 10 * u, r.Y, tw, titleH);
+            Str(g, t, fTitle, L.Text, r.X + 10 * u, r.Y);
             if (name != "")
             {
-                var nr = new RectangleF(r.X + 20 * k + tw, r.Y + 1 * k, r.Right - 10 * k - (r.X + 20 * k + tw), 16 * k);
+                var nr = new RectangleF(r.X + 20 * u + tw, r.Y + (titleH - g.MeasureString("Ag", fSmall).Height) / 2, r.Right - 10 * u - (r.X + 20 * u + tw), titleH);
                 float nw = Math.Min(nr.Width, g.MeasureString(name.ToLowerInvariant(), fSmall).Width);
-                using (var b = new SolidBrush(L.Bg)) g.FillRectangle(b, nr.Right - nw, r.Y, nw, 17 * k);
+                using (var b = new SolidBrush(L.Bg)) g.FillRectangle(b, nr.Right - nw, r.Y, nw, titleH);
                 StrFit(g, name.ToLowerInvariant(), fSmall, L.Sub, nr, true);
             }
-            y += 6 * k;
+            y = r.Y + titleH - 6 * u;
         }
         else
         {
-            Theme.FillRound(g, r, 10 * k, L.Card);
-            Theme.FillRound(g, new RectangleF(x, y + 4 * k, 10 * k, 10 * k), 3 * k, col);
-            Str(g, d.Title, fTitle, L.Sub, x + 16 * k, y);
+            Theme.FillRound(g, r, 10 * u, L.Card);
+            Theme.FillRound(g, new RectangleF(x, y + (titleH - 10 * u) / 2, 10 * u, 10 * u), 3 * u, col);
+            Str(g, d.Title, fTitle, L.Sub, x + 16 * u, y);
             float tw = g.MeasureString(d.Title, fTitle).Width;
-            if (name != "") StrFit(g, name, fSmall, L.Sub, new RectangleF(x + 24 * k + tw, y + 2 * k, right - (x + 24 * k + tw), 18 * k), true);
+            if (name != "") StrFit(g, name, fSmall, L.Sub, new RectangleF(x + 24 * u + tw, y + 2 * u, right - (x + 24 * u + tw), titleH), true);
         }
-        if (d.Cores) { DrawCores(g, L, new RectangleF(x, y + 30 * k, right - x, r.Bottom - 12 * k - (y + 30 * k)), s, col, k); return; }
+        float body = y + titleH + 4 * u; // where the readings start
+        if (d.Cores) { DrawCores(g, L, new RectangleF(x, body + 4 * u, right - x, bottom - body - 4 * u), s, col, u); return; }
+
+        // How much fits: the graph needs at least minGraph, the readings get what's left. Short cards drop the
+        // average and peak first, then readings from the bottom of the list.
+        float rowH = g.MeasureString("Ag", fRow).Height + 1 * u, smallH = g.MeasureString("Ag", fSmall).Height;
+        float bigH = g.MeasureString("0", fBig).Height;
+        bool legend = d.Graph.Length > 1;
+        float minGraph = 34 * u, legendH = legend ? smallH + 4 * u : 4 * u;
+        float room = bottom - minGraph - legendH - body;
+        var h = Dash.History(d.Big, n).Where(v => !double.IsNaN(v)).ToArray();
+        bool stats = h.Length > 1 && d.Graph.Contains(d.Big);
+        float leftH = bigH + smallH + (stats ? 2 * smallH : 0);
+        if (leftH > room && stats) { stats = false; leftH = bigH + smallH; }
+        int maxRows = Math.Max(0, Math.Min(5, (int)(room / rowH)));
 
         // Left: the main reading, what it is, and its average and peak over the graph's span
         float half = r.Width * 0.44f;
         string big = Dash.Text(d.Big, s) ?? "--";
         var fb = g.MeasureString(big, fBig).Width > half ? fBigSmall : fBig;
-        Str(g, big, fb, L.Text, x - 3 * k, y + 22 * k);
-        Str(g, Case(L, d.BigLabel), fSmall, L.Sub, x, y + 60 * k);
-        var h = Dash.History(d.Big, n).Where(v => !double.IsNaN(v)).ToArray();
-        if (h.Length > 1 && d.Graph.Contains(d.Big))
+        Str(g, big, fb, L.Text, x - 3 * u, body - 4 * u);
+        float ly = body - 4 * u + bigH;
+        Str(g, Case(L, d.BigLabel), fSmall, L.Sub, x, ly);
+        if (stats)
         {
-            Str(g, "avg " + StatsBar.FormatValue(d.Big, h.Average(), s), fSmall, L.Sub, x, y + 76 * k);
-            Str(g, (L.Term ? "max " : "peak ") + StatsBar.FormatValue(d.Big, h.Max(), s), fSmall, L.Sub, x, y + 92 * k);
+            Str(g, "avg " + StatsBar.FormatValue(d.Big, h.Average(), s), fSmall, L.Sub, x, ly + smallH);
+            Str(g, (L.Term ? "max " : "peak ") + StatsBar.FormatValue(d.Big, h.Max(), s), fSmall, L.Sub, x, ly + 2 * smallH);
         }
 
-        // Right: up to five more readings (ones this PC doesn't have are left out); the terminal joins them with dot leaders
-        float rx = r.X + half + 14 * k, ry = y + 24 * k;
+        // Right: more readings (ones this PC doesn't have are left out); the terminal joins them with dot leaders
+        float rx = r.X + half + 14 * u, ry = body;
         int shown = 0;
         foreach (var row in d.Rows)
         {
-            if (shown == 5) break;
+            if (shown == maxRows) break;
             string v = Dash.Text(row.Value, s);
             if (v == null) continue;
             if (row.Value == "FpsNote") v = Case(L, v);
             string label = Case(L, row.Key);
             Str(g, label, fRow, L.Sub, rx, ry);
-            StrRight(g, v, fRow, L.Text, right + 2 * k, ry);
+            StrRight(g, v, fRow, L.Text, right + 2 * u, ry);
             if (L.Term)
             {
-                float lx = rx + g.MeasureString(label, fRow).Width + 2 * k, vx = right - g.MeasureString(v, fRow).Width - 2 * k, ly = ry + 12 * k;
-                if (vx > lx) using (var p = new Pen(L.Dim, 1) { DashStyle = DashStyle.Dot }) g.DrawLine(p, lx, ly, vx, ly);
+                float lx = rx + g.MeasureString(label, fRow).Width + 2 * u, vx = right - g.MeasureString(v, fRow).Width - 2 * u, dy = ry + rowH * 0.72f;
+                if (vx > lx) using (var p = new Pen(L.Dim, 1) { DashStyle = DashStyle.Dot }) g.DrawLine(p, lx, dy, vx, dy);
             }
-            ry += 17 * k; shown++;
+            ry += rowH; shown++;
         }
 
-        var gr = new RectangleF(x, r.Y + 144 * k, right - x, r.Bottom - 12 * k - (r.Y + 144 * k));
-        DrawGraph(g, L, gr, d, c, n, k);
+        float infoBottom = Math.Max(body - 4 * u + leftH, ry);
+        var gr = new RectangleF(x, infoBottom + legendH + 2 * u, right - x, bottom - (infoBottom + legendH + 2 * u));
+        if (gr.Height >= 12 * u) DrawGraph(g, L, gr, d, c, n, u);
     }
 
-    void DrawGraph(Graphics g, Look L, RectangleF r, DashCard d, Settings c, int n, float k)
+    void DrawGraph(Graphics g, Look L, RectangleF r, DashCard d, Settings c, int n, float u)
     {
         using (var p = new Pen(L.Grid) { DashStyle = L.Term ? DashStyle.Dot : DashStyle.Solid })
             for (int i = 1; i < 4; i++) { float yy = (float)Math.Round(r.Y + r.Height * i / 4) + 0.5f; g.DrawLine(p, r.X, yy, r.Right, yy); }
@@ -7376,34 +7459,34 @@ class DashboardForm : Form
         Func<int, Color> colOf = i => L.Term ? (i == 0 ? L.Text : L.Alt) : Dash.ColorOf(d.Cols[i], c);
         for (int i = series.Length - 1; i >= 0; i--)
         {
-            if (L.Term && i == 0) Columns(g, r, series[i], n, max, colOf(i), k);
-            else Line(g, r, series[i], n, max, colOf(i), i == 0, k);
+            if (L.Term && i == 0) Columns(g, r, series[i], n, max, colOf(i), u);
+            else Line(g, r, series[i], n, max, colOf(i), i == 0, u);
         }
         if (d.Graph.Length > 1)
         {
-            float lx = r.X;
+            float smallH = g.MeasureString("Ag", fSmall).Height, lx = r.X, sq = Math.Max(6, 8 * u);
             for (int i = 0; i < d.Graph.Length; i++)
             {
                 string label; if (!Dash.Short.TryGetValue(d.Graph[i], out label)) label = d.Graph[i];
                 label = Case(L, label);
-                var box = new RectangleF(lx, r.Y - 13 * k, 8 * k, 8 * k);
+                var box = new RectangleF(lx, r.Y - 4 * u - (smallH + sq) / 2, sq, sq);
                 if (L.Term)
                 {
                     if (i == 0) using (var b = new SolidBrush(colOf(i))) g.FillRectangle(b, box);
                     else using (var p = new Pen(colOf(i))) g.DrawRectangle(p, box.X, box.Y, box.Width, box.Height);
                 }
-                else Theme.FillRound(g, box, 2 * k, colOf(i));
-                Str(g, label, fSmall, L.Sub, lx + 10 * k, r.Y - 17 * k);
-                lx += 18 * k + g.MeasureString(label, fSmall).Width;
+                else Theme.FillRound(g, box, 2 * u, colOf(i));
+                Str(g, label, fSmall, L.Sub, lx + sq + 2 * u, r.Y - 4 * u - smallH);
+                lx += sq + 10 * u + g.MeasureString(label, fSmall).Width;
             }
         }
-        if (series.Length > 0 && series[0].Length == 0) Str(g, L.Term ? "collecting…" : "Collecting…", fSmall, L.Sub, r.X + 2 * k, r.Bottom - 16 * k);
+        if (series.Length > 0 && series[0].Length == 0) Str(g, L.Term ? "collecting…" : "Collecting…", fSmall, L.Sub, r.X + 2 * u, r.Bottom - g.MeasureString("Ag", fSmall).Height - 2 * u);
     }
 
     static float Px(RectangleF r, int i, int len, int n) { return r.Right - (len - 1 - i) * r.Width / (n - 1); }
     static float Py(RectangleF r, double v, double max) { return r.Bottom - 1 - (r.Height - 2) * (float)Math.Min(1, Math.Max(0, v / max)); }
 
-    static void Line(Graphics g, RectangleF r, double[] h, int n, double max, Color col, bool fill, float k)
+    static void Line(Graphics g, RectangleF r, double[] h, int n, double max, Color col, bool fill, float u)
     {
         var seg = new List<PointF>();
         Action flush = () =>
@@ -7419,7 +7502,7 @@ class DashboardForm : Form
                         path.CloseFigure();
                         using (var b = new LinearGradientBrush(new RectangleF(r.X, r.Y - 1, r.Width, r.Height + 2), Color.FromArgb(80, col), Color.FromArgb(4, col), 90f)) g.FillPath(b, path);
                     }
-                using (var p = new Pen(col, 1.6f * k) { LineJoin = LineJoin.Round }) g.DrawLines(p, pts);
+                using (var p = new Pen(col, Math.Max(1.2f, 1.6f * u)) { LineJoin = LineJoin.Round }) g.DrawLines(p, pts);
             }
             seg.Clear();
         };
@@ -7432,7 +7515,7 @@ class DashboardForm : Form
     }
 
     // The terminal's graph: a column per sample with a bright top edge, like a text-mode bar chart.
-    static void Columns(Graphics g, RectangleF r, double[] h, int n, double max, Color col, float k)
+    static void Columns(Graphics g, RectangleF r, double[] h, int n, double max, Color col, float u)
     {
         float cw = r.Width / (n - 1);
         var old = g.SmoothingMode; g.SmoothingMode = SmoothingMode.None;
@@ -7444,21 +7527,23 @@ class DashboardForm : Form
                 float x1 = Px(r, i, h.Length, n), x0 = Math.Max(r.X, x1 - cw), y = Py(r, h[i], max);
                 float w = Math.Max(1, cw >= 4 ? x1 - x0 - 1 : x1 - x0);
                 g.FillRectangle(fillB, x0, y, w, r.Bottom - y);
-                g.FillRectangle(capB, x0, y, w, Math.Max(1.5f, 1.5f * k));
+                g.FillRectangle(capB, x0, y, w, Math.Max(1.5f, 1.5f * u));
             }
         g.SmoothingMode = old;
     }
 
-    void DrawCores(Graphics g, Look L, RectangleF r, Snapshot s, Color col, float k)
+    void DrawCores(Graphics g, Look L, RectangleF r, Snapshot s, Color col, float u)
     {
         var cores = s.Cores;
         if (cores.Length == 0) { Str(g, Case(L, "Waiting for readings…"), fRow, L.Sub, r.X, r.Y); return; }
         int count = cores.Length;
-        float gapc = Math.Max(1, Math.Min(4 * k, r.Width / count * 0.25f)), bw = (r.Width - gapc * (count - 1)) / count, bh = r.Height - 22 * k;
+        float noteH = g.MeasureString("Ag", fSmall).Height;
+        float gapc = Math.Max(1, Math.Min(4 * u, r.Width / count * 0.25f)), bw = (r.Width - gapc * (count - 1)) / count, bh = r.Height - noteH - 6 * u;
+        if (bh < 8) return;
         if (L.Term)
         {
             // LED segments: lit from the bottom up to the core's load
-            float sh = 4 * k, sg = 2 * k;
+            float sh = 4 * u, sg = 2 * u;
             int segs = Math.Max(1, (int)((bh + sg) / (sh + sg)));
             var old = g.SmoothingMode; g.SmoothingMode = SmoothingMode.None;
             using (var on = new SolidBrush(L.Text))
@@ -7470,10 +7555,10 @@ class DashboardForm : Form
                     for (int j = 0; j < segs; j++) g.FillRectangle(j < lit ? on : off, bx, r.Y + bh - (j + 1) * (sh + sg) + sg, bw, sh);
                 }
             g.SmoothingMode = old;
-            Str(g, count + " threads | max " + cores.Max().ToString("0") + "% | avg " + cores.Average().ToString("0") + "%", fSmall, L.Sub, r.X, r.Bottom - 15 * k);
+            Str(g, count + " threads | max " + cores.Max().ToString("0") + "% | avg " + cores.Average().ToString("0") + "%", fSmall, L.Sub, r.X, r.Bottom - noteH);
             return;
         }
-        float rad = Math.Min(3 * k, bw / 2);
+        float rad = Math.Min(3 * u, bw / 2);
         for (int i = 0; i < count; i++)
         {
             var br = new RectangleF(r.X + i * (bw + gapc), r.Y, bw, bh);
@@ -7481,7 +7566,7 @@ class DashboardForm : Form
             float fh = bh * (float)Math.Max(0, Math.Min(100, cores[i])) / 100;
             if (fh >= 1) Theme.FillRound(g, new RectangleF(br.X, br.Bottom - fh, bw, fh), Math.Min(rad, fh / 2), col);
         }
-        Str(g, count + " threads  ·  busiest " + cores.Max().ToString("0") + "%  ·  average " + cores.Average().ToString("0") + "%", fSmall, L.Sub, r.X, r.Bottom - 15 * k);
+        Str(g, count + " threads  ·  busiest " + cores.Max().ToString("0") + "%  ·  average " + cores.Average().ToString("0") + "%", fSmall, L.Sub, r.X, r.Bottom - noteH);
     }
 
     void ShowThemeMenu()
