@@ -98,6 +98,7 @@ class Settings
     public bool Dashboard = false, DashboardHotkey = true, WebDashboard = false, WebLan = false;
     public int DashMinutes = 5, DashW = 1180, DashH = 760, WebPort = 8484;
     public int DashTheme = 0; // see Dash.Themes
+    public string DashCards = "", DashStats = ""; // the dashboard's layout (Dash.GetLayout); "" = the defaults
     public string WebKey = ""; // the secret in the web dashboard's link; made when it's first switched on
 
     // Appearance
@@ -214,7 +215,7 @@ class Settings
     public bool Wants(string id)
     {
         if (StatsShare.Wants(id)) return true; // a companion app needs it
-        if (Dash.Viewing && Dash.WantIds.Contains(id)) return true; // the dashboard is open
+        if (Dash.Wants(this, id)) return true; // the dashboard is open and shows it
         if (IsOn(id) || (WidgetShow && WidgetIsOn(id)) || ((OverlayShow || OverlayAuto) && OverlayIsOn(id))) return true;
         if (AlertTemps && (id == "CpuTemp" || id == "GpuTemp")) return true;
         if (AlertDisk && id == "DiskFree") return true;
@@ -3575,6 +3576,7 @@ class StatsBar : Form
 
     void SyncDashboard()
     {
+        Dash.Bar = this;
         if (dash != null && !Cfg.Dashboard) dash.Close();
         WebDash.Sync(this, Cfg);
     }
@@ -4359,52 +4361,206 @@ static class StatsShare
 // ======================================================================= Live dashboard
 // Every reading with up to ten minutes of history, for the dashboard window and the web dashboard. History is only
 // kept, and the extra readings only measured, while one of them is actually being looked at.
+// A dashboard card: a group of related stats. Which cards show, in what order, and which of each card's stats show (and
+// in what order) is the user's layout (Settings.DashCards / DashStats). The first stat that's on is the card's big
+// reading; the graph shows it and the next stat that's on with the same unit.
 class DashCard
 {
-    public string Title, Color, Big, BigLabel, Name;
-    public string[] Graph, Cols;
-    public KeyValuePair<string, string>[] Rows;
-    public bool Pct, Cores;
+    public string Key, Title, Color;
+    public string[] Stats, Off;  // every stat the card can show, in default order; the ones off by default
+    public bool OnByDefault = true, Cores;
+    public IconFn Icon;
 
-    // graph and cols are comma lists; rows are "Label=Id;Label=Id".
-    public DashCard(string title, string color, string big, string bigLabel, string name, string graph, string cols, bool pct, string rows)
+    public DashCard(string key, string title, string color, IconFn icon, string stats, string off = "")
     {
-        Title = title; Color = color; Big = big; BigLabel = bigLabel; Name = name; Pct = pct;
-        Graph = graph == "" ? new string[0] : graph.Split(',');
-        Cols = cols == "" ? new string[0] : cols.Split(',');
-        Rows = rows == "" ? new KeyValuePair<string, string>[0]
-            : rows.Split(';').Select(r => { var p = r.Split('='); return new KeyValuePair<string, string>(p[0], p[1]); }).ToArray();
+        Key = key; Title = title; Color = color; Icon = icon;
+        Stats = stats.Split(',');
+        Off = off == "" ? new string[0] : off.Split(',');
     }
+}
+
+// One card as laid out right now: its big reading, graph and rows, from the user's layout.
+class DashView
+{
+    public DashCard Card;
+    public string Big, BigLabel;
+    public string[] Graph = new string[0];
+    public List<KeyValuePair<string, string>> Rows = new List<KeyValuePair<string, string>>(); // label, stat
+    public bool Pct;
+    public string Title { get { return Card.Title; } }
+    public string Name { get { return Card.Key == "cpu" || Card.Key == "gpu" || Card.Key == "game" ? Card.Key : ""; } }
+    public bool Cores { get { return Card.Cores; } }
 }
 
 static class Dash
 {
     public static readonly DashCard[] Cards =
     {
-        new DashCard("CPU", "cpu", "Cpu", "Usage", "cpu", "Cpu", "cpu", true, "Temperature=CpuTemp;Power=CpuPower;Clock=CpuClock;Processes=Processes"),
-        new DashCard("GPU", "gpu", "Gpu", "Usage", "gpu", "Gpu", "gpu", true, "Temperature=GpuTemp;Hot spot=GpuHotspot;Power=GpuPower;Clock=GpuClock;Fan=GpuFan;VRAM=GpuVram"),
-        new DashCard("Memory", "ram", "Ram", "RAM", "", "Ram,GpuVramPct", "ram,gpu", true, "RAM used=RamGb;Committed=RamCommit;VRAM=GpuVram"),
-        new DashCard("Network", "down", "Down", "Download", "", "Down,Up", "down,up", false, "Upload=Up;Ping=Ping;Wi-Fi=Wifi"),
-        new DashCard("Disk", "disk", "Disk", "Activity", "", "DiskRead,DiskWrite", "disk,up", false, "Read=DiskRead;Write=DiskWrite;Free space=DiskFree;Drive temp=SsdTemp"),
-        new DashCard("Temperatures", "temp", "CpuTemp", "CPU", "", "CpuTemp,GpuTemp", "temp,gpu", false, "GPU=GpuTemp;GPU hot spot=GpuHotspot;GPU memory=GpuMemTemp;Drive=SsdTemp;RAM=RamTemp"),
-        new DashCard("Power", "cpu", "TotalPower", "CPU + GPU", "", "CpuPower,GpuPower", "cpu,gpu", false, "CPU=CpuPower;GPU=GpuPower"),
-        new DashCard("Game", "gpu", "Fps", "FPS", "game", "Fps", "gpu", false, "1% low=FpsLow;0.1% low=FpsLow01;Frame time=FrameTime;Status=FpsNote"),
-        new DashCard("CPU cores", "cpu", "", "", "", "", "", true, "") { Cores = true },
+        new DashCard("cpu", "CPU", "cpu", Icons.Chip, "Cpu,CpuTemp,CpuPower,CpuClock,Processes"),
+        new DashCard("gpu", "GPU", "gpu", Icons.Gpu, "Gpu,GpuTemp,GpuHotspot,GpuPower,GpuClock,GpuFan,GpuVram,GpuMemTemp,GpuVramPct", "GpuMemTemp,GpuVramPct"),
+        new DashCard("mem", "Memory", "ram", Icons.Ram, "Ram,GpuVramPct,RamGb,RamCommit,GpuVram,RamTemp", "GpuVram,RamTemp"),
+        new DashCard("net", "Network", "down", Icons.UpDown, "Down,Up,Ping,Wifi,NetTotal,NetApp,PublicIp,Vpn", "NetTotal,NetApp,PublicIp,Vpn"),
+        new DashCard("disk", "Disk", "disk", Icons.Disk, "DiskRead,DiskWrite,Disk,DiskFree,SsdTemp"),
+        new DashCard("temp", "Temperatures", "temp", Icons.Thermo, "CpuTemp,GpuTemp,GpuHotspot,GpuMemTemp,SsdTemp,RamTemp"),
+        new DashCard("power", "Power", "cpu", Icons.Bolt, "TotalPower,CpuPower,GpuPower"),
+        new DashCard("game", "Game", "gpu", Icons.Monitor, "Fps,FpsLow,FpsLow01,FrameTime,BaseFps,Latency", "BaseFps,Latency"),
+        new DashCard("cores", "CPU cores", "cpu", Icons.Grid, "CpuCores") { Cores = true },
+        new DashCard("sys", "System", "misc", Icons.Clock, "Clock,Date,Uptime,Processes,PcBattery,BatTime,Batteries") { OnByDefault = false },
     };
 
-    // Short names for graph legends.
-    public static readonly Dictionary<string, string> Short = new Dictionary<string, string>
+    // Row labels: card-specific ones first ("temp:CpuTemp" is just "CPU" on the Temperatures card), then general ones.
+    static readonly Dictionary<string, string> Labels = new Dictionary<string, string>
     {
-        { "Cpu", "CPU" }, { "Gpu", "GPU" }, { "Ram", "RAM" }, { "GpuVramPct", "VRAM" }, { "Down", "Download" }, { "Up", "Upload" },
-        { "DiskRead", "Read" }, { "DiskWrite", "Write" }, { "CpuTemp", "CPU" }, { "GpuTemp", "GPU" }, { "CpuPower", "CPU" }, { "GpuPower", "GPU" }, { "Fps", "FPS" },
+        { "Up", "Upload" }, { "Down", "Download" }, { "NetTotal", "Total" }, { "NetApp", "Top app" }, { "Ping", "Ping" }, { "Wifi", "Wi-Fi" },
+        { "PublicIp", "Public IP" }, { "Vpn", "VPN" }, { "Cpu", "Usage" }, { "CpuCores", "Cores" }, { "CpuClock", "Clock" }, { "CpuTemp", "Temperature" },
+        { "CpuPower", "Power" }, { "Ram", "RAM" }, { "RamGb", "RAM used" }, { "RamCommit", "Committed" }, { "RamTemp", "RAM temp" }, { "Gpu", "Usage" },
+        { "GpuTemp", "Temperature" }, { "GpuHotspot", "Hot spot" }, { "GpuMemTemp", "Memory temp" }, { "GpuClock", "Clock" }, { "GpuFan", "Fan" },
+        { "GpuVram", "VRAM" }, { "GpuVramPct", "VRAM usage" }, { "GpuPower", "Power" }, { "Fps", "FPS" }, { "BaseFps", "Base FPS" }, { "FpsLow", "1% low" },
+        { "FpsLow01", "0.1% low" }, { "FrameTime", "Frame time" }, { "Latency", "Latency" }, { "Disk", "Activity" }, { "DiskRead", "Read" },
+        { "DiskWrite", "Write" }, { "DiskFree", "Free space" }, { "SsdTemp", "Drive temp" }, { "Processes", "Processes" }, { "Uptime", "Uptime" },
+        { "Clock", "Time" }, { "Date", "Date" }, { "PcBattery", "Battery" }, { "BatTime", "Time left" }, { "Batteries", "Devices" },
+        { "TotalPower", "CPU + GPU" }, { "FpsNote", "Status" },
+        { "mem:GpuVramPct", "VRAM" }, { "mem:GpuVram", "VRAM used" },
+        { "temp:CpuTemp", "CPU" }, { "temp:GpuTemp", "GPU" }, { "temp:GpuHotspot", "GPU hot spot" }, { "temp:GpuMemTemp", "GPU memory" }, { "temp:SsdTemp", "Drive" }, { "temp:RamTemp", "RAM" },
+        { "power:CpuPower", "CPU" }, { "power:GpuPower", "GPU" }, { "power:TotalPower", "CPU + GPU" },
     };
 
-    public static readonly string[] Graphed = Cards.SelectMany(d => d.Graph).Distinct().ToArray();
-    static readonly string[] TextIds = Cards.SelectMany(d => new[] { d.Big }.Concat(d.Rows.Select(r => r.Value))).Where(id => id != "").Concat(new[] { "Uptime" }).Distinct().ToArray();
-    // What the dashboard needs measured while it's being looked at.
-    public static readonly HashSet<string> WantIds = new HashSet<string>(TextIds.Concat(Graphed).Concat(new[] { "CpuCores" }).Where(id => Settings.StatIds.Contains(id)));
-    static readonly string[] ColorKeys = { "cpu", "gpu", "ram", "down", "up", "disk", "temp" };
-    public static readonly string[] Themes = { "Modern", "Terminal", "Amber terminal" };
+    public static string Label(string card, string id)
+    {
+        string l;
+        if (Labels.TryGetValue(card + ":" + id, out l) || Labels.TryGetValue(id, out l)) return l;
+        return id;
+    }
+
+    // Stats with the same unit can share a graph; ones without a family have no graph.
+    static string Family(string id)
+    {
+        switch (id)
+        {
+            case "Cpu": case "Gpu": case "Ram": case "RamCommit": case "GpuVramPct": case "Disk": case "Wifi": return "pct";
+            case "Up": case "Down": case "NetTotal": case "NetApp": case "DiskRead": case "DiskWrite": return "speed";
+            case "CpuTemp": case "GpuTemp": case "GpuHotspot": case "GpuMemTemp": case "SsdTemp": case "RamTemp": return "temp";
+            case "CpuPower": case "GpuPower": case "TotalPower": return "power";
+            case "Fps": case "BaseFps": case "FpsLow": case "FpsLow01": return "fps";
+            case "FrameTime": case "Latency": case "Ping": return "ms";
+            case "CpuClock": case "GpuClock": return "mhz";
+            case "RamGb": case "GpuVram": return "gb";
+            case "GpuFan": return "fan";
+            case "Processes": return "count";
+            default: return null;
+        }
+    }
+
+    // Every stat that can have a graph: history is kept for these while the dashboard is being looked at.
+    public static readonly string[] Graphed = Cards.SelectMany(d => d.Stats).Where(id => Family(id) != null).Distinct().ToArray();
+    static readonly string[] ColorKeys = { "cpu", "gpu", "ram", "down", "up", "disk", "temp", "misc" };
+    public static readonly string[] Themes = { "Modern", "Terminal", "Amber terminal", "Yellow terminal" };
+
+    // Set by the bar, for stats whose text only the bar knows how to make (batteries, for one).
+    public static StatsBar Bar;
+
+    // ---- The layout
+
+    public class Layout
+    {
+        public List<KeyValuePair<DashCard, bool>> Cards = new List<KeyValuePair<DashCard, bool>>();
+        public Dictionary<string, List<KeyValuePair<string, bool>>> Stats = new Dictionary<string, List<KeyValuePair<string, bool>>>();
+    }
+
+    // The saved layout, with anything missing (e.g. added in a newer version) filled in from the defaults.
+    // DashCards: "cpu,gpu,-sys"; DashStats: "cpu:Cpu,-CpuClock|gpu:...". A leading - means switched off.
+    public static Layout GetLayout(Settings c)
+    {
+        var L = new Layout();
+        foreach (var tok in (c.DashCards ?? "").Split(','))
+        {
+            bool off = tok.StartsWith("-");
+            var card = Cards.FirstOrDefault(x => x.Key == (off ? tok.Substring(1) : tok));
+            if (card != null && !L.Cards.Any(o => o.Key == card)) L.Cards.Add(new KeyValuePair<DashCard, bool>(card, !off));
+        }
+        foreach (var card in Cards) if (!L.Cards.Any(o => o.Key == card)) L.Cards.Add(new KeyValuePair<DashCard, bool>(card, card.OnByDefault));
+        var saved = new Dictionary<string, string[]>();
+        foreach (var part in (c.DashStats ?? "").Split('|'))
+        {
+            int colon = part.IndexOf(':');
+            if (colon > 0) saved[part.Substring(0, colon)] = part.Substring(colon + 1).Split(',');
+        }
+        foreach (var card in Cards)
+        {
+            var list = new List<KeyValuePair<string, bool>>();
+            string[] toks;
+            if (saved.TryGetValue(card.Key, out toks))
+                foreach (var tok in toks)
+                {
+                    bool off = tok.StartsWith("-");
+                    var id = off ? tok.Substring(1) : tok;
+                    if (card.Stats.Contains(id) && !list.Any(x => x.Key == id)) list.Add(new KeyValuePair<string, bool>(id, !off));
+                }
+            foreach (var id in card.Stats) if (!list.Any(x => x.Key == id)) list.Add(new KeyValuePair<string, bool>(id, !card.Off.Contains(id)));
+            L.Stats[card.Key] = list;
+        }
+        return L;
+    }
+
+    public static void SaveLayout(Settings c, Layout L)
+    {
+        c.DashCards = string.Join(",", L.Cards.Select(x => (x.Value ? "" : "-") + x.Key.Key));
+        c.DashStats = string.Join("|", L.Stats.Select(kv => kv.Key + ":" + string.Join(",", kv.Value.Select(x => (x.Value ? "" : "-") + x.Key))));
+    }
+
+    // The cards to show, built from the layout. Cached until the layout changes; read from the sampler and web threads too.
+    static Tuple<string, List<DashView>, HashSet<string>> views;
+
+    public static List<DashView> Views(Settings c) { return Current(c).Item2; }
+
+    static Tuple<string, List<DashView>, HashSet<string>> Current(Settings c)
+    {
+        string key = c.DashCards + "\n" + c.DashStats;
+        var v = views;
+        if (v != null && v.Item1 == key) return v;
+        var L = GetLayout(c);
+        var list = new List<DashView>();
+        var want = new HashSet<string>();
+        foreach (var entry in L.Cards)
+        {
+            if (!entry.Value) continue;
+            var card = entry.Key;
+            var on = L.Stats[card.Key].Where(x => x.Value).Select(x => x.Key).ToList();
+            if (on.Count == 0) continue;
+            var view = new DashView { Card = card };
+            foreach (var id in on) { if (id == "TotalPower") { want.Add("CpuPower"); want.Add("GpuPower"); } else want.Add(id); }
+            if (!card.Cores)
+            {
+                view.Big = on[0];
+                view.BigLabel = Label(card.Key, view.Big);
+                string fam = Family(view.Big);
+                if (fam != null)
+                {
+                    string second = on.Skip(1).FirstOrDefault(id => Family(id) == fam);
+                    view.Graph = second == null ? new[] { view.Big } : new[] { view.Big, second };
+                    view.Pct = fam == "pct";
+                }
+                foreach (var id in on.Skip(1)) view.Rows.Add(new KeyValuePair<string, string>(Label(card.Key, id), id));
+                if (on.Contains("Fps")) view.Rows.Add(new KeyValuePair<string, string>(Label(card.Key, "FpsNote"), "FpsNote"));
+            }
+            list.Add(view);
+        }
+        v = Tuple.Create(key, list, want);
+        views = v;
+        return v;
+    }
+
+    // What the dashboard needs measured while it's being looked at: only the stats that are switched on in it.
+    public static bool Wants(Settings c, string id) { return Viewing && Current(c).Item3.Contains(id); }
+
+    // Graph line colours: the card's colour, then the second stat's own colour (or the accent, if that's the same).
+    public static Color SeriesColor(DashView v, int i, Settings c)
+    {
+        var first = ColorOf(v.Card.Color, c);
+        if (i == 0) return first;
+        var col = v.Graph[i] == "TotalPower" ? c.CpuColor : Stats.Get(v.Graph[i], c).Color;
+        return col.ToArgb() == first.ToArgb() ? (first.ToArgb() == c.UpColor.ToArgb() ? Theme.Accent : c.UpColor) : col;
+    }
 
     public const int Capacity = 600; // samples kept: ten minutes at the default one-second interval
 
@@ -4420,20 +4576,30 @@ static class Dash
     // True while the window is open, or a browser asked for readings in the last 15 seconds.
     public static bool Viewing { get { return windowOpen || DateTime.UtcNow.Ticks - Interlocked.Read(ref webSeen) < 15 * TimeSpan.TicksPerSecond; } }
 
+    public static double Num(string id, Snapshot s)
+    {
+        if (id == "TotalPower")
+        {
+            double t = (double.IsNaN(s.CpuPower) ? 0 : s.CpuPower) + (s.HasGpu && !double.IsNaN(s.GpuPower) ? s.GpuPower : 0);
+            return t > 0 ? t : double.NaN;
+        }
+        return StatsBar.Num(id, s);
+    }
+
     public static void Record(Snapshot s)
     {
         lock (gate)
         {
             if (!Viewing) { if (hist.Count > 0) { hist.Clear(); count = head = 0; } return; } // nobody's looking: keep nothing
             if (hist.Count == 0) foreach (var id in Graphed) hist[id] = new double[Capacity];
-            foreach (var id in Graphed) hist[id][head] = StatsBar.Num(id, s);
+            foreach (var id in Graphed) hist[id][head] = Num(id, s);
             head = (head + 1) % Capacity;
             if (count < Capacity) count++;
             seq++;
         }
     }
 
-    // The last n samples of one reading, oldest first; NaN where it wasn't available.
+    // The last n samples of one stat, oldest first; NaN where it wasn't available.
     public static double[] History(string id, int n)
     {
         lock (gate)
@@ -4458,6 +4624,7 @@ static class Dash
             case "up": return c.UpColor;
             case "disk": return c.DiskColor;
             case "temp": return c.TempColor;
+            case "misc": return c.MiscColor;
             default: return Theme.Accent;
         }
     }
@@ -4470,7 +4637,7 @@ static class Dash
         return "";
     }
 
-    // A reading as the dashboard shows it, or null when there isn't one.
+    // A stat as the dashboard shows it, or null when there isn't a reading.
     public static string Text(string id, Snapshot s)
     {
         switch (id)
@@ -4480,14 +4647,24 @@ static class Dash
             case "DiskFree": return s.FreeGb >= 0 ? StatsBar.SizeGb(s.FreeGb) + (s.FreeName != "" ? " (" + s.FreeName + ")" : "") : null;
             case "Uptime": return StatsBar.Duration(s.Uptime);
             case "FpsNote": return !double.IsNaN(s.Fps) ? null : Program.IsAdmin ? "No game in front" : "Needs admin";
-            case "TotalPower":
-            {
-                double t = (double.IsNaN(s.CpuPower) ? 0 : s.CpuPower) + (s.HasGpu && !double.IsNaN(s.GpuPower) ? s.GpuPower : 0);
-                return t > 0 ? t.ToString("0") + " W" : null;
-            }
+            case "Clock": return DateTime.Now.ToString("t", CultureInfo.CurrentCulture);
+            case "Date": return DateTime.Now.ToString("ddd d MMM", CultureInfo.CurrentCulture);
+            case "PublicIp": return string.IsNullOrEmpty(s.PublicIp) ? null : s.PublicIp;
+            case "Vpn": return s.Vpn == null ? null : s.Vpn == "" ? "Off" : s.Vpn;
+            case "NetApp": return s.NetAppRate >= 0 && s.NetAppName != "" ? s.NetAppName + "  " + StatsBar.Speed(s.NetAppRate) : null;
+            case "TotalPower": { double t = Num(id, s); return double.IsNaN(t) ? null : t.ToString("0") + " W"; }
         }
         double v = StatsBar.Num(id, s);
-        return double.IsNaN(v) ? null : StatsBar.FormatValue(id, v, s);
+        if (!double.IsNaN(v)) return StatsBar.FormatValue(id, v, s);
+        var bar = Bar;
+        if (bar == null) return null;
+        try // the bar's own text, for stats like the batteries
+        {
+            var segs = bar.BuildSegments(s, Color.White, Color.Gray, new List<string> { id }, x => true, false);
+            var t = string.Join("  ", segs.Select(sg => string.Join(" ", sg.Parts.Select(p => p.Text)))).Trim();
+            return t == "" || t.StartsWith("--") ? null : t;
+        }
+        catch { return null; }
     }
 
     static string N(double v) { return double.IsNaN(v) || double.IsInfinity(v) ? "null" : v.ToString("0.###", CultureInfo.InvariantCulture); }
@@ -4506,12 +4683,18 @@ static class Dash
         return sb.Append('"').ToString();
     }
 
-    // The readings for the web dashboard. full adds the cards' layout and the history so far.
+    // The readings for the web dashboard. full adds the cards' layout and the history so far. lv changes whenever
+    // the layout does, so an open page knows to ask for the new one.
     public static string Json(Snapshot s, Settings c, bool full)
     {
+        var cur = Current(c);
+        var vs = cur.Item2;
+        var graphIds = vs.SelectMany(v => v.Graph).Distinct().ToList();
+        var textIds = vs.SelectMany(v => (v.Big == null ? new string[0] : new[] { v.Big }).Concat(v.Rows.Select(r => r.Value))).Concat(new[] { "Uptime" }).Distinct().ToList();
         var sb = new StringBuilder(full ? 65536 : 2048);
         int sq; lock (gate) sq = seq;
-        sb.Append("{\"seq\":").Append(sq).Append(",\"interval\":").Append(Math.Max(250, c.Interval)).Append(",\"cap\":").Append(Capacity).Append(",\"minutes\":").Append(c.DashMinutes).Append(",\"theme\":").Append(c.DashTheme);
+        sb.Append("{\"seq\":").Append(sq).Append(",\"lv\":").Append(cur.Item1.GetHashCode()).Append(",\"interval\":").Append(Math.Max(250, c.Interval))
+          .Append(",\"cap\":").Append(Capacity).Append(",\"minutes\":").Append(c.DashMinutes).Append(",\"theme\":").Append(c.DashTheme);
         sb.Append(",\"names\":{\"cpu\":").Append(Js(NameOf("cpu", s))).Append(",\"gpu\":").Append(Js(NameOf("gpu", s))).Append(",\"game\":").Append(Js(NameOf("game", s))).Append('}');
         sb.Append(",\"colors\":{");
         for (int i = 0; i < ColorKeys.Length; i++)
@@ -4521,7 +4704,7 @@ static class Dash
         }
         sb.Append("},\"text\":{");
         bool first = true;
-        foreach (var id in TextIds)
+        foreach (var id in textIds)
         {
             var t = Text(id, s);
             if (t == null) continue;
@@ -4529,25 +4712,26 @@ static class Dash
             first = false;
         }
         sb.Append("},\"v\":{");
-        for (int i = 0; i < Graphed.Length; i++) sb.Append(i > 0 ? "," : "").Append('"').Append(Graphed[i]).Append("\":").Append(N(StatsBar.Num(Graphed[i], s)));
+        for (int i = 0; i < graphIds.Count; i++) sb.Append(i > 0 ? "," : "").Append('"').Append(graphIds[i]).Append("\":").Append(N(Num(graphIds[i], s)));
         sb.Append("},\"cores\":[").Append(string.Join(",", s.Cores.Select(v => N(v)))).Append(']');
         if (full)
         {
             sb.Append(",\"themes\":[").Append(string.Join(",", Themes.Select(x => Js(x)))).Append(']');
-            sb.Append(",\"short\":{").Append(string.Join(",", Short.Select(kv => Js(kv.Key) + ":" + Js(kv.Value)))).Append('}');
             sb.Append(",\"cards\":[");
-            for (int i = 0; i < Cards.Length; i++)
+            for (int i = 0; i < vs.Count; i++)
             {
-                var d = Cards[i];
-                sb.Append(i > 0 ? "," : "").Append("{\"t\":").Append(Js(d.Title)).Append(",\"c\":").Append(Js(d.Color)).Append(",\"b\":").Append(Js(d.Big))
+                var d = vs[i];
+                Func<int, string> hex = k => { var col = SeriesColor(d, k, c); return Js("#" + col.R.ToString("x2") + col.G.ToString("x2") + col.B.ToString("x2")); };
+                sb.Append(i > 0 ? "," : "").Append("{\"t\":").Append(Js(d.Title)).Append(",\"c\":").Append(Js(d.Card.Color)).Append(",\"b\":").Append(Js(d.Big))
                   .Append(",\"bl\":").Append(Js(d.BigLabel)).Append(",\"n\":").Append(Js(d.Name)).Append(",\"p\":").Append(d.Pct ? "true" : "false")
                   .Append(",\"k\":").Append(d.Cores ? "true" : "false").Append(",\"g\":[").Append(string.Join(",", d.Graph.Select(x => Js(x))))
-                  .Append("],\"gc\":[").Append(string.Join(",", d.Cols.Select(x => Js(x)))).Append("],\"r\":[")
+                  .Append("],\"gc\":[").Append(string.Join(",", Enumerable.Range(0, d.Graph.Length).Select(hex)))
+                  .Append("],\"gl\":[").Append(string.Join(",", d.Graph.Select(x => Js(Label(d.Card.Key, x))))).Append("],\"r\":[")
                   .Append(string.Join(",", d.Rows.Select(r => "[" + Js(r.Key) + "," + Js(r.Value) + "]"))).Append("]}");
             }
             sb.Append("],\"hist\":{");
-            for (int i = 0; i < Graphed.Length; i++)
-                sb.Append(i > 0 ? "," : "").Append('"').Append(Graphed[i]).Append("\":[").Append(string.Join(",", History(Graphed[i], Capacity).Select(v => N(v)))).Append(']');
+            for (int i = 0; i < graphIds.Count; i++)
+                sb.Append(i > 0 ? "," : "").Append('"').Append(graphIds[i]).Append("\":[").Append(string.Join(",", History(graphIds[i], Capacity).Select(v => N(v)))).Append(']');
             sb.Append('}');
         }
         return sb.Append('}').ToString();
@@ -4728,6 +4912,7 @@ static class WebDash
 :root{--bg:#141418;--card:#1e1e24;--line:#2c2c34;--text:#ececf0;--sub:#9696a2;--dim:#2a2a32;--alt:#4cc2ff}
 body.term{--bg:#030a05;--card:#030a05;--line:#228c3e;--text:#5aff78;--sub:#2eaa50;--dim:rgba(90,255,120,.22);--alt:#cdffd7}
 body.amber{--bg:#0c0700;--card:#0c0700;--line:#965c0c;--text:#ffb628;--sub:#b97616;--dim:rgba(255,182,40,.22);--alt:#ffe8b4}
+body.yellow{--bg:#000;--card:#000;--line:#968400;--text:#ffe200;--sub:#c8b200;--dim:rgba(255,226,0,.22);--alt:#ffffbe}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:14px/1.35 'Segoe UI',system-ui,-apple-system,Roboto,sans-serif}
 body.mono{font-family:'Cascadia Mono',Consolas,'Courier New',monospace;font-size:13px}
@@ -4787,23 +4972,25 @@ body.mono::after{content:'';position:fixed;inset:0;pointer-events:none;backgroun
 <script>
 const key=new URLSearchParams(location.search).get('k')||'';
 const $=id=>document.getElementById(id);
-let cards=null,short={},colors={},hist={},cap=600,interval=1000,minutes=0,theme=-1,fails=0,needHist=true,last=null,seq=-1,dead=false;
+let cards=null,lv=null,colors={},hist={},cap=600,interval=1000,minutes=0,theme=-1,fails=0,needHist=true,last=null,seq=-1,dead=false;
 const els={};
 function el(tag,cls,parent){const e=document.createElement(tag);if(cls)e.className=cls;if(parent)parent.appendChild(e);return e}
 function css(v){return getComputedStyle(document.body).getPropertyValue(v).trim()}
-function mono(){return theme===1||theme===2}
+function mono(){return theme>=1}
 function save(k,v){try{localStorage.setItem(k,v)}catch(e){}}
 function load(k){try{return localStorage.getItem(k)}catch(e){return null}}
-function build(){const g=$('grid');g.textContent='';for(const c of cards){const s=el('section','card',g),t=el('div','t',s),o={dot:el('i','',t)};el('span','tt',t).textContent=c.t;o.n=el('span','n',t);
- if(c.k){o.cores=el('div','cores',s);o.note=el('div','note',s)}else{const top=el('div','top',s),l=el('div','lft',top);o.big=el('div','big',l);o.bl=el('div','bl',l);o.st=el('div','st',l);o.rows=el('div','rows',top);if(c.g.length>1)o.leg=el('div','leg',s);o.cv=el('canvas','',s)}els[c.t]=o}}
+function build(){const g=$('grid');g.textContent='';if(!cards.length)el('p','note',g).textContent='No cards are switched on. Choose them in Kinetik: Settings, Dashboard.';for(const c of cards){const s=el('section','card',g),t=el('div','t',s),o={dot:el('i','',t)};el('span','tt',t).textContent=c.t;o.n=el('span','n',t);
+ if(c.k){o.cores=el('div','cores',s);o.note=el('div','note',s)}else{const top=el('div','top',s),l=el('div','lft',top);o.big=el('div','big',l);o.bl=el('div','bl',l);o.st=el('div','st',l);o.rows=el('div','rows',top);if(c.g.length>1)o.leg=el('div','leg',s);if(c.g.length)o.cv=el('canvas','',s)}els[c.t]=o}}
 function rng(){const r=$('rng');r.textContent='';for(const m of [1,2,5,10]){const b=el('button',m===minutes?'on':'',r);b.textContent=mono()?m+'m':m+' min';b.onclick=()=>{minutes=m;save('kinetik-min',m);rng();render()}}}
-function applyTheme(t){theme=t;document.body.className=t===1?'mono term':t===2?'mono amber':'';$('theme').value=t;save('kinetik-theme',t);
+function applyTheme(t){theme=t;document.body.className=['','mono term','mono amber','mono yellow'][t]||'';$('theme').value=t;save('kinetik-theme',t);
  const h=$('h1');h.textContent=t?'kinetik:~$ dashboard --live':'Kinetik';if(t)el('span','cur',h);
  document.querySelector('meta[name=theme-color]').setAttribute('content',css('--bg'));rng();render()}
 function span(){return Math.max(2,Math.min(cap,Math.round(minutes*60000/interval)))}
 function fmt(id,v){if(v==null||isNaN(v))return '--';
  if(/^(Down|Up|DiskRead|DiskWrite)$/.test(id)){if(v>=1073741824)return (v/1073741824).toFixed(2)+' GB/s';if(v>=1048576)return (v/1048576).toFixed(v>=104857600?0:v>=10485760?1:2)+' MB/s';if(v>=1024)return Math.round(v/1024)+' KB/s';return Math.round(v)+' B/s'}
- if(/Temp/.test(id))return Math.round(v)+'°C';if(/Power/.test(id))return Math.round(v)+' W';if(/^Fps/.test(id))return Math.round(v)+' fps';return Math.round(v)+'%'}
+ if(/Temp|Hotspot/.test(id))return Math.round(v)+'°C';if(/Power/.test(id))return Math.round(v)+' W';if(/Fps/.test(id))return Math.round(v)+' fps';
+ if(id==='CpuClock')return (v/1000).toFixed(2)+' GHz';if(id==='GpuClock')return Math.round(v)+' MHz';if(/^(FrameTime|Latency|Ping)$/.test(id))return v.toFixed(id==='FrameTime'?1:0)+' ms';
+ if(/^(RamGb|GpuVram)$/.test(id))return v.toFixed(1)+' GB';if(id==='Processes')return ''+Math.round(v);return Math.round(v)+'%'}
 function plot(cv,ids,cols,pct){const dpr=window.devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;
  if(cv.width!==Math.round(w*dpr)||cv.height!==Math.round(h*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr)}
  const x=cv.getContext('2d'),m=mono();x.setTransform(dpr,0,0,dpr,0,0);x.clearRect(0,0,w,h);
@@ -4830,18 +5017,19 @@ function render(){if(!cards||!last)return;const d=last,m=mono(),text=css('--text
    o.note.textContent=!cores.length?'Waiting for readings…':m?cores.length+' threads | max '+mx+'% | avg '+av+'%':cores.length+' threads  ·  busiest '+mx+'%  ·  average '+av+'%';continue}
   o.big.textContent=d.text[c.b]||'--';o.bl.textContent=c.bl;
   const h=(hist[c.b]||[]).slice(-span()).filter(v=>v!=null);
-  o.st.textContent=h.length>1?'avg '+fmt(c.b,h.reduce((a,b)=>a+b,0)/h.length)+(m?'  ·  max ':'  ·  peak ')+fmt(c.b,Math.max(...h)):'';
-  o.rows.textContent='';let shown=0;for(const r of c.r){const v=d.text[r[1]];if(v==null||shown>=5)continue;el('b','',o.rows).textContent=r[0];el('u','',o.rows);el('span','',o.rows).textContent=m&&r[1]==='FpsNote'?v.toLowerCase():v;shown++}
-  const cols=m?[text,alt]:c.gc.map(k=>colors[k]||col);
-  if(o.leg){o.leg.textContent='';c.g.forEach((id,i)=>{const s=el('span','',o.leg);el('i','',s).style.background=cols[i];s.appendChild(document.createTextNode(short[id]||id))})}
-  plot(o.cv,c.g,cols,c.p)}}
+  o.st.textContent=h.length>1&&c.g[0]===c.b?'avg '+fmt(c.b,h.reduce((a,b)=>a+b,0)/h.length)+(m?'  ·  max ':'  ·  peak ')+fmt(c.b,Math.max(...h)):'';
+  o.rows.textContent='';let shown=0;for(const r of c.r){const v=d.text[r[1]];if(v==null||shown>=(c.g.length?5:9))continue;el('b','',o.rows).textContent=r[0];el('u','',o.rows);el('span','',o.rows).textContent=m&&r[1]==='FpsNote'?v.toLowerCase():v;shown++}
+  const cols=m?[text,alt]:c.gc;
+  if(o.leg){o.leg.textContent='';c.g.forEach((id,i)=>{const s=el('span','',o.leg);el('i','',s).style.background=cols[i];s.appendChild(document.createTextNode(c.gl[i]||id))})}
+  if(o.cv)plot(o.cv,c.g,cols,c.p)}}
 async function poll(){if(dead)return;let wait=interval;
  if(document.hidden){needHist=true;setTimeout(poll,2000);return}
  try{const r=await fetch('data?k='+encodeURIComponent(key)+(needHist?'&hist=1':''),{cache:'no-store'});
   if(r.status===403){dead=true;$('off').textContent='This link isn\'t valid any more. Get the current one from Kinetik: Settings, Dashboard.';$('off').style.display='block';return}
   if(!r.ok)throw new Error(r.status);
   const d=await r.json();interval=d.interval||1000;cap=d.cap||600;colors=d.colors||colors;
-  if(d.cards&&!cards){cards=d.cards;short=d.short||{};build()}
+  if(d.cards&&(d.lv!==lv||!cards)){cards=d.cards;lv=d.lv;build()}
+  if(!d.cards&&d.lv!==lv)needHist=true;
   if(d.themes&&!$('theme').options.length){d.themes.forEach((t,i)=>{const o=el('option','',$('theme'));o.value=i;o.textContent=t});$('theme').onchange=e=>applyTheme(+e.target.value)}
   if(d.hist){hist=d.hist;needHist=false}
   else if(d.seq!==seq){if(d.seq-seq>3)needHist=true;for(const id in d.v){const a=hist[id]||(hist[id]=[]);a.push(d.v[id]);if(a.length>cap)a.splice(0,a.length-cap)}}
@@ -7153,7 +7341,7 @@ class OverlayForm : Form
 // ======================================================================= Live dashboard window
 // Cards with the current readings and graphs of the last few minutes. The cards are laid out to fit the window: the grid
 // with the most room per card wins, and the text and graphs scale with it. Only exists while open.
-// Themes (Dash.Themes): Modern, rounded cards in the stat colours; Terminal and Amber, a monochrome text terminal.
+// Themes (Dash.Themes): Modern, rounded cards in the stat colours; Terminal, Amber and Yellow, a monochrome text terminal.
 class DashboardForm : Form
 {
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int v, int size);
@@ -7168,16 +7356,18 @@ class DashboardForm : Form
 
     static Look LookFor(int theme)
     {
-        if (theme == 1 || theme == 2)
+        if (theme >= 1 && theme <= 3)
         {
-            bool amber = theme == 2;
-            Color t = amber ? Color.FromArgb(255, 182, 40) : Color.FromArgb(90, 255, 120);
-            Color bg = amber ? Color.FromArgb(12, 7, 0) : Color.FromArgb(3, 10, 5);
+            bool amber = theme == 2, yellow = theme == 3;
+            Color t = yellow ? Color.FromArgb(255, 226, 0) : amber ? Color.FromArgb(255, 182, 40) : Color.FromArgb(90, 255, 120);
+            Color bg = yellow ? Color.Black : amber ? Color.FromArgb(12, 7, 0) : Color.FromArgb(3, 10, 5);
             return new Look
             {
                 Term = true, Bg = bg, Card = bg, Text = t,
-                Edge = amber ? Color.FromArgb(150, 92, 12) : Color.FromArgb(34, 140, 62), Sub = amber ? Color.FromArgb(185, 118, 22) : Color.FromArgb(46, 170, 80),
-                Dim = Color.FromArgb(55, t), Grid = Color.FromArgb(40, t), Alt = amber ? Color.FromArgb(255, 232, 180) : Color.FromArgb(205, 255, 215)
+                Edge = yellow ? Color.FromArgb(150, 132, 0) : amber ? Color.FromArgb(150, 92, 12) : Color.FromArgb(34, 140, 62),
+                Sub = yellow ? Color.FromArgb(200, 178, 0) : amber ? Color.FromArgb(185, 118, 22) : Color.FromArgb(46, 170, 80),
+                Dim = Color.FromArgb(55, t), Grid = Color.FromArgb(40, t),
+                Alt = yellow ? Color.FromArgb(255, 255, 190) : amber ? Color.FromArgb(255, 232, 180) : Color.FromArgb(205, 255, 215)
             };
         }
         return new Look { Bg = Theme.Bg, Card = Theme.Card, Edge = Theme.Border, Text = Theme.Text, Sub = Theme.Sub, Dim = Theme.CardHover, Grid = Theme.Border, Alt = Theme.Accent };
@@ -7272,7 +7462,8 @@ class DashboardForm : Form
 
         // The grid: try every column count and keep the one whose cards get the most room. If even the best can't
         // keep cards at MinScale, fall back to as many natural-size columns as fit, and scroll.
-        int count = Dash.Cards.Length, cols = 1;
+        var views = Dash.Views(c);
+        int count = Math.Max(1, views.Count), cols = 1;
         float best = 0;
         for (int tc = 1; tc <= count; tc++)
         {
@@ -7324,11 +7515,12 @@ class DashboardForm : Form
 
         int n = Math.Max(2, Math.Min(Dash.Capacity, c.DashMinutes * 60000 / Math.Max(250, c.Interval)));
         float u = k * Math.Max(MinScale, Math.Min(MaxScale, Math.Min(ch / (CardH * k), cw / (CardW * k)))); // the cards' layout unit
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < views.Count; i++)
         {
             int col = i % cols, row = i / cols;
-            DrawCard(g, L, new RectangleF(pad + col * (cw + gap), top + row * (ch + gap), cw, ch), Dash.Cards[i], s, c, n, u);
+            DrawCard(g, L, new RectangleF(pad + col * (cw + gap), top + row * (ch + gap), cw, ch), views[i], s, c, n, u);
         }
+        if (views.Count == 0) Str(g, Case(L, "No cards are switched on. Choose them in Settings → Dashboard."), fBtn, L.Sub, pad, top);
 
         if (L.Term) // scanlines over the whole window
         {
@@ -7362,9 +7554,9 @@ class DashboardForm : Form
     }
 
     // u is the layout unit: one pixel at 96 DPI and 100% card scale.
-    void DrawCard(Graphics g, Look L, RectangleF r, DashCard d, Snapshot s, Settings c, int n, float u)
+    void DrawCard(Graphics g, Look L, RectangleF r, DashView d, Snapshot s, Settings c, int n, float u)
     {
-        Color col = L.Term ? L.Text : Dash.ColorOf(d.Color, c);
+        Color col = L.Term ? L.Text : Dash.ColorOf(d.Card.Color, c);
         float x = r.X + 14 * u, y = r.Y + 12 * u, right = r.Right - 14 * u, bottom = r.Bottom - 12 * u;
         string name = Dash.NameOf(d.Name, s);
         float titleH = g.MeasureString("Ag", fTitle).Height;
@@ -7401,14 +7593,14 @@ class DashboardForm : Form
         // average and peak first, then readings from the bottom of the list.
         float rowH = g.MeasureString("Ag", fRow).Height + 1 * u, smallH = g.MeasureString("Ag", fSmall).Height;
         float bigH = g.MeasureString("0", fBig).Height;
-        bool legend = d.Graph.Length > 1;
-        float minGraph = 34 * u, legendH = legend ? smallH + 4 * u : 4 * u;
+        bool legend = d.Graph.Length > 1, graph = d.Graph.Length > 0;
+        float minGraph = graph ? 34 * u : 0, legendH = legend ? smallH + 4 * u : graph ? 4 * u : 0;
         float room = bottom - minGraph - legendH - body;
         var h = Dash.History(d.Big, n).Where(v => !double.IsNaN(v)).ToArray();
-        bool stats = h.Length > 1 && d.Graph.Contains(d.Big);
+        bool stats = h.Length > 1 && graph && d.Graph[0] == d.Big;
         float leftH = bigH + smallH + (stats ? 2 * smallH : 0);
         if (leftH > room && stats) { stats = false; leftH = bigH + smallH; }
-        int maxRows = Math.Max(0, Math.Min(5, (int)(room / rowH)));
+        int maxRows = Math.Max(0, Math.Min(graph ? 5 : 9, (int)(room / rowH)));
 
         // Left: the main reading, what it is, and its average and peak over the graph's span
         float half = r.Width * 0.44f;
@@ -7419,8 +7611,8 @@ class DashboardForm : Form
         Str(g, Case(L, d.BigLabel), fSmall, L.Sub, x, ly);
         if (stats)
         {
-            Str(g, "avg " + StatsBar.FormatValue(d.Big, h.Average(), s), fSmall, L.Sub, x, ly + smallH);
-            Str(g, (L.Term ? "max " : "peak ") + StatsBar.FormatValue(d.Big, h.Max(), s), fSmall, L.Sub, x, ly + 2 * smallH);
+            Str(g, "avg " + Format(d.Big, h.Average(), s), fSmall, L.Sub, x, ly + smallH);
+            Str(g, (L.Term ? "max " : "peak ") + Format(d.Big, h.Max(), s), fSmall, L.Sub, x, ly + 2 * smallH);
         }
 
         // Right: more readings (ones this PC doesn't have are left out); the terminal joins them with dot leaders
@@ -7445,10 +7637,13 @@ class DashboardForm : Form
 
         float infoBottom = Math.Max(body - 4 * u + leftH, ry);
         var gr = new RectangleF(x, infoBottom + legendH + 2 * u, right - x, bottom - (infoBottom + legendH + 2 * u));
-        if (gr.Height >= 12 * u) DrawGraph(g, L, gr, d, c, n, u);
+        if (graph && gr.Height >= 12 * u) DrawGraph(g, L, gr, d, c, n, u);
     }
 
-    void DrawGraph(Graphics g, Look L, RectangleF r, DashCard d, Settings c, int n, float u)
+    static string Format(string id, double v, Snapshot s) { return id == "TotalPower" ? v.ToString("0") + " W" : StatsBar.FormatValue(id, v, s);
+    }
+
+    void DrawGraph(Graphics g, Look L, RectangleF r, DashView d, Settings c, int n, float u)
     {
         using (var p = new Pen(L.Grid) { DashStyle = L.Term ? DashStyle.Dot : DashStyle.Solid })
             for (int i = 1; i < 4; i++) { float yy = (float)Math.Round(r.Y + r.Height * i / 4) + 0.5f; g.DrawLine(p, r.X, yy, r.Right, yy); }
@@ -7456,7 +7651,7 @@ class DashboardForm : Form
         var series = d.Graph.Select(id => Dash.History(id, n)).ToArray();
         double max = d.Pct ? 100 : 0;
         if (!d.Pct) { foreach (var h in series) foreach (var v in h) if (!double.IsNaN(v) && v > max) max = v; max = max > 0 ? max * 1.15 : 1; }
-        Func<int, Color> colOf = i => L.Term ? (i == 0 ? L.Text : L.Alt) : Dash.ColorOf(d.Cols[i], c);
+        Func<int, Color> colOf = i => L.Term ? (i == 0 ? L.Text : L.Alt) : Dash.SeriesColor(d, i, c);
         for (int i = series.Length - 1; i >= 0; i--)
         {
             if (L.Term && i == 0) Columns(g, r, series[i], n, max, colOf(i), u);
@@ -7467,8 +7662,7 @@ class DashboardForm : Form
             float smallH = g.MeasureString("Ag", fSmall).Height, lx = r.X, sq = Math.Max(6, 8 * u);
             for (int i = 0; i < d.Graph.Length; i++)
             {
-                string label; if (!Dash.Short.TryGetValue(d.Graph[i], out label)) label = d.Graph[i];
-                label = Case(L, label);
+                string label = Case(L, Dash.Label(d.Card.Key, d.Graph[i]));
                 var box = new RectangleF(lx, r.Y - 4 * u - (smallH + sq) / 2, sq, sq);
                 if (L.Term)
                 {
@@ -7884,10 +8078,15 @@ class ReorderList : Control
     readonly Func<string, bool> isOn;
     readonly Action<string, bool> setOn;
     readonly string dividerDesc;
+    readonly Func<string, Stats.Info> infoOf; // each row's title, icon and colour
 
     public ReorderList(Settings c, List<string> items, int width, Func<string, bool> isOn, Action<string, bool> setOn, string dividerDesc)
+        : this(c, items, width, isOn, setOn, dividerDesc, null) { }
+
+    public ReorderList(Settings c, List<string> items, int width, Func<string, bool> isOn, Action<string, bool> setOn, string dividerDesc, Func<string, Stats.Info> infoOf)
     {
         this.c = c; this.items = items; this.isOn = isOn; this.setOn = setOn; this.dividerDesc = dividerDesc;
+        this.infoOf = infoOf ?? (id => Stats.Get(id, c));
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
         BackColor = Theme.Bg; TabStop = true;
         for (int i = 0; i < items.Count; i++) pos[items[i]] = i * Step;
@@ -7939,7 +8138,7 @@ class ReorderList : Control
         if (DownRect(y).Contains(pt)) return i < items.Count - 1 ? "down" : "none";
         if (UpRect(y).Contains(pt)) return i > 0 ? "up" : "none";
         if (SwitchRect(y, divider).Contains(pt)) return divider ? "remove" : "toggle";
-        if (IconRect(y).Contains(pt)) return "icon";
+        if (IconClicked != null && IconRect(y).Contains(pt)) return "icon";
         return "body";
     }
 
@@ -8130,7 +8329,7 @@ class ReorderList : Control
     void DrawRow(Graphics g, int i)
     {
         string id = items[i];
-        var info = Stats.Get(id, c);
+        var info = infoOf(id);
         bool divider = Settings.IsDivider(id), on = isOn(id), lifted = i == drag, hot = i == hover && drag < 0;
         float y = pos[id];
         var r = new RectangleF(0, y, Width - 1, RowH);
@@ -8345,6 +8544,7 @@ class SettingsForm : Form
     ReorderList arrangeList;
     string pendingSelect;
     int gpuCount = -1;
+    string dashEditCard = "cpu"; // the card whose stats the Dashboard page is showing
 
     public SettingsForm(StatsBar bar)
     {
@@ -9024,8 +9224,67 @@ class SettingsForm : Form
         var mins = new[] { 1, 2, 5, 10 };
         Add(Icons.Clock, Theme.Accent, "Graph length", "How far back the graphs go. History starts when the dashboard opens.",
             Combo(mins.Select(m => m + (m == 1 ? " minute" : " minutes")).ToArray(), Math.Max(0, Array.IndexOf(mins, c.DashMinutes)), i => { c.DashMinutes = mins[i]; Apply(); bar.RefreshDashboard(); }, 130));
-        Add(Icons.Palette, Theme.Accent, "Theme", "Modern, or a text terminal in green or amber. The window's header and the web page have a theme picker too.",
+        Add(Icons.Palette, Theme.Accent, "Theme", "Modern, or a text terminal in green, amber or yellow. The window's header and the web page have a theme picker too.",
             Combo(Dash.Themes, c.DashTheme, i => { c.DashTheme = i; Apply(); bar.RefreshDashboard(); }, 150));
+
+        Header("Layout");
+        Hint("Drag the cards into order and switch off the ones you don't want. Stats you switch off aren't measured for the dashboard.", 40);
+        var layout = Dash.GetLayout(c);
+        Func<string, Stats.Info> cardInfo = key =>
+        {
+            var card = Dash.Cards.First(x => x.Key == key);
+            return new Stats.Info { Title = card.Title, Short = card.Title, Icon = card.Icon, Default = card.Icon, Color = Dash.ColorOf(card.Color, c) };
+        };
+        var cardList = new ReorderList(c, layout.Cards.Select(x => x.Key.Key).ToList(), RowW,
+            key => Dash.GetLayout(c).Cards.First(x => x.Key.Key == key).Value,
+            (key, on) =>
+            {
+                var L = Dash.GetLayout(c);
+                int i = L.Cards.FindIndex(x => x.Key.Key == key);
+                L.Cards[i] = new KeyValuePair<DashCard, bool>(L.Cards[i].Key, on);
+                Dash.SaveLayout(c, L);
+            }, null, cardInfo) { Margin = new Padding(0, 4, 0, 8) };
+        cardList.Moved += order =>
+        {
+            var L = Dash.GetLayout(c);
+            L.Cards = order.Select(k => L.Cards.First(x => x.Key.Key == k)).ToList();
+            Dash.SaveLayout(c, L); Apply(); bar.RefreshDashboard();
+        };
+        cardList.Toggled += id => { Apply(); bar.RefreshDashboard(); };
+        list.Controls.Add(cardList);
+
+        Header("Stats in a card");
+        var keys = Dash.Cards.Select(x => x.Key).ToList();
+        if (!keys.Contains(dashEditCard)) dashEditCard = "cpu";
+        string ek = dashEditCard;
+        Add(Icons.Layers, Theme.Accent, "Card", "Switch its stats on or off and drag them into order. The first one that's on is the card's big reading.",
+            Combo(Dash.Cards.Select(x => x.Title).ToArray(), keys.IndexOf(ek), i => { dashEditCard = keys[i]; BeginInvoke((Action)RefreshPage); }, 170));
+        Func<string, Stats.Info> statInfo = id => id == "TotalPower"
+            ? new Stats.Info { Title = "Total power (CPU + GPU)", Short = "PWR", Icon = Icons.Bolt, Default = Icons.Bolt, Color = c.CpuColor }
+            : Stats.Get(id, c);
+        var statList = new ReorderList(c, layout.Stats[ek].Select(x => x.Key).ToList(), RowW,
+            id => Dash.GetLayout(c).Stats[ek].First(x => x.Key == id).Value,
+            (id, on) =>
+            {
+                var L = Dash.GetLayout(c);
+                var l = L.Stats[ek];
+                int i = l.FindIndex(x => x.Key == id);
+                l[i] = new KeyValuePair<string, bool>(id, on);
+                Dash.SaveLayout(c, L);
+            }, null, statInfo) { Margin = new Padding(0, 4, 0, 8) };
+        statList.Moved += order =>
+        {
+            var L = Dash.GetLayout(c);
+            var l = L.Stats[ek];
+            L.Stats[ek] = order.Select(id => l.First(x => x.Key == id)).ToList();
+            Dash.SaveLayout(c, L); Apply(); bar.RefreshDashboard();
+        };
+        statList.Toggled += id => { Apply(); bar.RefreshDashboard(); };
+        list.Controls.Add(statList);
+        Add(Icons.Gear, Theme.Sub, "Reset layout", "Every card and stat back to how they started", Btn("Reset", (s, e) =>
+        {
+            c.DashCards = ""; c.DashStats = ""; Apply(); bar.RefreshDashboard(); RefreshPage();
+        }));
 
         Header("Web dashboard");
         var web = new Toggle { On = c.WebDashboard };
