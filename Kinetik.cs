@@ -64,6 +64,8 @@ class Settings
     public bool Disk = false, DiskRead = false, DiskWrite = false, DiskFree = false;
     public bool Processes = false, Uptime = false;
     public bool PcBattery = true, BatTime = false, Batteries = true, DeviceNames = false;
+    public bool NowPlaying = false; public int NowPlayingChars = 32; // the song playing, from Windows' media controls
+    public bool NowPlayingCorner = true; public int NowPlayingOffset = 0; // in the taskbar's left corner (MediaCorner), shifted right by pixels
     public string Order = DefaultOrder;
     public string GpuSource = ""; // "" = auto, otherwise the GPU's name
     public string PingHost = "1.1.1.1";
@@ -130,7 +132,8 @@ class Settings
     public int AnimFps = 60, TrayStyle = 0, AppBackground = 0; // icon animation frame rate; tray icon background (see TrayIconArt.Styles)
 
     // Every stat that can appear on the bar, in default order. Dividers ("Sep1", "Sep2", ...) are added by the user.
-    public const string DefaultOrder = "Up,Down,NetTotal,NetApp,Ping,Wifi,PublicIp,Vpn,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit,RamTemp," +
+    // Now playing comes first: the bar grows to the left, so the song's changing length never moves the other stats.
+    public const string DefaultOrder = "NowPlaying,Up,Down,NetTotal,NetApp,Ping,Wifi,PublicIp,Vpn,Cpu,CpuCores,CpuClock,CpuTemp,CpuPower,Ram,RamGb,RamCommit,RamTemp," +
         "Gpu,GpuTemp,GpuHotspot,GpuMemTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower,Fps,BaseFps,FpsLow,FpsLow01,FrameTime,Latency," +
         "Disk,DiskRead,DiskWrite,DiskFree,SsdTemp,Processes,Uptime,Clock,Date,PcBattery,BatTime,Batteries";
     public static readonly string[] StatIds = DefaultOrder.Split(',');
@@ -138,14 +141,14 @@ class Settings
     // The widget has its own order (grouped by hardware) and its own set of stats that are switched on.
     public const string DefaultWidgetOrder = "Cpu,CpuTemp,CpuClock,CpuPower,CpuCores,Gpu,GpuTemp,GpuHotspot,GpuMemTemp,GpuClock,GpuFan,GpuVram,GpuVramPct,GpuPower," +
         "Fps,BaseFps,FpsLow,FpsLow01,FrameTime,Latency,Ram,RamGb,RamCommit,RamTemp,Down,Up,NetTotal,NetApp,Ping,Wifi,PublicIp,Vpn," +
-        "Disk,DiskRead,DiskWrite,DiskFree,SsdTemp,Processes,Uptime,Clock,Date,PcBattery,BatTime,Batteries";
+        "Disk,DiskRead,DiskWrite,DiskFree,SsdTemp,Processes,Uptime,Clock,Date,PcBattery,BatTime,Batteries,NowPlaying";
     public const string DefaultWidgetItems = "Cpu,CpuTemp,CpuClock,Gpu,GpuTemp,GpuVram,Ram,RamGb,Down,Up,Wifi";
     public static readonly string[] WidgetIds = DefaultWidgetOrder.Split(',');
 
     // The game overlay likewise has its own order and selection, with the frame rate first.
     public const string DefaultOverlayOrder = "Fps,BaseFps,FpsLow,FpsLow01,FrameTime,Latency,Cpu,CpuTemp,CpuPower,CpuClock,CpuCores," +
         "Gpu,GpuTemp,GpuHotspot,GpuMemTemp,GpuPower,GpuClock,GpuFan,GpuVram,GpuVramPct,Ram,RamGb,RamCommit,RamTemp," +
-        "Down,Up,NetTotal,NetApp,Ping,Wifi,PublicIp,Vpn,Disk,DiskRead,DiskWrite,DiskFree,SsdTemp,Processes,Uptime,Clock,Date,PcBattery,BatTime,Batteries";
+        "Down,Up,NetTotal,NetApp,Ping,Wifi,PublicIp,Vpn,Disk,DiskRead,DiskWrite,DiskFree,SsdTemp,Processes,Uptime,Clock,Date,PcBattery,BatTime,Batteries,NowPlaying";
     public const string DefaultOverlayItems = "Fps,Cpu,CpuTemp,Gpu,GpuTemp,Ram";
     public static readonly string[] OverlayIds = DefaultOverlayOrder.Split(',');
 
@@ -290,6 +293,7 @@ class Settings
         IconScale = cl(IconScale, 20, 400); RowGap = cl(RowGap, 0, 50);
         DividerStyle = cl(DividerStyle, 0, 3); DividerHeight = cl(DividerHeight, 10, 400);
         DashMinutes = cl(DashMinutes, 1, 10); DashTheme = cl(DashTheme, 0, Dash.Themes.Length - 1); DashW = cl(DashW, 420, 4000); DashH = cl(DashH, 360, 3000); WebPort = cl(WebPort, 1024, 65535);
+        NowPlayingChars = cl(NowPlayingChars, 12, 80); NowPlayingOffset = cl(NowPlayingOffset, 0, 3000);
         TrayStyle = cl(TrayStyle, 0, TrayIconArt.Styles.Length - 1); AppBackground = cl(AppBackground, 0, Theme.Backgrounds.Length - 1);
         if (float.IsNaN(FontSize) || FontSize < 0 || FontSize > 72) FontSize = 0;
         if (string.IsNullOrWhiteSpace(FontName) || FontName.Length > 100) FontName = DefaultFont();
@@ -396,6 +400,8 @@ class Snapshot
     public string NetAppName = ""; public double NetAppRate = -1;
     public string PublicIp = "", Vpn = null;                    // Vpn: null = not checked, "" = none, else its name
     public string FpsApp = "", FpsStatus = "";
+    public string MediaTitle = "", MediaArtist = "", MediaAlbum = "", MediaApp = ""; // now playing; "" = nothing
+    public bool MediaPlaying; public double MediaPos = -1, MediaDur = -1;           // seconds, -1 = unknown
 }
 
 // Reads sensors through LibreHardwareMonitorLib: CPU temperature/power (needs admin + PawnIO driver)
@@ -1094,12 +1100,22 @@ class Sampler
         ManageWifi();
         if (c.Wants("Wifi")) { s.Wifi = wifiPct; s.WifiName = wifiName; }
         ManageBatteries();
+        if (c.Wants("NowPlaying")) ReadMedia(s);
         s.Uptime = GetTickCount64() / 1000.0;
         return s;
     }
 
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
+
+    // Now playing. If Windows' media controls aren't there (older Windows) or stop answering, try again in a while.
+    DateTime mediaRetry;
+    void ReadMedia(Snapshot s)
+    {
+        if (DateTime.UtcNow < mediaRetry) return;
+        try { MediaWatch.Fill(s); }
+        catch { mediaRetry = DateTime.UtcNow.AddSeconds(30); }
+    }
 
     static readonly int OwnPid = Process.GetCurrentProcess().Id;
     // Set by the bar while its hover graph for a network stat is open, so per-app traffic is measured for it.
@@ -1526,7 +1542,7 @@ static class Icons
         K("Graphics card", Gpu), K("Memory chip", Vram), K("Monitor", Monitor), K("Drive", Disk), K("Drive read", DiskRead), K("Drive write", DiskWrite),
         K("List", List), K("Clock", Clock), K("Hourglass", Hourglass), K("Pulse", Pulse), K("Battery", (g, r, c) => Battery(g, r, c, 70)),
         K("Headphones", Headphones), K("Mouse", Mouse), K("Keyboard", Keyboard), K("Controller", Gamepad), K("Heart", Heart), K("Star", Star),
-        K("Dot", Dot), K("Gear", Gear),
+        K("Dot", Dot), K("Gear", Gear), K("Music", Music),
     };
 
     static KeyValuePair<string, IconFn> K(string name, IconFn fn) { return new KeyValuePair<string, IconFn>(name, fn); }
@@ -1866,6 +1882,19 @@ static class Icons
         using (var b = new SolidBrush(c)) g.FillPolygon(b, pts);
     }
 
+    public static void Music(Graphics g, RectangleF r, Color c)
+    {
+        float s = Math.Min(r.Width, r.Height), x = r.X + (r.Width - s) / 2, y = r.Y + (r.Height - s) / 2;
+        using (var p = P(c, s)) using (var b = new SolidBrush(c))
+        {
+            g.FillEllipse(b, x + s * 0.06f, y + s * 0.66f, s * 0.34f, s * 0.25f);
+            g.FillEllipse(b, x + s * 0.54f, y + s * 0.56f, s * 0.34f, s * 0.25f);
+            g.DrawLine(p, x + s * 0.38f, y + s * 0.77f, x + s * 0.38f, y + s * 0.2f);
+            g.DrawLine(p, x + s * 0.86f, y + s * 0.67f, x + s * 0.86f, y + s * 0.1f);
+            using (var beam = new Pen(c, Math.Max(2f, s * 0.15f))) g.DrawLine(beam, x + s * 0.38f, y + s * 0.2f, x + s * 0.86f, y + s * 0.1f);
+        }
+    }
+
     public static void Dot(Graphics g, RectangleF r, Color c)
     {
         float d = r.Width * 0.44f;
@@ -2126,6 +2155,7 @@ static class Stats
         { "PcBattery", new[] { "PC battery", "Battery", "BatColor", "BAT" } },
         { "BatTime", new[] { "Battery time left", "Hourglass", "BatColor", "LEFT" } },
         { "Batteries", new[] { "Bluetooth device batteries", "Headphones", "BatColor", "BT" } },
+        { "NowPlaying", new[] { "Now playing", "Music", "MiscColor", "NOW" } },
     };
     static readonly string[] dividerDef = { "Divider", "Divider", "LabelColor", "|" };
 
@@ -2694,6 +2724,7 @@ class StatsBar : Form
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.Close(); // flushes unsaved settings
+        if (corner != null) { corner.Close(); corner.Dispose(); corner = null; }
         if (dash != null) dash.Close();
         WebDash.Stop();
         if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; } // otherwise a dead icon lingers until hovered
@@ -2792,7 +2823,26 @@ class StatsBar : Form
 
     protected override bool ShowWithoutActivation { get { return true; } }
 
-    protected override void OnMouseUp(MouseEventArgs e) { Clicked(e.Button); base.OnMouseUp(e); }
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        var sg = SegAt(e.Location);
+        if (sg != null && sg.Id == "NowPlaying" && (e.Button == MouseButtons.Left || e.Button == MouseButtons.Middle))
+            MediaWatch.Control(e.Button == MouseButtons.Left ? 0 : 1);
+        else Clicked(e.Button);
+        base.OnMouseUp(e);
+    }
+
+    DateTime wheelAt;
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        var sg = SegAt(PointToClient(Cursor.Position));
+        if (sg != null && sg.Id == "NowPlaying" && (DateTime.UtcNow - wheelAt).TotalMilliseconds > 350)
+        {
+            wheelAt = DateTime.UtcNow;
+            MediaWatch.Control(e.Delta < 0 ? 1 : -1);
+        }
+        base.OnMouseWheel(e);
+    }
 
     public void Clicked(MouseButtons b)
     {
@@ -2950,6 +3000,7 @@ class StatsBar : Form
         else if (kind == "gpu" && s.HasGpu) title += " · " + s.GpuName;
         string value = string.Join("  ", sg.Parts.Select(p => p.Text));
         if (value == "" && sg.Bars != null) value = FormatValue(id, Num(id, s), s);
+        if (id == "NowPlaying" && s.MediaTitle != "") value = s.MediaTitle;
 
         Queue<double> q;
         var hist = hoverHist.TryGetValue(id, out q) ? q.ToArray() : new double[0];
@@ -2970,6 +3021,16 @@ class StatsBar : Form
         if (id == "Vpn" && !string.IsNullOrEmpty(s.Vpn)) lines.Add("Connection: " + s.Vpn);
         if (id == "PublicIp") lines.Add("From api.ipify.org, every 5 minutes");
         if (id == "Batteries") foreach (var d in Sampler.Devices) lines.Add("• " + d.Key + ": " + d.Value + "%");
+        if (id == "NowPlaying")
+        {
+            if (s.MediaArtist != "" || s.MediaAlbum != "") lines.Add(string.Join("  ·  ", new[] { s.MediaArtist, s.MediaAlbum }.Where(x => x != "")));
+            var where = new List<string>();
+            if (s.MediaApp != "") where.Add(s.MediaApp);
+            if (s.MediaDur > 0) where.Add(MediaWatch.Time(s.MediaPos) + " / " + MediaWatch.Time(s.MediaDur));
+            if (!s.MediaPlaying) where.Add("paused");
+            if (where.Count > 0) lines.Add(string.Join("  ·  ", where));
+            lines.Add("Click: play or pause  ·  Scroll: next or previous track");
+        }
 
         if (kind == "net")
         {
@@ -3062,6 +3123,17 @@ class StatsBar : Form
                     add(s.Ping >= 0 ? s.Ping + " ms" : "-- ms", "888 ms", s.Ping == -2 || s.Ping >= c.WarnPing ? c.WarnColor : s.Ping < 0 ? dim : val);
                     break;
                 case "Wifi": if (s.Wifi >= 0) add(s.Wifi + "%", "100%", s.Wifi <= 25 ? c.WarnColor : val); break;
+                case "NowPlaying":
+                    if (s.MediaTitle != "")
+                    {
+                        string t = s.MediaArtist != "" ? s.MediaTitle + " – " + s.MediaArtist : s.MediaTitle;
+                        if (t.Length > c.NowPlayingChars) t = t.Substring(0, c.NowPlayingChars - 1).TrimEnd() + "…";
+                        var sg = seg();
+                        if (!customIcon && !asText && MediaWatch.Art != null) sg.Icon = MediaWatch.DrawArt;
+                        sg.Parts.Add(new Part { Text = t, Template = t, Color = s.MediaPlaying ? val : dim, Bold = s.MediaPlaying });
+                        segs.Add(sg);
+                    }
+                    break;
                 case "Cpu": add(s.Cpu.ToString("0") + "%", "100%", warn(s.Cpu, c.WarnCpu)); break;
                 case "CpuCores":
                     if (s.Cores.Length > 0) { var sg = seg(); sg.Bars = s.Cores; sg.BarColor = info.Color; segs.Add(sg); }
@@ -3252,14 +3324,19 @@ class StatsBar : Form
     // Works out what goes where. Key sums up everything that affects the pixels, so unchanged frames can be skipped.
     public BarLayout Build(int height, bool light)
     {
+        return Build(height, light, Cfg.OrderList(), id => Cfg.IsOn(id) && !(id == "NowPlaying" && cornerOn), true);
+    }
+
+    public BarLayout Build(int height, bool light, List<string> ids, Func<string, bool> isOn, bool hint)
+    {
         Color val = Cfg.ValueColor, dim = Cfg.LabelColor;
         if (Cfg.AutoTheme)
         {
             val = light ? Color.FromArgb(20, 20, 20) : Color.White;
             dim = light ? Color.FromArgb(95, 95, 100) : Color.FromArgb(150, 150, 160);
         }
-        var segs = BuildSegments(Sampler.Snap, val, dim, Cfg.OrderList(), Cfg.IsOn, false);
-        if (segs.Count == 0) segs.Add(new Seg { Icon = Icons.Gear, IconColor = dim, Parts = { new Part { Text = "Right-click for settings", Template = "", Color = dim } } });
+        var segs = BuildSegments(Sampler.Snap, val, dim, ids, isOn, false);
+        if (segs.Count == 0 && hint) segs.Add(new Seg { Icon = Icons.Gear, IconColor = dim, Parts = { new Part { Text = "Right-click for settings", Template = "", Color = dim } } });
 
         float fontPx = FontPx(height);
         EnsureFonts(fontPx);
@@ -3308,6 +3385,7 @@ class StatsBar : Form
         foreach (var seg in segs)
         {
             k.Append('|').Append(seg.IconColor.ToArgb()).Append(seg.Label);
+            if (seg.Icon == (IconFn)MediaWatch.DrawArt && MediaWatch.Art != null) k.Append('#').Append(MediaWatch.Art.GetHashCode()); // a new cover
             foreach (var p in seg.Parts) k.Append(';').Append(p.Text).Append(p.Color.ToArgb());
             if (seg.Bars != null) foreach (var b in seg.Bars) k.Append(',').Append((int)b);
         }
@@ -3355,7 +3433,7 @@ class StatsBar : Form
                 else if (seg.Icon != null)
                 {
                     var ir = new RectangleF(sx, cy + (rowH - icon) / 2, icon, icon);
-                    if (Cfg.BarAnimate) anim.Draw(g, seg.Id, seg.Icon, ir, seg.IconColor, seg.Act, seg.IconColor == Cfg.WarnColor);
+                    if (Cfg.BarAnimate && seg.Icon != (IconFn)MediaWatch.DrawArt) anim.Draw(g, seg.Id, seg.Icon, ir, seg.IconColor, seg.Act, seg.IconColor == Cfg.WarnColor);
                     else seg.Icon(g, ir, seg.IconColor);
                     sx += icon + L.IconGap;
                 }
@@ -3448,7 +3526,9 @@ class StatsBar : Form
         RECT tb;
         if (taskbar == IntPtr.Zero || !GetWindowRect(taskbar, out tb)) return;
         bool hideBar = fullscreen && (fsScreen == null || Screen.FromHandle(taskbar).DeviceName == fsScreen.DeviceName);
-        if (hideBar) { ShowWindow(Handle, 0); shownL = null; return; }
+        cornerOn = Cfg.NowPlaying && Cfg.NowPlayingCorner && TaskbarCentred();
+        if (hideBar) { ShowWindow(Handle, 0); shownL = null; if (corner != null) corner.HideNow(); return; }
+        SyncCorner(tb, force);
 
         TaskbarHeight = tb.B - tb.T;
         var L = Build(TaskbarHeight, LightTaskbar());
@@ -3468,6 +3548,60 @@ class StatsBar : Form
         ShowWindow(Handle, 8); // SW_SHOWNA
         SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // stay above the taskbar
         if (freshSnap && hover != null && hover.Visible) ShowHover();
+    }
+
+    // ---- Now playing in the taskbar's left corner, apart from the stats, so a song's changing length never moves them.
+    // Only while the taskbar's icons are centred: left-aligned, the Start button is in that corner, so it stays in the bar.
+    MediaCorner corner;
+    bool cornerOn;
+    bool centred = true; DateTime centredAt;
+
+    static int WindowsBuild()
+    {
+        try { using (var k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion")) return int.Parse((string)k.GetValue("CurrentBuildNumber", "0")); }
+        catch { return 0; }
+    }
+    static readonly int WinBuild = WindowsBuild();
+
+    bool TaskbarCentred()
+    {
+        if ((DateTime.UtcNow - centredAt).TotalSeconds < 5) return centred;
+        centredAt = DateTime.UtcNow;
+        bool c = WinBuild >= 22000; // Windows 10's icons always start at the left
+        try
+        {
+            using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"))
+                if (k != null && Convert.ToInt32(k.GetValue("TaskbarAl", 1)) == 0) c = false;
+        }
+        catch { }
+        return centred = c;
+    }
+
+    void SyncCorner(RECT tb, bool force)
+    {
+        var s = Sampler.Snap;
+        if (!cornerOn || s.MediaTitle == "") { if (corner != null) corner.HideNow(); return; }
+        int h = tb.B - tb.T;
+        if (h <= 0 || tb.R - tb.L < h * 4) { if (corner != null) corner.HideNow(); return; } // vertical or hidden taskbar
+        if (corner == null) corner = new MediaCorner(this);
+        var L = Build(h, LightTaskbar(), new List<string> { "NowPlaying" }, id => id == "NowPlaying", false);
+        int x = tb.L + (int)(h * 0.2f) + Cfg.NowPlayingOffset;
+        if (force || corner.Last == null || corner.Last.Key != L.Key || corner.X != x || corner.Y != tb.T) corner.Push(L, h, x, tb.T);
+        corner.UpdateTip(s);
+    }
+
+    // The tooltip for Now playing: everything the strip has no room for, and how to control it.
+    public static string MediaTip(Snapshot s)
+    {
+        var lines = new List<string> { s.MediaTitle };
+        if (s.MediaArtist != "" || s.MediaAlbum != "") lines.Add(string.Join("  ·  ", new[] { s.MediaArtist, s.MediaAlbum }.Where(x => x != "")));
+        var where = new List<string>();
+        if (s.MediaApp != "") where.Add(s.MediaApp);
+        if (s.MediaDur > 0) where.Add(MediaWatch.Time(s.MediaPos) + " / " + MediaWatch.Time(s.MediaDur));
+        if (!s.MediaPlaying) where.Add("paused");
+        if (where.Count > 0) lines.Add(string.Join("  ·  ", where));
+        lines.Add("Click: play or pause  ·  Scroll: next or previous track  ·  Right-click: Kinetik");
+        return string.Join("\n", lines);
     }
 
     // ---- The bar on other monitors' taskbars: one mirror per secondary taskbar, left of where its clock sits.
@@ -4184,6 +4318,38 @@ class MirrorBar : Form
 
     protected override void OnMouseUp(MouseEventArgs e) { bar.Clicked(e.Button); base.OnMouseUp(e); }
     protected override void Dispose(bool disposing) { surface.Dispose(); base.Dispose(disposing); }
+}
+
+// Now playing in the taskbar's left corner (StatsBar.SyncCorner). Click to play or pause, middle-click for the next
+// track, scroll to change track; right-click opens Kinetik's menu like the bar.
+class MediaCorner : MirrorBar
+{
+    readonly StatsBar owner;
+    readonly ToolTip tip = new ToolTip { InitialDelay = 400, ShowAlways = true };
+    string tipText = "";
+    DateTime wheelAt;
+
+    public MediaCorner(StatsBar bar) : base(bar) { owner = bar; }
+
+    public void UpdateTip(Snapshot s)
+    {
+        var t = StatsBar.MediaTip(s);
+        if (t != tipText) { tipText = t; tip.SetToolTip(this, t); }
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left || e.Button == MouseButtons.Middle) MediaWatch.Control(e.Button == MouseButtons.Left ? 0 : 1);
+        else owner.Clicked(e.Button);
+    }
+
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        if ((DateTime.UtcNow - wheelAt).TotalMilliseconds > 350) { wheelAt = DateTime.UtcNow; MediaWatch.Control(e.Delta < 0 ? 1 : -1); }
+        base.OnMouseWheel(e);
+    }
+
+    protected override void Dispose(bool disposing) { if (disposing) tip.Dispose(); base.Dispose(disposing); }
 }
 
 // ======================================================================= Sharing readings with companion apps
@@ -5044,6 +5210,158 @@ poll();
 </script></body></html>";
 }
 
+// ======================================================================= Now playing
+// What's playing, from Windows' media controls: the same source as the volume flyout, so Spotify, browsers and media
+// players all show up. A class of its own, so its Windows Runtime types only load once the Now playing stat is on.
+static class MediaWatch
+{
+    static Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager mgr;
+    static string artFor;
+    static volatile Bitmap art;
+    public static Bitmap Art { get { return art; } } // the current track's cover, square; null when there isn't one
+
+    // Windows Runtime calls are asynchronous; this waits for one, on the sampler's thread (never the UI's).
+    static T Wait<T>(Windows.Foundation.IAsyncOperation<T> op)
+    {
+        var info = (Windows.Foundation.IAsyncInfo)op;
+        var sw = Stopwatch.StartNew();
+        while (info.Status == Windows.Foundation.AsyncStatus.Started)
+        {
+            if (sw.ElapsedMilliseconds > 2000) { info.Cancel(); throw new TimeoutException("media controls didn't answer"); }
+            Thread.Sleep(5);
+        }
+        if (info.Status != Windows.Foundation.AsyncStatus.Completed) throw new InvalidOperationException("media controls: " + info.Status);
+        return op.GetResults();
+    }
+
+    public static void Fill(Snapshot s)
+    {
+        if (mgr == null) mgr = Wait(Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager.RequestAsync());
+        var session = mgr.GetCurrentSession();
+        if (session == null) { SetArt(null, null); return; }
+        var props = Wait(session.TryGetMediaPropertiesAsync());
+        var playback = session.GetPlaybackInfo();
+        var tl = session.GetTimelineProperties();
+        s.MediaTitle = (props.Title ?? "").Trim();
+        s.MediaArtist = (props.Artist ?? "").Trim();
+        if (s.MediaArtist == "") s.MediaArtist = (props.AlbumArtist ?? "").Trim();
+        s.MediaAlbum = (props.AlbumTitle ?? "").Trim();
+        s.MediaApp = AppName(session.SourceAppUserModelId ?? "");
+        s.MediaPlaying = playback.PlaybackStatus == Windows.Media.Control.GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+        if (tl.EndTime > TimeSpan.Zero)
+        {
+            double pos = tl.Position.TotalSeconds, since = (DateTimeOffset.Now - tl.LastUpdatedTime).TotalSeconds;
+            if (s.MediaPlaying && since > 0 && since < 3600) pos += since; // apps only report the position now and then
+            s.MediaDur = tl.EndTime.TotalSeconds;
+            s.MediaPos = Math.Max(0, Math.Min(s.MediaDur, pos));
+        }
+        if (s.MediaTitle == "") { SetArt(null, null); return; }
+        SetArt(s.MediaTitle + "\n" + s.MediaArtist + "\n" + s.MediaAlbum + "\n" + (props.Thumbnail != null), props.Thumbnail);
+    }
+
+    // Loads a new track's cover once. The old one is left to the garbage collector, since the bar may still be drawing it.
+    static void SetArt(string key, Windows.Storage.Streams.IRandomAccessStreamReference thumb)
+    {
+        if (key == artFor) return;
+        artFor = key;
+        Bitmap b = null;
+        if (thumb != null) try { b = LoadArt(thumb); } catch { }
+        art = b;
+    }
+
+    static Bitmap LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference thumb)
+    {
+        var stream = Wait(thumb.OpenReadAsync());
+        try
+        {
+            ulong size = stream.Size;
+            if (size == 0 || size > 16 * 1024 * 1024) return null;
+            var reader = new Windows.Storage.Streams.DataReader(stream);
+            try
+            {
+                Wait(reader.LoadAsync((uint)size));
+                var bytes = new byte[size];
+                reader.ReadBytes(bytes);
+                using (var ms = new MemoryStream(bytes))
+                using (var img = Image.FromStream(ms))
+                {
+                    // The middle square, at a size that stays sharp on the bar, the widget and hover cards.
+                    int side = Math.Min(img.Width, img.Height);
+                    var b = new Bitmap(96, 96, PixelFormat.Format32bppPArgb);
+                    using (var g = Graphics.FromImage(b))
+                    {
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                        g.DrawImage(img, new Rectangle(0, 0, 96, 96), (img.Width - side) / 2, (img.Height - side) / 2, side, side, GraphicsUnit.Pixel);
+                    }
+                    return b;
+                }
+            }
+            finally { reader.Dispose(); }
+        }
+        finally { stream.Dispose(); }
+    }
+
+    // The cover as a stat icon, with rounded corners; a music note when there's no cover.
+    public static void DrawArt(Graphics g, RectangleF r, Color c)
+    {
+        var a = art;
+        if (a == null) { Icons.Music(g, r, c); return; }
+        var state = g.Save();
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        using (var path = Icons.Round(r, r.Width * 0.22f))
+        {
+            g.SetClip(path, CombineMode.Intersect);
+            g.DrawImage(a, r);
+        }
+        g.Restore(state);
+    }
+
+    // 0 = play or pause, 1 = next track, -1 = previous track. On a worker thread, so a slow app can't hold up the bar.
+    public static void Control(int what)
+    {
+        var m = mgr;
+        if (m == null) return;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try
+            {
+                var session = m.GetCurrentSession();
+                if (session == null) return;
+                Wait(what == 0 ? session.TryTogglePlayPauseAsync() : what > 0 ? session.TrySkipNextAsync() : session.TrySkipPreviousAsync());
+            }
+            catch { }
+        });
+    }
+
+    public static string Time(double secs)
+    {
+        if (secs < 0) return "--:--";
+        var t = TimeSpan.FromSeconds(secs);
+        return t.TotalHours >= 1 ? (int)t.TotalHours + ":" + t.Minutes.ToString("00") + ":" + t.Seconds.ToString("00") : (int)t.TotalMinutes + ":" + t.Seconds.ToString("00");
+    }
+
+    // A friendly name for the app that's playing, from its app ID ("Spotify.exe", "MSEdge", "308046B0AF4A39CB"…).
+    static string AppName(string id)
+    {
+        string l = id.ToLowerInvariant();
+        if (l.Contains("spotify")) return "Spotify";
+        if (l.Contains("msedge")) return "Microsoft Edge";
+        if (l.Contains("chrome")) return "Chrome";
+        if (l.Contains("firefox") || l == "308046b0af4a39cb") return "Firefox";
+        if (l.Contains("opera")) return "Opera";
+        if (l.Contains("brave")) return "Brave";
+        if (l.Contains("zunemusic")) return "Media Player";
+        if (l.Contains("zunevideo")) return "Films & TV";
+        if (l.Contains("vlc")) return "VLC";
+        if (l.Contains("applemusic") || l.Contains("itunes")) return "Apple Music";
+        int bang = id.IndexOf('!'); if (bang > 0) id = id.Substring(0, bang);
+        if (id.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) id = id.Substring(0, id.Length - 4);
+        int dot = id.LastIndexOf('.'); if (dot >= 0 && dot < id.Length - 1) id = id.Substring(dot + 1);
+        int us = id.IndexOf('_'); if (us > 0) id = id.Substring(0, us);
+        return id;
+    }
+}
+
 // ======================================================================= Wi-Fi signal
 // Signal quality of the connected Wi-Fi network, straight from Windows' Native Wifi API (no netsh, no polling a process).
 static class WifiSignal
@@ -5732,6 +6050,7 @@ class IconAnim
             case "Processes": return Clamp(s.Processes / 600.0);
             case "PcBattery": return SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online ? 0.6 : 0.1;
             case "DiskFree": return 0.1;
+            case "NowPlaying": return s.MediaPlaying ? 0.5 : 0;
             default: return 0.15;
         }
     }
@@ -6675,6 +6994,14 @@ class WidgetForm : Form
                 if (s.Wifi >= 0) { r = Graph(row(s.WifiName != "" ? "Wi-Fi (" + s.WifiName + ")" : "Wi-Fi signal", s.Wifi + "%"), s.Wifi, 100, 1); r.Frac = s.Wifi / 100.0; r.Warn = s.Wifi <= 25; }
                 break;
             case "Cpu": Pct(row("CPU usage", s.Cpu.ToString("0") + "%"), s.Cpu, c.WarnCpu); break;
+            case "NowPlaying":
+                if (s.MediaTitle != "")
+                {
+                    r = row(s.MediaTitle, s.MediaArtist);
+                    r.Dim = !s.MediaPlaying;
+                    if (!customIcon && MediaWatch.Art != null) r.Icon = MediaWatch.DrawArt;
+                }
+                break;
             case "CpuCores":
                 if (s.Cores.Length > 0) { r = row("CPU cores", "max " + s.Cores.Max().ToString("0") + "%"); r.Kind = 4; r.Cores = s.Cores; }
                 break;
@@ -8831,6 +9158,15 @@ class SettingsForm : Form
         Switch(Icons.Text, c.BatColor, "Show device names", "DeviceNames");
         Stat("PcBattery", "Laptops only");
         Stat("BatTime", "Laptops only, while unplugged");
+
+        Header("Media");
+        Stat("NowPlaying", "The song or video playing in Spotify, a browser or a media player, with its cover. Click it to play or pause; scroll over it to change track.");
+        SliderRow(Icons.Text, c.MiscColor, "Now playing length", "NowPlayingChars", 12, 80, " chars", "Longer titles are shortened to fit");
+        Add(Icons.Monitor, c.MiscColor, "Where", "The left corner keeps it apart from your stats. It needs centred taskbar icons; otherwise it joins the stats.",
+            Combo(new[] { "Left corner of the taskbar", "With the other stats" }, c.NowPlayingCorner ? 0 : 1, i => { c.NowPlayingCorner = i == 0; Apply(); }, 200));
+        var shift = new NumericUpDown { Minimum = 0, Maximum = 3000, Increment = 10, Value = Math.Max(0, Math.Min(3000, c.NowPlayingOffset)), Width = 90, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle };
+        shift.ValueChanged += (s, e) => { c.NowPlayingOffset = (int)shift.Value; Apply(); };
+        Add(Icons.Spacing, c.MiscColor, "Shift right", "Pixels from the corner, e.g. to clear the Widgets button", shift);
     }
 
     void Stat(string id, string desc = null)
