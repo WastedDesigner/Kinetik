@@ -2655,6 +2655,7 @@ class StatsBar : Form
         Sampler = new Sampler(Cfg, () => { try { BeginInvoke((Action)Render); } catch { } });
         Watch = new GameWatch(this);
         hoverTimer.Tick += (s, e) => ShowHover();
+        mediaTimer.Tick += (s, e) => { mediaTimer.Stop(); if (mediaAnchor.Contains(Cursor.Position)) ShowMediaCard(mediaAnchor); };
         HandleCreated += (s, e) =>
         {
             Sampler.Start(); TrimSoon(15000); ListenForShow();
@@ -2725,6 +2726,7 @@ class StatsBar : Form
     {
         if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.Close(); // flushes unsaved settings
         if (corner != null) { corner.Close(); corner.Dispose(); corner = null; }
+        if (mediaCard != null) { mediaCard.Close(); mediaCard.Dispose(); mediaCard = null; }
         if (dash != null) dash.Close();
         WebDash.Stop();
         if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; } // otherwise a dead icon lingers until hovered
@@ -2998,9 +3000,9 @@ class StatsBar : Form
         string title = info.Title;
         if (kind == "cpu" && s.CpuName != "") title += " · " + s.CpuName;
         else if (kind == "gpu" && s.HasGpu) title += " · " + s.GpuName;
+        if (id == "NowPlaying") { mediaAnchor = new Rectangle(lastX + (int)sg.X, lastY, (int)Math.Ceiling(sg.W), TaskbarHeight); ShowMediaCard(mediaAnchor); return; }
         string value = string.Join("  ", sg.Parts.Select(p => p.Text));
         if (value == "" && sg.Bars != null) value = FormatValue(id, Num(id, s), s);
-        if (id == "NowPlaying" && s.MediaTitle != "") value = s.MediaTitle;
 
         Queue<double> q;
         var hist = hoverHist.TryGetValue(id, out q) ? q.ToArray() : new double[0];
@@ -3021,16 +3023,6 @@ class StatsBar : Form
         if (id == "Vpn" && !string.IsNullOrEmpty(s.Vpn)) lines.Add("Connection: " + s.Vpn);
         if (id == "PublicIp") lines.Add("From api.ipify.org, every 5 minutes");
         if (id == "Batteries") foreach (var d in Sampler.Devices) lines.Add("• " + d.Key + ": " + d.Value + "%");
-        if (id == "NowPlaying")
-        {
-            if (s.MediaArtist != "" || s.MediaAlbum != "") lines.Add(string.Join("  ·  ", new[] { s.MediaArtist, s.MediaAlbum }.Where(x => x != "")));
-            var where = new List<string>();
-            if (s.MediaApp != "") where.Add(s.MediaApp);
-            if (s.MediaDur > 0) where.Add(MediaWatch.Time(s.MediaPos) + " / " + MediaWatch.Time(s.MediaDur));
-            if (!s.MediaPlaying) where.Add("paused");
-            if (where.Count > 0) lines.Add(string.Join("  ·  ", where));
-            lines.Add("Click: play or pause  ·  Scroll: next or previous track");
-        }
 
         if (kind == "net")
         {
@@ -3053,13 +3045,18 @@ class StatsBar : Form
     }
 
     // ---- Layout model ----
-    public class Part { public string Text, Template; public Color Color; public bool Bold; public float W; }
+    public class Part
+    {
+        public string Text, Template; public Color Color; public bool Bold; public float W;
+        public string Full; public bool Marquee; public float FullW; // Marquee: shows Full, scrolling it when it's wider than W
+    }
     public class Seg
     {
         public IconFn Icon; public string Label; public Color IconColor; public float LabelW;
         public string Id; public double Act; // what the icon's animation follows
         public List<Part> Parts = new List<Part>();
         public double[] Bars; public Color BarColor;
+        public bool Solo; public float IconSize; // Solo: a column to itself, with a taskbar-icon-sized icon
         public bool IsSep; public float Mark; // divider: size of the line / dot
         public float W, X, Y; // width, and where it was last drawn
     }
@@ -3069,6 +3066,7 @@ class StatsBar : Form
         public int Width;
         public float FontPx, Icon, IconGap, PartGap, SegGap, Pad, BarW, BarGap, LineH, RowH;
         public string Key;
+        public bool Scrolls; // a title is scrolling, so it's repainted every frame
     }
 
     public static string Speed(double b)
@@ -3126,11 +3124,12 @@ class StatsBar : Form
                 case "NowPlaying":
                     if (s.MediaTitle != "")
                     {
-                        string t = s.MediaArtist != "" ? s.MediaTitle + " – " + s.MediaArtist : s.MediaTitle;
+                        string full = s.MediaArtist != "" ? s.MediaTitle + " – " + s.MediaArtist : s.MediaTitle, t = full;
                         if (t.Length > c.NowPlayingChars) t = t.Substring(0, c.NowPlayingChars - 1).TrimEnd() + "…";
                         var sg = seg();
+                        sg.Solo = true;
                         if (!customIcon && !asText && MediaWatch.Art != null) sg.Icon = MediaWatch.DrawArt;
-                        sg.Parts.Add(new Part { Text = t, Template = t, Color = s.MediaPlaying ? val : dim, Bold = s.MediaPlaying });
+                        sg.Parts.Add(new Part { Text = t, Template = t, Full = full, Marquee = true, Color = s.MediaPlaying ? val : dim, Bold = s.MediaPlaying });
                         segs.Add(sg);
                     }
                     break;
@@ -3360,12 +3359,23 @@ class StatsBar : Form
             }
             float w = 0;
             if (seg.Label != null) { seg.LabelW = Measure(seg.Label, bold); w += seg.LabelW + L.IconGap; }
-            else if (seg.Icon != null) w += L.Icon + L.IconGap;
+            else if (seg.Icon != null)
+            {
+                seg.IconSize = seg.Solo ? (float)Math.Round(height * 0.5f) : L.Icon; // Solo: as big as the taskbar's app icons
+                w += seg.IconSize + L.IconGap;
+            }
             if (seg.Bars != null) w += seg.Bars.Length * (L.BarW + L.BarGap) - L.BarGap;
             for (int i = 0; i < seg.Parts.Count; i++)
             {
                 var p = seg.Parts[i];
-                p.W = Math.Max(Measure(p.Text, p.Bold ? bold : font), TemplateWidth(p.Template, p.Bold));
+                if (p.Marquee)
+                {
+                    var f = p.Bold ? bold : font;
+                    p.FullW = Measure(p.Full, f);
+                    p.W = Math.Min(p.FullW, Measure(new string('a', Cfg.NowPlayingChars), f)); // room for about that many characters
+                    if (p.FullW > p.W + 0.5f) L.Scrolls = true;
+                }
+                else p.W = Math.Max(Measure(p.Text, p.Bold ? bold : font), TemplateWidth(p.Template, p.Bold));
                 w += p.W + (i > 0 ? L.PartGap : 0);
             }
             seg.W = (float)Math.Ceiling(w);
@@ -3375,7 +3385,7 @@ class StatsBar : Form
         foreach (var seg in segs)
         {
             var last = L.Cols.Count > 0 ? L.Cols[L.Cols.Count - 1] : null;
-            if (Cfg.TwoLines && !seg.IsSep && last != null && last.Count == 1 && !last[0].IsSep) last.Add(seg);
+            if (Cfg.TwoLines && !seg.IsSep && !seg.Solo && last != null && last.Count == 1 && !last[0].IsSep && !last[0].Solo) last.Add(seg);
             else L.Cols.Add(new List<Seg> { seg });
         }
         L.Width = Math.Max(4, (int)Math.Ceiling(L.Pad * 2 + L.Cols.Sum(col => col.Max(sg => sg.W)) + L.SegGap * (L.Cols.Count - 1)));
@@ -3386,7 +3396,7 @@ class StatsBar : Form
         {
             k.Append('|').Append(seg.IconColor.ToArgb()).Append(seg.Label);
             if (seg.Icon == (IconFn)MediaWatch.DrawArt && MediaWatch.Art != null) k.Append('#').Append(MediaWatch.Art.GetHashCode()); // a new cover
-            foreach (var p in seg.Parts) k.Append(';').Append(p.Text).Append(p.Color.ToArgb());
+            foreach (var p in seg.Parts) k.Append(';').Append(p.Marquee ? p.Full : p.Text).Append(p.Color.ToArgb());
             if (seg.Bars != null) foreach (var b in seg.Bars) k.Append(',').Append((int)b);
         }
         L.Key = k.ToString();
@@ -3432,10 +3442,11 @@ class StatsBar : Form
                 }
                 else if (seg.Icon != null)
                 {
-                    var ir = new RectangleF(sx, cy + (rowH - icon) / 2, icon, icon);
+                    float isz = seg.IconSize > 0 ? seg.IconSize : icon;
+                    var ir = new RectangleF(sx, col.Count == 1 ? (height - isz) / 2f : cy + (rowH - isz) / 2, isz, isz);
                     if (Cfg.BarAnimate && seg.Icon != (IconFn)MediaWatch.DrawArt) anim.Draw(g, seg.Id, seg.Icon, ir, seg.IconColor, seg.Act, seg.IconColor == Cfg.WarnColor);
                     else seg.Icon(g, ir, seg.IconColor);
-                    sx += icon + L.IconGap;
+                    sx += isz + L.IconGap;
                 }
                 if (seg.Bars != null)
                 {
@@ -3453,12 +3464,32 @@ class StatsBar : Form
                     var p = seg.Parts[i];
                     if (i > 0) sx += L.PartGap;
                     brush.Color = p.Color;
-                    g.DrawString(p.Text, p.Bold ? bold : font, brush, sx, cy + (rowH - L.LineH) / 2, Fmt);
+                    if (p.Marquee) DrawMarquee(g, p, sx, cy + (rowH - L.LineH) / 2, height, L.FontPx);
+                    else g.DrawString(p.Text, p.Bold ? bold : font, brush, sx, cy + (rowH - L.LineH) / 2, Fmt);
                     sx += p.W;
                 }
             }
             cx += colW + L.SegGap;
         }
+    }
+
+    // A title too long for its room scrolls: it holds at the start, scrolls through, and comes round again.
+    readonly Stopwatch marquee = Stopwatch.StartNew();
+    string marqueeText;
+
+    void DrawMarquee(Graphics g, Part p, float x, float y, int height, float fontPx)
+    {
+        var f = p.Bold ? bold : font;
+        if (p.FullW <= p.W + 0.5f) { g.DrawString(p.Full, f, brush, x, y, Fmt); return; }
+        if (p.Full != marqueeText) { marqueeText = p.Full; marquee.Restart(); } // a new title starts from the beginning
+        float gap = fontPx * 3, cycle = p.FullW + gap, speed = fontPx * 2.4f; // pixels per second
+        double hold = 2.5, ph = marquee.Elapsed.TotalSeconds % (hold + cycle / speed);
+        float off = ph < hold ? 0 : (float)((ph - hold) * speed);
+        var st = g.Save();
+        g.SetClip(new RectangleF(x, 0, p.W, height));
+        g.DrawString(p.Full, f, brush, x - off, y, Fmt);
+        if (off > 0) g.DrawString(p.Full, f, brush, x - off + cycle, y, Fmt);
+        g.Restore(st);
     }
 
     void PaintDivider(Graphics g, BarLayout L, Seg seg, float x, int height)
@@ -3529,6 +3560,7 @@ class StatsBar : Form
         cornerOn = Cfg.NowPlaying && Cfg.NowPlayingCorner && TaskbarCentred();
         if (hideBar) { ShowWindow(Handle, 0); shownL = null; if (corner != null) corner.HideNow(); return; }
         SyncCorner(tb, force);
+        if (mediaCard != null && mediaCard.Visible) { if (Sampler.Snap.MediaTitle == "") mediaCard.Hide(); else mediaCard.ShowFor(mediaCard.From); }
 
         TaskbarHeight = tb.B - tb.T;
         var L = Build(TaskbarHeight, LightTaskbar());
@@ -3587,21 +3619,26 @@ class StatsBar : Form
         var L = Build(h, LightTaskbar(), new List<string> { "NowPlaying" }, id => id == "NowPlaying", false);
         int x = tb.L + (int)(h * 0.2f) + Cfg.NowPlayingOffset;
         if (force || corner.Last == null || corner.Last.Key != L.Key || corner.X != x || corner.Y != tb.T) corner.Push(L, h, x, tb.T);
-        corner.UpdateTip(s);
+        else corner.KeepOnTop(); // like the bar: clicking the taskbar raises it over us, and its glass would blur the strip
     }
 
-    // The tooltip for Now playing: everything the strip has no room for, and how to control it.
-    public static string MediaTip(Snapshot s)
+    // ---- The Now playing card, opened by hovering the corner strip or the bar's Now playing.
+    MediaCard mediaCard;
+    Rectangle mediaAnchor;
+    readonly System.Windows.Forms.Timer mediaTimer = new System.Windows.Forms.Timer { Interval = 350 };
+
+    public void HoverMedia(Rectangle anchor)
     {
-        var lines = new List<string> { s.MediaTitle };
-        if (s.MediaArtist != "" || s.MediaAlbum != "") lines.Add(string.Join("  ·  ", new[] { s.MediaArtist, s.MediaAlbum }.Where(x => x != "")));
-        var where = new List<string>();
-        if (s.MediaApp != "") where.Add(s.MediaApp);
-        if (s.MediaDur > 0) where.Add(MediaWatch.Time(s.MediaPos) + " / " + MediaWatch.Time(s.MediaDur));
-        if (!s.MediaPlaying) where.Add("paused");
-        if (where.Count > 0) lines.Add(string.Join("  ·  ", where));
-        lines.Add("Click: play or pause  ·  Scroll: next or previous track  ·  Right-click: Kinetik");
-        return string.Join("\n", lines);
+        mediaAnchor = anchor;
+        if (mediaCard != null && mediaCard.Visible) { mediaCard.From = anchor; return; }
+        if (!mediaTimer.Enabled) mediaTimer.Start();
+    }
+
+    void ShowMediaCard(Rectangle anchor)
+    {
+        if (Sampler.Snap.MediaTitle == "") return;
+        if (mediaCard == null) mediaCard = new MediaCard(this);
+        mediaCard.ShowFor(anchor);
     }
 
     // ---- The bar on other monitors' taskbars: one mirror per secondary taskbar, left of where its clock sits.
@@ -3663,7 +3700,8 @@ class StatsBar : Form
     {
         anim.Advance();
         SpinTray();
-        if (Cfg.BarAnimate && shownL != null && IsHandleCreated && lastX != int.MinValue) Push(shownL, shownH, lastX, lastY);
+        if ((Cfg.BarAnimate || (shownL != null && shownL.Scrolls)) && shownL != null && IsHandleCreated && lastX != int.MinValue) Push(shownL, shownH, lastX, lastY);
+        if (corner != null && corner.Last != null && corner.Last.Scrolls) corner.Push(corner.Last, corner.H, corner.X, corner.Y);
         if (Cfg.BarAnimate) foreach (var m in mirrors) if (m.Last != null) m.Push(m.Last, m.H, m.X, m.Y);
     }
 
@@ -4315,26 +4353,25 @@ class MirrorBar : Form
     }
 
     public void HideNow() { if (IsHandleCreated) ShowWindow(Handle, 0); Last = null; }
+    public void KeepOnTop() { if (Last != null && IsHandleCreated) SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10); }
 
     protected override void OnMouseUp(MouseEventArgs e) { bar.Clicked(e.Button); base.OnMouseUp(e); }
     protected override void Dispose(bool disposing) { surface.Dispose(); base.Dispose(disposing); }
 }
 
 // Now playing in the taskbar's left corner (StatsBar.SyncCorner). Click to play or pause, middle-click for the next
-// track, scroll to change track; right-click opens Kinetik's menu like the bar.
+// track, scroll to change track, hover for the Now playing card; right-click opens Kinetik's menu like the bar.
 class MediaCorner : MirrorBar
 {
     readonly StatsBar owner;
-    readonly ToolTip tip = new ToolTip { InitialDelay = 400, ShowAlways = true };
-    string tipText = "";
     DateTime wheelAt;
 
     public MediaCorner(StatsBar bar) : base(bar) { owner = bar; }
 
-    public void UpdateTip(Snapshot s)
+    protected override void OnMouseMove(MouseEventArgs e)
     {
-        var t = StatsBar.MediaTip(s);
-        if (t != tipText) { tipText = t; tip.SetToolTip(this, t); }
+        if (Last != null) owner.HoverMedia(new Rectangle(X, Y, Last.Width, H));
+        base.OnMouseMove(e);
     }
 
     protected override void OnMouseUp(MouseEventArgs e)
@@ -4349,7 +4386,192 @@ class MediaCorner : MirrorBar
         base.OnMouseWheel(e);
     }
 
-    protected override void Dispose(bool disposing) { if (disposing) tip.Dispose(); base.Dispose(disposing); }
+}
+
+// The card that opens over Now playing: the cover or video thumbnail (in its own shape), what's playing and where,
+// its progress, and previous / play-pause / next buttons. It closes once the mouse has left both it and what it
+// opened from.
+class MediaCard : Form
+{
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int v, int size);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint f);
+
+    const float CardW = 320; // at 96 DPI
+    readonly StatsBar bar;
+    public Rectangle From; // the strip or bar segment it belongs to, on screen
+    RectangleF prevR, playR, nextR;
+    string hot = "";
+    readonly System.Windows.Forms.Timer watch = new System.Windows.Forms.Timer { Interval = 300 };
+
+    public MediaCard(StatsBar bar)
+    {
+        this.bar = bar;
+        FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; StartPosition = FormStartPosition.Manual;
+        BackColor = Color.FromArgb(32, 32, 36); DoubleBuffered = true;
+        watch.Tick += (s, e) =>
+        {
+            var p = Cursor.Position;
+            if (!Bounds.Contains(p) && !From.Contains(p)) { watch.Stop(); Hide(); }
+        };
+    }
+
+    protected override CreateParams CreateParams
+    {
+        get { var cp = base.CreateParams; cp.ExStyle |= 0x80 | 0x8 | 0x08000000; return cp; } // TOOLWINDOW | TOPMOST | NOACTIVATE
+    }
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        int one = 1; DwmSetWindowAttribute(Handle, 20, ref one, 4);   // dark
+        int round = 2; DwmSetWindowAttribute(Handle, 33, ref round, 4); // rounded corners, like Windows' own flyouts
+    }
+
+    protected override void Dispose(bool disposing) { if (disposing) watch.Dispose(); base.Dispose(disposing); }
+
+    float K { get { return DeviceDpi / 96f; } }
+
+    // Opens the card above the strip or segment it's for, or lays it out again for a new track.
+    public void ShowFor(Rectangle from)
+    {
+        From = from;
+        float k = K;
+        int w = (int)(CardW * k), h;
+        using (var g = CreateGraphics()) h = (int)Math.Ceiling(Arrange(g, false));
+        var area = Screen.FromRectangle(from).WorkingArea;
+        int x = Math.Max(area.Left + (int)(8 * k), Math.Min(area.Right - w - (int)(8 * k), from.Left));
+        int y = Math.Max(area.Top, Math.Min(area.Bottom, from.Top) - h - (int)(10 * k));
+        var b = new Rectangle(x, y, w, h);
+        if (Bounds != b) Bounds = b;
+        if (!Visible) Show();
+        SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10); // above the taskbar
+        Invalidate();
+        watch.Start();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.Clear(BackColor);
+        Arrange(g, true);
+    }
+
+    // Lays the card out, drawing it when paint is set. Returns its height.
+    float Arrange(Graphics g, bool paint)
+    {
+        float k = K, pad = 12 * k, x = pad, y = pad, cw = CardW * k - 2 * pad;
+        var s = bar.Sampler.Snap;
+        var a = MediaWatch.ArtFull;
+        if (a != null)
+        {
+            float th = Math.Min(190 * k, cw * a.Height / Math.Max(1, a.Width)), tw = Math.Min(cw, th * a.Width / Math.Max(1, a.Height));
+            if (paint)
+            {
+                var r = new RectangleF(x + (cw - tw) / 2, y, tw, th);
+                var st = g.Save();
+                using (var path = Icons.Round(r, 6 * k)) { g.SetClip(path, CombineMode.Intersect); g.DrawImage(a, r); }
+                g.Restore(st);
+            }
+            y += th + 10 * k;
+        }
+        var fT = Theme.UI(11f, FontStyle.Bold); var fS = Theme.UI(9.5f); var fX = Theme.UI(8.5f);
+        using (var wrap = new StringFormat { Trimming = StringTrimming.EllipsisWord })
+        using (var line = new StringFormat(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter })
+        {
+            string title = s.MediaTitle == "" ? "Nothing playing" : s.MediaTitle;
+            float th = Math.Min(fT.GetHeight(g) * 2, g.MeasureString(title, fT, (int)cw, wrap).Height); // two lines at most
+            if (paint) using (var b = new SolidBrush(Theme.Text)) g.DrawString(title, fT, b, new RectangleF(x, y, cw, th + 1), wrap);
+            y += th + 2 * k;
+            string who = string.Join("  ·  ", new[] { s.MediaArtist, s.MediaAlbum }.Where(t => t != ""));
+            if (who != "")
+            {
+                if (paint) using (var b = new SolidBrush(Theme.Text)) g.DrawString(who, fS, b, new RectangleF(x, y, cw, fS.GetHeight(g) + 1), line);
+                y += fS.GetHeight(g) + 1 * k;
+            }
+            string app = s.MediaApp + (s.MediaPlaying ? "" : (s.MediaApp != "" ? "  ·  " : "") + "Paused");
+            if (app != "")
+            {
+                if (paint) using (var b = new SolidBrush(Theme.Sub)) g.DrawString(app, fX, b, new RectangleF(x, y, cw, fX.GetHeight(g) + 1), line);
+                y += fX.GetHeight(g);
+            }
+            if (s.MediaDur > 0)
+            {
+                y += 10 * k;
+                float frac = (float)Math.Max(0, Math.Min(1, s.MediaPos / s.MediaDur));
+                if (paint)
+                {
+                    Theme.FillRound(g, new RectangleF(x, y, cw, 4 * k), 2 * k, Theme.CardHover);
+                    if (frac > 0) Theme.FillRound(g, new RectangleF(x, y, Math.Max(4 * k, cw * frac), 4 * k), 2 * k, Theme.Accent);
+                }
+                y += 8 * k;
+                if (paint)
+                    using (var b = new SolidBrush(Theme.Sub))
+                    {
+                        g.DrawString(MediaWatch.Time(s.MediaPos), fX, b, x, y);
+                        string end = MediaWatch.Time(s.MediaDur);
+                        g.DrawString(end, fX, b, x + cw - g.MeasureString(end, fX).Width, y);
+                    }
+                y += fX.GetHeight(g);
+            }
+        }
+        // Previous, play or pause, next
+        y += 6 * k;
+        float bs = 36 * k, mid = x + cw / 2;
+        playR = new RectangleF(mid - bs / 2, y, bs, bs);
+        prevR = new RectangleF(playR.X - bs - 16 * k, y, bs, bs);
+        nextR = new RectangleF(playR.Right + 16 * k, y, bs, bs);
+        if (paint)
+        {
+            Button(g, prevR, "prev", s.MediaPlaying);
+            Button(g, playR, "play", s.MediaPlaying);
+            Button(g, nextR, "next", s.MediaPlaying);
+        }
+        return y + bs + pad;
+    }
+
+    void Button(Graphics g, RectangleF r, string kind, bool playing)
+    {
+        if (hot == kind) Theme.FillRound(g, r, r.Height / 2, Theme.CardHover);
+        float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2, u = r.Height / 36f;
+        using (var b = new SolidBrush(Theme.Text))
+        {
+            if (kind == "play")
+            {
+                if (playing) { g.FillRectangle(b, cx - 7 * u, cy - 8 * u, 5 * u, 16 * u); g.FillRectangle(b, cx + 2 * u, cy - 8 * u, 5 * u, 16 * u); }
+                else g.FillPolygon(b, new[] { new PointF(cx - 6 * u, cy - 9 * u), new PointF(cx + 9 * u, cy), new PointF(cx - 6 * u, cy + 9 * u) });
+                return;
+            }
+            float d = kind == "next" ? 1 : -1; // two arrowheads and a bar, pointing the way it skips
+            g.FillPolygon(b, new[] { new PointF(cx - 8 * u * d, cy - 7 * u), new PointF(cx, cy), new PointF(cx - 8 * u * d, cy + 7 * u) });
+            g.FillPolygon(b, new[] { new PointF(cx, cy - 7 * u), new PointF(cx + 8 * u * d, cy), new PointF(cx, cy + 7 * u) });
+            g.FillRectangle(b, d > 0 ? cx + 8 * u : cx - 10 * u, cy - 7 * u, 2 * u, 14 * u);
+        }
+    }
+
+    string PartAt(Point p) { return prevR.Contains(p) ? "prev" : playR.Contains(p) ? "play" : nextR.Contains(p) ? "next" : ""; }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        var h = PartAt(e.Location);
+        if (h != hot) { hot = h; Invalidate(); }
+        Cursor = h != "" ? Cursors.Hand : Cursors.Default;
+        base.OnMouseMove(e);
+    }
+
+    protected override void OnMouseLeave(EventArgs e) { if (hot != "") { hot = ""; Invalidate(); } base.OnMouseLeave(e); }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        if (e.Button == MouseButtons.Left)
+        {
+            var h = PartAt(e.Location);
+            if (h != "") MediaWatch.Control(h == "play" ? 0 : h == "next" ? 1 : -1);
+        }
+        base.OnMouseUp(e);
+    }
 }
 
 // ======================================================================= Sharing readings with companion apps
@@ -5217,8 +5439,9 @@ static class MediaWatch
 {
     static Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager mgr;
     static string artFor;
-    static volatile Bitmap art;
-    public static Bitmap Art { get { return art; } } // the current track's cover, square; null when there isn't one
+    static volatile Bitmap art, artFull;
+    public static Bitmap Art { get { return art; } }         // the current track's cover, square; null when there isn't one
+    public static Bitmap ArtFull { get { return artFull; } } // the same in its own shape (a video's is wide), for the card
 
     // Windows Runtime calls are asynchronous; this waits for one, on the sampler's thread (never the UI's).
     static T Wait<T>(Windows.Foundation.IAsyncOperation<T> op)
@@ -5264,13 +5487,14 @@ static class MediaWatch
     {
         if (key == artFor) return;
         artFor = key;
-        Bitmap b = null;
-        if (thumb != null) try { b = LoadArt(thumb); } catch { }
-        art = b;
+        Bitmap b = null, full = null;
+        if (thumb != null) try { b = LoadArt(thumb, out full); } catch { }
+        art = b; artFull = full;
     }
 
-    static Bitmap LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference thumb)
+    static Bitmap LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference thumb, out Bitmap full)
     {
+        full = null;
         var stream = Wait(thumb.OpenReadAsync());
         try
         {
@@ -5285,7 +5509,15 @@ static class MediaWatch
                 using (var ms = new MemoryStream(bytes))
                 using (var img = Image.FromStream(ms))
                 {
-                    // The middle square, at a size that stays sharp on the bar, the widget and hover cards.
+                    // In its own shape, at most 640 wide, for the card
+                    float sc = Math.Min(1f, 640f / Math.Max(1, img.Width));
+                    full = new Bitmap(Math.Max(1, (int)(img.Width * sc)), Math.Max(1, (int)(img.Height * sc)), PixelFormat.Format32bppPArgb);
+                    using (var g = Graphics.FromImage(full))
+                    {
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                        g.DrawImage(img, 0, 0, full.Width, full.Height);
+                    }
+                    // The middle square, at a size that stays sharp as a taskbar-sized icon.
                     int side = Math.Min(img.Width, img.Height);
                     var b = new Bitmap(96, 96, PixelFormat.Format32bppPArgb);
                     using (var g = Graphics.FromImage(b))
@@ -7588,7 +7820,7 @@ class OverlayForm : Form
         foreach (var seg in segs)
         {
             k.Append('|').Append(seg.Label).Append(seg.IconColor.ToArgb());
-            foreach (var p in seg.Parts) k.Append(';').Append(p.Text).Append(p.Color.ToArgb());
+            foreach (var p in seg.Parts) k.Append(';').Append(p.Marquee ? p.Full : p.Text).Append(p.Color.ToArgb());
             if (seg.Bars != null) foreach (var b in seg.Bars) k.Append(',').Append((int)b);
         }
         var key = k.ToString();
