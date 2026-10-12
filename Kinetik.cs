@@ -79,10 +79,12 @@ class Settings
     public int WidgetX = int.MinValue, WidgetY = int.MinValue; // int.MinValue = top-right corner of the main screen
     public int WidgetWidth = 280, WidgetScale = 100, WidgetOpacity = 88, WidgetRound = 100, WidgetGraphSecs = 60;
     public int WidgetStyle = 0; // 0 bars, 1 graphs, 2 bars and graphs, 3 minimal
-    public int WidgetTheme = 0; // 0 dark, 1 light, 2 match Windows
+    public int WidgetTheme = 0; // legacy: 0 dark, 1 light, 2 match Windows; only read to seed WidgetThemeName
+    public string WidgetThemeName = ""; // a WidgetThemes name, or "Auto" to match Windows
     public int WidgetLayer = 0; // 0 on the desktop (behind windows), 1 normal, 2 always on top
     public bool WidgetLocked = false, WidgetClickThrough = false, WidgetSnap = true, WidgetHeadings = true, WidgetHwNames = true, WidgetShadow = true, WidgetAnimate = true, BarAnimate = true;
     public string WidgetTitle = "";
+    public string WidgetFont = ""; // "" = the default UI font (Segoe UI Variable Text)
     public Color WidgetBg = Color.FromArgb(0, 0, 0, 0); // fully transparent = the theme's own background colour
 
     // Game overlay: a slim always-on-top strip with its own stats, for use while gaming
@@ -294,6 +296,7 @@ class Settings
         DividerStyle = cl(DividerStyle, 0, 3); DividerHeight = cl(DividerHeight, 10, 400);
         DashMinutes = cl(DashMinutes, 1, 10); DashTheme = cl(DashTheme, 0, Dash.Themes.Length - 1); DashW = cl(DashW, 420, 4000); DashH = cl(DashH, 360, 3000); WebPort = cl(WebPort, 1024, 65535);
         NowPlayingChars = cl(NowPlayingChars, 12, 80); NowPlayingOffset = cl(NowPlayingOffset, 0, 3000);
+        if (WidgetThemeName != "Auto" && !WidgetThemes.All.Any(t => t.Name == WidgetThemeName)) WidgetThemeName = WidgetTheme == 1 ? "Light" : WidgetTheme == 2 ? "Auto" : "Midnight";
         TrayStyle = cl(TrayStyle, 0, TrayIconArt.Styles.Length - 1); AppBackground = cl(AppBackground, 0, Theme.Backgrounds.Length - 1);
         if (float.IsNaN(FontSize) || FontSize < 0 || FontSize > 72) FontSize = 0;
         if (string.IsNullOrWhiteSpace(FontName) || FontName.Length > 100) FontName = DefaultFont();
@@ -6962,6 +6965,7 @@ class WidgetForm : Form
     bool dragging, clickThrough;
     Point grab;
     float u = 1, fontU;
+    string fontFam;
     Font fLabel, fValue, fHead, fSmall, fTitle;
     static readonly StringFormat Trim = new StringFormat(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter, LineAlignment = StringAlignment.Center };
     static readonly StringFormat Typo = MakeTypo();
@@ -7119,15 +7123,15 @@ class WidgetForm : Form
     // ---- fonts and theme
     void EnsureFonts()
     {
-        if (fLabel != null && Math.Abs(fontU - u) < 0.001f) return;
+        var fam = c.WidgetFont != "" && FontList.Has(c.WidgetFont) ? c.WidgetFont : Theme.Family;
+        if (fLabel != null && Math.Abs(fontU - u) < 0.001f && fontFam == fam) return;
         DisposeFonts();
-        var fam = Theme.Family;
         fLabel = new Font(fam, 12.5f * u, FontStyle.Regular, GraphicsUnit.Pixel);
         fValue = new Font(fam, 12.5f * u, FontStyle.Bold, GraphicsUnit.Pixel);
         fHead = new Font(fam, 10f * u, FontStyle.Bold, GraphicsUnit.Pixel);
         fSmall = new Font(fam, 10.5f * u, FontStyle.Regular, GraphicsUnit.Pixel);
         fTitle = new Font(fam, 15f * u, FontStyle.Bold, GraphicsUnit.Pixel);
-        fontU = u;
+        fontU = u; fontFam = fam;
     }
 
     void DisposeFonts()
@@ -7137,9 +7141,10 @@ class WidgetForm : Form
     }
 
     static bool appsLight; static DateTime appsLightAt;
-    bool IsLight()
+    bool IsLight() { return WidgetThemes.Resolve(c.WidgetThemeName).Light; }
+
+    public static bool WindowsLight()
     {
-        if (c.WidgetTheme != 2) return c.WidgetTheme == 1;
         if ((DateTime.UtcNow - appsLightAt).TotalSeconds > 3)
         {
             appsLightAt = DateTime.UtcNow;
@@ -7447,17 +7452,19 @@ class WidgetForm : Form
         else if (Layer == 2) SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x1 | 0x2 | 0x10); // stay on top
     }
 
-    void PaintWidget(Graphics g, List<Item> items, int cardW, float pad)
-    {
-        g.Clear(Color.Transparent);
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+    Bitmap layer;
 
-        bool light = IsLight();
-        Color bg = c.WidgetBg.A != 0 ? Color.FromArgb(255, c.WidgetBg) : light ? Color.FromArgb(246, 246, 248) : Color.FromArgb(22, 22, 26);
-        Color text = light ? Color.FromArgb(24, 24, 28) : Color.FromArgb(240, 240, 244);
-        Color sub = light ? Color.FromArgb(96, 96, 106) : Color.FromArgb(150, 150, 162);
+    void PaintWidget(Graphics target, List<Item> items, int cardW, float pad)
+    {
+        target.Clear(Color.Transparent);
+        target.SmoothingMode = SmoothingMode.AntiAlias;
+        target.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        var g = target;
+
+        var th = WidgetThemes.Resolve(c.WidgetThemeName);
+        bool light = th.Light;
+        Color bg = c.WidgetBg.A != 0 ? Color.FromArgb(255, c.WidgetBg) : th.Bg;
+        Color text = th.Text, sub = th.Sub;
         Color track = light ? Color.FromArgb(26, 0, 0, 0) : Color.FromArgb(34, 255, 255, 255);
         Color line = light ? Color.FromArgb(30, 0, 0, 0) : Color.FromArgb(28, 255, 255, 255);
         int alpha = (int)Math.Round(c.WidgetOpacity * 2.55);
@@ -7472,9 +7479,24 @@ class WidgetForm : Form
                 r.Offset(0, 2 * u);
                 Theme.FillRound(g, r, rad + k * 1.6f * u, Color.FromArgb(Math.Max(1, 7 * alpha / 255), 0, 0, 0));
             }
+
+        // ClearType needs solid pixels behind the text. So for a mostly opaque card, the card is drawn solid with ClearType text
+        // on a layer, and the whole layer is then blended in at the card's opacity. A very see-through card keeps grayscale text.
+        bool crisp = alpha >= 150;
+        if (crisp)
+        {
+            if (layer == null || layer.Width != winW || layer.Height != winH) { if (layer != null) layer.Dispose(); layer = new Bitmap(winW, winH, PixelFormat.Format32bppPArgb); }
+            g = Graphics.FromImage(layer);
+            g.Clear(Color.Transparent);
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            g.TextContrast = 2;
+        }
+        else g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
         cardFill = Color.FromArgb(Math.Max(1, alpha), bg);
         animCells.Clear();
-        Theme.FillRound(g, card, rad, Color.FromArgb(Math.Max(1, alpha), bg)); // alpha ≥ 1 so the whole card still catches clicks
+        Theme.FillRound(g, card, rad, crisp ? bg : Color.FromArgb(Math.Max(1, alpha), bg)); // alpha ≥ 1 so the whole card still catches clicks
         if (alpha > 0) Theme.StrokeRound(g, card, rad, line, 1);
 
         float x0 = card.X + pad, x1 = card.Right - pad, y = card.Y + pad;
@@ -7511,6 +7533,17 @@ class WidgetForm : Form
                     break;
             }
             y += h;
+        }
+        if (crisp)
+        {
+            g.Dispose();
+            if (alpha >= 255) target.DrawImageUnscaled(layer, 0, 0);
+            else
+                using (var ia = new ImageAttributes())
+                {
+                    ia.SetColorMatrix(new ColorMatrix { Matrix33 = alpha / 255f });
+                    target.DrawImage(layer, new Rectangle(0, 0, layer.Width, layer.Height), 0, 0, layer.Width, layer.Height, GraphicsUnit.Pixel, ia);
+                }
         }
     }
 
@@ -8356,6 +8389,110 @@ class DashboardForm : Form
     protected override void OnMouseWheel(MouseEventArgs e) { base.OnMouseWheel(e); Invalidate(); }
 }
 
+// ======================================================================= Widget themes
+// The same named palettes as Kinetik Calendar, so every Kinetik app can match.
+class WidgetTheme
+{
+    public readonly string Name; public readonly Color Bg, Text, Sub, Accent; public readonly bool Light;
+    public WidgetTheme(string name, Color bg, Color text, Color sub, Color accent, bool light) { Name = name; Bg = bg; Text = text; Sub = sub; Accent = accent; Light = light; }
+}
+
+static class WidgetThemes
+{
+    static Color C(int r, int g, int b) { return Color.FromArgb(r, g, b); }
+
+    public static readonly WidgetTheme[] All =
+    {
+        new WidgetTheme("Midnight", C(22, 22, 26), C(242, 242, 246), C(168, 168, 180), C(240, 88, 88), false),
+        new WidgetTheme("Navy", C(22, 27, 40), C(236, 240, 248), C(138, 150, 176), C(77, 166, 255), false),
+        new WidgetTheme("Graphite", C(40, 40, 44), C(236, 236, 236), C(160, 160, 166), C(255, 159, 10), false),
+        new WidgetTheme("Nord", C(46, 52, 64), C(236, 239, 244), C(152, 162, 182), C(136, 192, 208), false),
+        new WidgetTheme("Dracula", C(40, 42, 54), C(248, 248, 242), C(150, 156, 192), C(255, 121, 198), false),
+        new WidgetTheme("Solarized", C(0, 43, 54), C(238, 232, 213), C(131, 148, 150), C(203, 75, 22), false),
+        new WidgetTheme("Forest", C(22, 33, 27), C(228, 240, 231), C(138, 166, 148), C(108, 201, 124), false),
+        new WidgetTheme("Ocean", C(12, 29, 45), C(228, 242, 250), C(128, 160, 186), C(56, 198, 232), false),
+        new WidgetTheme("Sunset", C(40, 23, 35), C(250, 236, 240), C(192, 150, 172), C(255, 138, 92), false),
+        new WidgetTheme("Mono", C(10, 10, 10), C(245, 245, 245), C(140, 140, 140), C(245, 245, 245), false),
+        new WidgetTheme("Light", C(246, 246, 248), C(24, 24, 28), C(96, 96, 106), C(230, 70, 70), true),
+        new WidgetTheme("Paper", C(250, 246, 236), C(52, 42, 32), C(132, 116, 96), C(204, 92, 52), true),
+        new WidgetTheme("Frost", C(236, 242, 250), C(20, 30, 48), C(92, 106, 132), C(40, 120, 230), true),
+    };
+
+    public static WidgetTheme Get(string name) { return All.FirstOrDefault(t => t.Name == name) ?? All[0]; }
+
+    // "Auto" follows the Windows light / dark app setting.
+    public static WidgetTheme Resolve(string name) { return name == "Auto" ? Get(WidgetForm.WindowsLight() ? "Light" : "Midnight") : Get(name); }
+}
+
+// A clickable mini preview of one widget theme, matching Kinetik Calendar's theme picker.
+class WidgetThemeTile : Control
+{
+    public readonly string ThemeName;
+    bool selected, hot;
+    float sel;
+    readonly System.Windows.Forms.Timer t = new System.Windows.Forms.Timer { Interval = 15 };
+    static readonly Color[] Bars = { Color.FromArgb(77, 166, 255), Color.FromArgb(56, 198, 180), Color.FromArgb(240, 88, 88) };
+
+    public WidgetThemeTile(string name, bool isSelected)
+    {
+        ThemeName = name; selected = isSelected; sel = isSelected ? 1 : 0;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+        Size = new Size(110, 84);
+        Margin = new Padding(0, 0, 8, 8);
+        Cursor = Cursors.Hand;
+        BackColor = Theme.Bg;
+        t.Tick += (s, e) =>
+        {
+            float target = selected ? 1 : 0;
+            sel += (target - sel) * 0.3f;
+            if (Math.Abs(target - sel) < 0.02f) { sel = target; t.Stop(); }
+            Invalidate();
+        };
+    }
+
+    public void SetSelected(bool v) { if (selected == v) return; selected = v; t.Start(); }
+    protected override void OnMouseEnter(EventArgs e) { hot = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { hot = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void Dispose(bool disposing) { if (disposing) t.Dispose(); base.Dispose(disposing); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.Clear(BackColor);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        var outer = new RectangleF(1, 1, Width - 3, Height - 3);
+        Theme.FillRound(g, outer, 10, hot ? Theme.CardHover : Theme.Card);
+        if (sel > 0) Theme.StrokeRound(g, outer, 10, Color.FromArgb((int)(255 * sel), Theme.Accent), 2);
+        var inner = new RectangleF(8, 8, Width - 16, Height - 34);
+        if (ThemeName == "Auto")
+        {
+            Mini(g, inner, WidgetThemes.Get("Midnight"));
+            var st = g.Save();
+            g.SetClip(new RectangleF(inner.X + inner.Width / 2, inner.Y, inner.Width, inner.Height));
+            Mini(g, inner, WidgetThemes.Get("Light"));
+            g.Restore(st);
+        }
+        else Mini(g, inner, WidgetThemes.Get(ThemeName));
+        TextRenderer.DrawText(g, ThemeName == "Auto" ? "Match Windows" : ThemeName, Theme.UI(9f), new Rectangle(0, Height - 26, Width, 20), selected ? Theme.Text : Theme.Sub,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+    }
+
+    static void Mini(Graphics g, RectangleF r, WidgetTheme th)
+    {
+        Theme.FillRound(g, r, 6, th.Bg);
+        float x = r.X + 7, w = r.Width - 14, y = r.Y + 7;
+        using (var b = new SolidBrush(th.Accent)) g.FillEllipse(b, x, y, 7, 7);
+        Theme.FillRound(g, new RectangleF(x + 11, y + 1, w * 0.45f, 4), 2, th.Text);
+        for (int i = 0; i < 3; i++)
+        {
+            float yy = y + 13 + i * 9;
+            Theme.FillRound(g, new RectangleF(x, yy, 3, 6), 1.5f, Bars[i]);
+            Theme.FillRound(g, new RectangleF(x + 7, yy + 1, w * (0.62f - i * 0.12f), 4), 2, Color.FromArgb(150, th.Sub));
+            Theme.FillRound(g, new RectangleF(x + w - 14, yy + 1, 14, 4), 2, Color.FromArgb(200, th.Text));
+        }
+    }
+}
+
 // ======================================================================= Settings UI
 static class Theme
 {
@@ -8531,8 +8668,8 @@ class Slider : Control
         Value = min + (int)Math.Round((double)(x - t.X) / t.Width * (max - min));
     }
 
-    protected override void OnMouseDown(MouseEventArgs e) { Focus(); if (e.Button == MouseButtons.Left) { dragging = true; SetFromX(e.X); } base.OnMouseDown(e); }
-    protected override void OnMouseMove(MouseEventArgs e) { if (dragging) SetFromX(e.X); base.OnMouseMove(e); }
+    protected override void OnMouseDown(MouseEventArgs e) { Focus(); if (e.Button == MouseButtons.Left && !OnNumber(e.X)) { dragging = true; SetFromX(e.X); } base.OnMouseDown(e); }
+    protected override void OnMouseMove(MouseEventArgs e) { if (dragging) SetFromX(e.X); else Cursor = OnNumber(e.X) ? Cursors.IBeam : Cursors.Hand; base.OnMouseMove(e); }
     protected override void OnMouseUp(MouseEventArgs e) { dragging = false; base.OnMouseUp(e); }
     protected override void OnMouseWheel(MouseEventArgs e)
     {
@@ -8548,6 +8685,52 @@ class Slider : Control
         else if (e.KeyCode == Keys.Right) Value++;
         base.OnKeyDown(e);
     }
+    // Double-click the number, press Enter or just start typing to enter an exact value
+    TextBox edit;
+    bool OnNumber(int x) { return x > Track.Right + 4; }
+
+    void BeginEdit(string seed)
+    {
+        if (edit != null) return;
+        edit = new TextBox { BorderStyle = BorderStyle.FixedSingle, TextAlign = HorizontalAlignment.Right, Font = Theme.UI(9f), BackColor = Theme.CardHover, ForeColor = Theme.Text, Width = 62 };
+        edit.Location = new Point(Width - edit.Width - 1, (Height - edit.Height) / 2);
+        edit.Text = seed ?? value.ToString();
+        edit.KeyDown += (s, e) =>
+        {
+            if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Escape) { e.SuppressKeyPress = true; EndEdit(e.KeyCode == Keys.Enter); Focus(); }
+            else if (e.KeyCode == Keys.Up || e.KeyCode == Keys.Down)
+            {
+                e.SuppressKeyPress = true;
+                int cur; if (!int.TryParse(edit.Text.Trim(), out cur)) cur = value;
+                edit.Text = Math.Max(min, Math.Min(max, cur + (e.KeyCode == Keys.Up ? 1 : -1))).ToString();
+                edit.SelectionStart = edit.Text.Length;
+            }
+        };
+        edit.LostFocus += (s, e) => EndEdit(true);
+        Controls.Add(edit);
+        edit.Focus();
+        if (seed == null) edit.SelectAll(); else edit.SelectionStart = edit.Text.Length;
+    }
+
+    void EndEdit(bool commit)
+    {
+        if (edit == null) return;
+        var t = edit; edit = null;
+        var digits = new StringBuilder();
+        foreach (char ch in t.Text) if (char.IsDigit(ch) || (ch == '-' && digits.Length == 0)) digits.Append(ch);
+        int v;
+        if (commit && int.TryParse(digits.ToString(), out v)) Value = v;
+        Controls.Remove(t); t.Dispose(); Invalidate();
+    }
+
+    protected override void OnMouseDoubleClick(MouseEventArgs e) { if (OnNumber(e.X)) BeginEdit(null); base.OnMouseDoubleClick(e); }
+    protected override void OnKeyPress(KeyPressEventArgs e)
+    {
+        if (char.IsDigit(e.KeyChar) || e.KeyChar == '-') { e.Handled = true; BeginEdit(e.KeyChar.ToString()); }
+        else if (e.KeyChar == (char)13) { e.Handled = true; BeginEdit(null); }
+        base.OnKeyPress(e);
+    }
+
     protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
     protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
 
@@ -9641,10 +9824,23 @@ class SettingsForm : Form
         Header("Look");
         Add(Icons.Pulse, Theme.Accent, "Style", null,
             Combo(new[] { "Bars", "Graphs", "Bars and graphs", "Minimal" }, c.WidgetStyle, i => { c.WidgetStyle = i; Apply(); }, 170));
-        Add(Icons.Palette, Theme.Accent, "Theme", null,
-            Combo(new[] { "Dark", "Light", "Match Windows" }, c.WidgetTheme, i => { c.WidgetTheme = i; Apply(); }, 170));
+        Header("Theme");
+        var tiles = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MaximumSize = new Size(RowW, 0), WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 4) };
+        foreach (var name in new[] { "Auto" }.Concat(WidgetThemes.All.Select(t => t.Name)))
+        {
+            var tile = new WidgetThemeTile(name, name == c.WidgetThemeName);
+            tile.Click += (s, e) =>
+            {
+                c.WidgetThemeName = tile.ThemeName;
+                foreach (WidgetThemeTile o in tiles.Controls) o.SetSelected(o == tile);
+                Apply();
+            };
+            tiles.Controls.Add(tile);
+        }
+        list.Controls.Add(tiles);
+        Header("Colours");
         var bgTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
-        var sw = new Swatch { Value = c.WidgetBg.A != 0 ? Color.FromArgb(255, c.WidgetBg) : Color.FromArgb(22, 22, 26), Margin = new Padding(0, 3, 8, 0) };
+        var sw = new Swatch { Value = c.WidgetBg.A != 0 ? Color.FromArgb(255, c.WidgetBg) : WidgetThemes.Resolve(c.WidgetThemeName).Bg, Margin = new Padding(0, 3, 8, 0) };
         sw.Click += (s, e) =>
         {
             using (var dlg = new ColorDialog { Color = sw.Value, FullOpen = true })
@@ -9654,6 +9850,18 @@ class SettingsForm : Form
         bgTools.Controls.Add(Btn("Default", (s, e) => { c.WidgetBg = Color.FromArgb(0, 0, 0, 0); Apply(); RefreshPage(); }));
         Add(Icons.Palette, Theme.Accent, "Background colour", c.WidgetBg.A != 0 ? "Custom colour" : "Follows the theme", bgTools);
         SliderRow(Icons.Palette, Theme.Accent, "Background opacity", "WidgetOpacity", 0, 100, "%");
+        var wfonts = new[] { "Segoe UI Variable Text", "Segoe UI", "Bahnschrift", "Calibri", "Aptos", "Inter", "Cascadia Code", "Consolas", "Verdana", "Georgia" }.Where(FontList.Has).ToList();
+        if (c.WidgetFont != "" && FontList.Has(c.WidgetFont) && !wfonts.Contains(c.WidgetFont)) wfonts.Add(c.WidgetFont);
+        wfonts.Insert(0, "Default");
+        var fontTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
+        fontTools.Controls.Add(Combo(wfonts.ToArray(), Math.Max(0, wfonts.IndexOf(c.WidgetFont)), i => { c.WidgetFont = i == 0 ? "" : wfonts[i]; Apply(); }));
+        fontTools.Controls.Add(Btn("More…", (s, e) =>
+        {
+            using (var cur = new Font(c.WidgetFont != "" && FontList.Has(c.WidgetFont) ? c.WidgetFont : Theme.Family, 10f))
+            using (var dlg = new FontDialog { Font = cur, ShowEffects = false, FontMustExist = true, AllowVerticalFonts = false })
+                if (dlg.ShowDialog(this) == DialogResult.OK) { c.WidgetFont = dlg.Font.Name; Apply(); RefreshPage(); }
+        }));
+        Add(Icons.Text, Theme.Accent, "Font", "Pick a preset, or More… for any installed font", fontTools);
         SliderRow(Icons.Chip, Theme.Accent, "Size", "WidgetScale", 60, 180, "%");
         SliderRow(Icons.Spacing, Theme.Accent, "Width", "WidgetWidth", 200, 520, " px");
         SliderRow(Icons.Palette, Theme.Accent, "Corner roundness", "WidgetRound", 0, 200, "%");
