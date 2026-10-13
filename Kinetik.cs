@@ -2589,6 +2589,33 @@ class DibSurface : IDisposable
         UpdateLayeredWindow(hwnd, IntPtr.Zero, ref pos, ref size, memDC, ref src, 0, ref blend, 2);
     }
 
+    // The same, when only part of the bitmap changed: Windows then copies just that part.
+    [StructLayout(LayoutKind.Sequential)] struct ULWINFO { public int Size; public IntPtr Dst, PtDst, PSize, Src, PtSrc; public int Key; public IntPtr Blend; public int Flags; public IntPtr Dirty; }
+    [DllImport("user32.dll")] static extern bool UpdateLayeredWindowIndirect(IntPtr h, ref ULWINFO info);
+
+    public void Push(IntPtr hwnd, int x, int y, Rectangle dirty)
+    {
+        dirty.Intersect(new Rectangle(0, 0, w, h));
+        if (dirty.IsEmpty) return;
+        var mem = Marshal.AllocHGlobal(48); // POINT dst, SIZE, POINT src, BLENDFUNCTION, (pad), RECT dirty
+        try
+        {
+            Marshal.WriteInt32(mem, 0, x); Marshal.WriteInt32(mem, 4, y);
+            Marshal.WriteInt32(mem, 8, w); Marshal.WriteInt32(mem, 12, h);
+            Marshal.WriteInt64(mem, 16, 0);
+            Marshal.WriteInt32(mem, 24, 0x01FF0000); // AC_SRC_OVER, no flags, constant alpha 255, AC_SRC_ALPHA
+            Marshal.WriteInt32(mem, 32, dirty.Left); Marshal.WriteInt32(mem, 36, dirty.Top); Marshal.WriteInt32(mem, 40, dirty.Right); Marshal.WriteInt32(mem, 44, dirty.Bottom);
+            var info = new ULWINFO
+            {
+                Size = Marshal.SizeOf(typeof(ULWINFO)), PtDst = mem, PSize = mem + 8, Src = memDC, PtSrc = mem + 16,
+                Blend = mem + 24, Flags = 2, Dirty = mem + 32 // ULW_ALPHA
+            };
+            if (UpdateLayeredWindowIndirect(hwnd, ref info)) return;
+        }
+        finally { Marshal.FreeHGlobal(mem); }
+        Push(hwnd, x, y);
+    }
+
     void Free()
     {
         if (bmp != null) { bmp.Dispose(); bmp = null; }
@@ -2597,6 +2624,37 @@ class DibSurface : IDisposable
     }
 
     public void Dispose() { Free(); }
+}
+
+// A card's soft shadow: stacked, slightly larger translucent shapes. Those anti-aliased fills over the whole card cost
+// more than the rest of a frame put together, so they're drawn once into a bitmap and copied while nothing about them changes.
+sealed class ShadowCache : IDisposable
+{
+    Bitmap bmp; string key;
+
+    // Lays the shadow into the (cleared) w × h target. look sums up everything draw depends on.
+    public void Paint(Graphics target, int w, int h, string look, Action<Graphics> draw)
+    {
+        var k = w + "x" + h + "|" + look + "|" + (int)target.SmoothingMode + (int)target.PixelOffsetMode;
+        if (k != key || bmp == null)
+        {
+            if (bmp == null || bmp.Width != w || bmp.Height != h) { if (bmp != null) bmp.Dispose(); bmp = new Bitmap(w, h, PixelFormat.Format32bppPArgb); }
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.Clear(Color.Transparent);
+                g.SmoothingMode = target.SmoothingMode; g.PixelOffsetMode = target.PixelOffsetMode;
+                draw(g);
+            }
+            key = k;
+        }
+        bmp.SetResolution(target.DpiX, target.DpiY); // so it's copied 1:1
+        var mode = target.CompositingMode;
+        target.CompositingMode = CompositingMode.SourceCopy;
+        target.DrawImageUnscaled(bmp, 0, 0);
+        target.CompositingMode = mode;
+    }
+
+    public void Dispose() { if (bmp != null) bmp.Dispose(); bmp = null; key = null; }
 }
 
 // ======================================================================= Bar
@@ -2663,7 +2721,9 @@ class StatsBar : Form
             benchItem.ShortcutKeyDisplayString = Cfg.BenchHotkey ? "Ctrl+Shift+F11" : null;
             dashItem.Visible = Cfg.Dashboard; dashItem.ShortcutKeyDisplayString = Cfg.DashboardHotkey ? "Ctrl+Shift+F9" : null;
             webItem.Visible = Cfg.WebDashboard && WebDash.Status == "" && Cfg.WebKey != "";
+            var oldProfiles = profilesItem.DropDownItems.Cast<ToolStripItem>().ToList();
             profilesItem.DropDownItems.Clear();
+            foreach (var it in oldProfiles) it.Dispose();
             foreach (var name in Profiles.List())
             {
                 var n = name;
@@ -2684,11 +2744,38 @@ class StatsBar : Form
         HandleCreated += (s, e) =>
         {
             Sampler.Start(); TrimSoon(15000); ListenForShow();
+            try { RegisterPowerSettingNotification(Handle, ref DisplayState, 0); } catch { } // answered straight away with the current state
             if (File.Exists(Shortcuts.DesktopPath)) ThreadPool.QueueUserWorkItem(_ => Shortcuts.CreateDesktop(Cfg.TrayStyle)); // keeps its icon current
         };
+        SystemEvents.SessionSwitch += OnSessionSwitch;
         var animTimer = new System.Windows.Forms.Timer { Interval = 16 };
         animTimer.Tick += (s, e) => { animTimer.Interval = 1000 / Math.Max(10, Cfg.AnimFps); AnimFrame(); };
         animTimer.Start();
+    }
+
+    // ---- Nothing animates while the screen is off or the PC is locked, as there's nothing to see. The stats keep being
+    // sampled and drawn once a second (for the web dashboard, logs and graphs).
+    [DllImport("user32.dll")] static extern IntPtr RegisterPowerSettingNotification(IntPtr h, ref Guid setting, int flags);
+    static Guid DisplayState = new Guid("6FE69556-704A-47A0-8F24-C28D936FDA47"); // GUID_CONSOLE_DISPLAY_STATE
+    static volatile bool displayOff, sessionLocked;
+    public static bool Paused { get { return displayOff || sessionLocked; } }
+
+    void OnSessionSwitch(object s, SessionSwitchEventArgs e)
+    {
+        if (e.Reason == SessionSwitchReason.SessionLock) sessionLocked = true;
+        else if (e.Reason == SessionSwitchReason.SessionUnlock) { sessionLocked = false; try { BeginInvoke((Action)(() => Render(true))); } catch { } }
+    }
+
+    // WM_POWERBROADCAST / PBT_POWERSETTINGCHANGE: POWERBROADCAST_SETTING is the setting's GUID, a DWORD length, then the data.
+    void OnPowerSetting(IntPtr p)
+    {
+        if (p == IntPtr.Zero) return;
+        var bytes = new byte[16];
+        Marshal.Copy(p, bytes, 0, 16);
+        if (new Guid(bytes) != DisplayState || Marshal.ReadInt32(p, 16) < 1) return;
+        bool off = Marshal.ReadByte(p, 20) == 0; // 0 off, 1 on, 2 dimmed
+        if (displayOff && !off) BeginInvoke((Action)(() => Render(true)));
+        displayOff = off;
     }
 
     // Launching Kinetik again (e.g. from the desktop shortcut) signals one of these events, and the running copy opens
@@ -2828,13 +2915,14 @@ class StatsBar : Form
 
     protected override void Dispose(bool disposing)
     {
+        if (disposing) SystemEvents.SessionSwitch -= OnSessionSwitch;
         if (disposing && tray != null) { tray.Visible = false; tray.Dispose(); tray = null; }
         surface.Dispose();
         if (disposing && widget != null) widget.Dispose();
         if (disposing && overlay != null) overlay.Dispose();
         if (disposing) { foreach (var m in mirrors) m.Dispose(); if (hover != null) hover.Dispose(); hoverTimer.Dispose(); }
         if (disposing) { Watch.Shutdown(); if (noteIcon != null) { noteIcon.Visible = false; noteIcon.Dispose(); } noteTimer.Dispose(); }
-        if (disposing) { DisposeFonts(); if (measureG != null) { measureG.Dispose(); measureBmp.Dispose(); } brush.Dispose(); }
+        if (disposing) { DisposeFonts(); if (measureG != null) { measureG.Dispose(); measureBmp.Dispose(); } brush.Dispose(); anim.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -3723,6 +3811,7 @@ class StatsBar : Form
 
     void AnimFrame()
     {
+        if (Paused) return;
         anim.Advance();
         SpinTray();
         if ((Cfg.BarAnimate || (shownL != null && shownL.Scrolls)) && shownL != null && IsHandleCreated && lastX != int.MinValue) Push(shownL, shownH, lastX, lastY);
@@ -3835,11 +3924,12 @@ class StatsBar : Form
             else if (m.WParam.ToInt32() == 3) ToggleDashboard();
             return;
         }
+        if (m.Msg == 0x218 && m.WParam.ToInt32() == 0x8013) try { OnPowerSetting(m.LParam); } catch { } // WM_POWERBROADCAST, PBT_POWERSETTINGCHANGE
         base.WndProc(ref m);
     }
 
     // ---- Notifications, as Windows toasts through the tray icon (a temporary one when the tray icon is off).
-    NotifyIcon noteIcon; Action noteClick;
+    NotifyIcon noteIcon; Action noteClick; bool noteTimerHooked;
     readonly System.Windows.Forms.Timer noteTimer = new System.Windows.Forms.Timer { Interval = 15000 };
 
     public void Notify(string title, string text, Action click)
@@ -3851,6 +3941,10 @@ class StatsBar : Form
             {
                 noteIcon = new NotifyIcon { Icon = TrayIconArt.Frame(Cfg.TrayStyle, SystemInformation.SmallIconSize.Width, 0), Text = "Kinetik" };
                 noteIcon.BalloonTipClicked += (s, e) => { if (noteClick != null) noteClick(); };
+            }
+            if (!noteTimerHooked)
+            {
+                noteTimerHooked = true; // once: the icon comes and goes, the timer stays
                 noteTimer.Tick += (s, e) => { noteTimer.Stop(); if (noteIcon != null) { noteIcon.Visible = false; noteIcon.Dispose(); noteIcon = null; } };
             }
             noteIcon.Visible = true;
@@ -6194,7 +6288,7 @@ static class Shortcuts
 // Brings icons to life on the bar and the widget. Each preset icon has its own animation that acts out
 // what it shows (a fan spins, a thermometer's mercury rises, a gauge's needle swings, disk LEDs flicker…),
 // driven by how busy its stat is. Each icon keeps its own phase, so a change of speed never makes it jump.
-class IconAnim
+class IconAnim : IDisposable
 {
     readonly Dictionary<string, double> phase = new Dictionary<string, double>();
     readonly Dictionary<string, double> shown = new Dictionary<string, double>(); // activity, eased per icon
@@ -6371,18 +6465,48 @@ class IconAnim
 
         // Soft glow behind the icon that grows with activity.
         int glowA = (int)(a * 75 * (0.75 + 0.25 * wave));
-        if (glowA > 3)
-            using (var path = new GraphicsPath())
-            {
-                float gr = s * 0.65f;
-                path.AddEllipse(cx - gr, cy - gr, gr * 2, gr * 2);
-                using (var pb = new PathGradientBrush(path) { CenterColor = Color.FromArgb(glowA, hot), SurroundColors = new[] { Color.FromArgb(0, hot) } })
-                    g.FillPath(pb, path);
-            }
+        if (glowA > 3) Glow(g, cx, cy, s * 0.65f, hot, glowA);
 
         var state = g.Save();
         try { Paint(g, kind, id, icon, r, col, a, p, frac, wave, s, cx, cy); }
         finally { g.Restore(state); }
+    }
+
+    // GDI+ fills a radial gradient slowly (20–30 µs per icon, every frame, which was most of the animation's cost).
+    // So each glow is drawn once into a small bitmap, per colour, size, eighth of a pixel and alpha step, and copied after that.
+    readonly Dictionary<string, Bitmap> glows = new Dictionary<string, Bitmap>();
+
+    void Glow(Graphics g, float cx, float cy, float gr, Color hot, int alpha)
+    {
+        float left = cx - gr, top = cy - gr;
+        int ox = (int)Math.Floor(left), oy = (int)Math.Floor(top);
+        int fx = (int)Math.Round((left - ox) * 8), fy = (int)Math.Round((top - oy) * 8);
+        alpha = Math.Min(255, (alpha + 1) / 3 * 3);
+        var key = hot.ToArgb() + "|" + gr.ToString("0.00", CultureInfo.InvariantCulture) + "|" + fx + "|" + fy + "|" + alpha + "|" + (int)g.SmoothingMode + (int)g.PixelOffsetMode;
+        Bitmap bmp;
+        if (!glows.TryGetValue(key, out bmp))
+        {
+            if (glows.Count > 2000) Dispose();
+            int size = (int)Math.Ceiling(gr * 2) + 3;
+            bmp = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+            bmp.SetResolution(g.DpiX, g.DpiY); // so it's copied 1:1
+            using (var bg = Graphics.FromImage(bmp))
+            using (var path = new GraphicsPath())
+            {
+                bg.SmoothingMode = g.SmoothingMode; bg.PixelOffsetMode = g.PixelOffsetMode;
+                path.AddEllipse(fx / 8f, fy / 8f, gr * 2, gr * 2);
+                using (var pb = new PathGradientBrush(path) { CenterColor = Color.FromArgb(alpha, hot), SurroundColors = new[] { Color.FromArgb(0, hot) } })
+                    bg.FillPath(pb, path);
+            }
+            glows[key] = bmp;
+        }
+        g.DrawImageUnscaled(bmp, ox, oy);
+    }
+
+    public void Dispose()
+    {
+        foreach (var b in glows.Values) b.Dispose();
+        glows.Clear();
     }
 
     void Paint(Graphics g, string kind, string id, IconFn icon, RectangleF r, Color col, double a, double p, double frac, double wave, float s, float cx, float cy)
@@ -6975,6 +7099,7 @@ class WidgetForm : Form
     readonly Settings c;
     public readonly int Layer;
     readonly DibSurface surface = new DibSurface();
+    readonly ShadowCache shadow = new ShadowCache();
     readonly ContextMenuStrip menu = new ContextMenuStrip();
     readonly Dictionary<string, Hist> history = new Dictionary<string, Hist>();
     readonly SolidBrush brush = new SolidBrush(Color.White);
@@ -7020,12 +7145,14 @@ class WidgetForm : Form
         animTimer.Start();
     }
 
-    // Redraws just the icon squares for the next animation frame, then re-pushes the window.
+    // Redraws just the icon squares for the next animation frame, then re-pushes that part of the window.
     void AnimFrame()
     {
+        if (StatsBar.Paused) return;
         anim.Advance();
-        if (!c.WidgetAnimate || animCells.Count == 0 || !IsHandleCreated || !Visible || dragging) return;
+        if (!c.WidgetAnimate || animCells.Count == 0 || !IsHandleCreated || !Visible || dragging || Covered()) return;
         var bmp = surface.Canvas(winW, winH);
+        var dirty = RectangleF.Empty;
         using (var g = Graphics.FromImage(bmp))
         using (var fill = new SolidBrush(cardFill))
         {
@@ -7034,6 +7161,7 @@ class WidgetForm : Form
             foreach (var cell in animCells)
             {
                 var r = IconAnim.Cell(cell.Value);
+                dirty = dirty.IsEmpty ? r : RectangleF.Union(dirty, r);
                 g.SetClip(r);
                 g.CompositingMode = CompositingMode.SourceCopy;
                 g.FillRectangle(fill, r);
@@ -7042,7 +7170,54 @@ class WidgetForm : Form
                 anim.Draw(g, it.Id, it.Icon, cell.Value, it.Color, it.Act, it.Warn);
             }
         }
-        surface.Push(Handle, c.WidgetX, c.WidgetY);
+        surface.Push(Handle, c.WidgetX, c.WidgetY, Rectangle.FromLTRB((int)Math.Floor(dirty.Left), (int)Math.Floor(dirty.Top), (int)Math.Ceiling(dirty.Right), (int)Math.Ceiling(dirty.Bottom)));
+    }
+
+    // On the desktop the widget sits under every other window, so while one covers all of it (a maximised app, say)
+    // there's nothing to animate. Checked a few times a second by walking up the windows stacked above it.
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder name, int max);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int value, int size);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int attr, out WinRect value, int size);
+    [StructLayout(LayoutKind.Sequential)] struct WinRect { public int L, T, R, B; }
+    static readonly uint OwnPid = (uint)Process.GetCurrentProcess().Id;
+    readonly StringBuilder classBuf = new StringBuilder(64);
+    long coveredAt; bool covered;
+
+    bool Covered()
+    {
+        if (Layer != 0) return false;
+        long now = Environment.TickCount;
+        if (now - coveredAt < 250 && now >= coveredAt) return covered;
+        coveredAt = now;
+        covered = false;
+        int left = c.WidgetX + margin, top = c.WidgetY + margin, right = c.WidgetX + winW - margin, bottom = c.WidgetY + winH - margin;
+        try
+        {
+            IntPtr h = Handle;
+            for (int n = 0; n < 2000 && (h = GetWindow(h, 3)) != IntPtr.Zero; n++) // GW_HWNDPREV: the next window up
+            {
+                if (!IsWindowVisible(h) || IsIconic(h)) continue;
+                if ((GetWindowLong(h, -20) & (0x80000 | 0x20)) != 0) continue; // LAYERED or TRANSPARENT: may be see-through
+                int cloaked;
+                if (DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) continue; // DWMWA_CLOAKED: another virtual desktop, a suspended app…
+                uint pid;
+                GetWindowThreadProcessId(h, out pid);
+                if (pid == OwnPid) continue;
+                classBuf.Clear();
+                GetClassName(h, classBuf, classBuf.Capacity);
+                var cls = classBuf.ToString();
+                if (cls == "Progman" || cls == "WorkerW") continue; // the desktop itself
+                WinRect r;
+                if (DwmGetWindowAttribute(h, 9, out r, 16) != 0) continue; // DWMWA_EXTENDED_FRAME_BOUNDS: what's actually drawn
+                if (r.L <= left && r.T <= top && r.R >= right && r.B >= bottom) { covered = true; break; }
+            }
+        }
+        catch { covered = false; }
+        return covered;
     }
 
     bool ClickThroughWanted { get { return c.WidgetLocked && c.WidgetClickThrough; } }
@@ -7075,7 +7250,7 @@ class WidgetForm : Form
     protected override void Dispose(bool disposing)
     {
         surface.Dispose();
-        if (disposing) { animTimer.Dispose(); DisposeFonts(); brush.Dispose(); menu.Dispose(); }
+        if (disposing) { animTimer.Dispose(); DisposeFonts(); brush.Dispose(); menu.Dispose(); anim.Dispose(); shadow.Dispose(); if (layer != null) layer.Dispose(); }
         base.Dispose(disposing);
     }
 
@@ -7494,13 +7669,16 @@ class WidgetForm : Form
         var card = new RectangleF(margin, margin, cardW, winH - margin * 2);
         float rad = Math.Min(card.Height / 2, 12 * u * c.WidgetRound / 100f);
         if (margin > 1) // soft shadow: stacked, slightly larger translucent shapes
-            for (int k = 7; k >= 1; k--)
+            shadow.Paint(target, winW, winH, card + "|" + rad + "|" + u + "|" + alpha, sg =>
             {
-                var r = card;
-                r.Inflate(k * 1.6f * u, k * 1.6f * u);
-                r.Offset(0, 2 * u);
-                Theme.FillRound(g, r, rad + k * 1.6f * u, Color.FromArgb(Math.Max(1, 7 * alpha / 255), 0, 0, 0));
-            }
+                for (int k = 7; k >= 1; k--)
+                {
+                    var r = card;
+                    r.Inflate(k * 1.6f * u, k * 1.6f * u);
+                    r.Offset(0, 2 * u);
+                    Theme.FillRound(sg, r, rad + k * 1.6f * u, Color.FromArgb(Math.Max(1, 7 * alpha / 255), 0, 0, 0));
+                }
+            });
 
         // ClearType needs solid pixels behind the text. So for a mostly opaque card, the card is drawn solid with ClearType text
         // on a layer, and the whole layer is then blended in at the card's opacity. A very see-through card keeps grayscale text.
@@ -7711,6 +7889,7 @@ class OverlayForm : Form
 
     void AnimFrame()
     {
+        if (StatsBar.Paused) return;
         anim.Advance();
         if (Animated && !dragging && IsHandleCreated && Visible && winW > 0) Draw();
     }
@@ -7739,7 +7918,7 @@ class OverlayForm : Form
         surface.Dispose();
         if (disposing)
         {
-            animTimer.Dispose(); menu.Dispose(); brush.Dispose(); measureG.Dispose(); measureBmp.Dispose();
+            animTimer.Dispose(); menu.Dispose(); brush.Dispose(); measureG.Dispose(); measureBmp.Dispose(); anim.Dispose();
             if (font != null) font.Dispose();
             if (bold != null) bold.Dispose();
         }
