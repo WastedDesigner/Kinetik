@@ -2229,6 +2229,7 @@ static class Program
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             Application.ThreadException += (s, e) => Log(e.Exception);
+            OfferFolderRestore();
             var bar = new StatsBar();
             if (args.Contains("--dashboard")) bar.Load += (s, e) => bar.BeginInvoke((Action)(() => { bar.Cfg.Dashboard = true; bar.OpenDashboard(); }));
             int si = Array.IndexOf(args, "--settings");
@@ -2247,6 +2248,27 @@ static class Program
     {
         if (IsAdmin) return;
         try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "Kinetik.log"), DateTime.Now + " " + e + Environment.NewLine); } catch { }
+    }
+
+    // "Kinetik settings.kinetik" next to the exe: a backup that stays with the app folder, so it survives a Windows
+    // reinstall as long as the folder is kept. Run from Program Files, that's C:\Program Files\Kinetik.
+    public static string FolderBackup { get { return Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "Kinetik settings.kinetik"); } }
+
+    // A fresh Windows has no saved settings ("Order" is always written by Settings.Save), so offer the folder backup.
+    static void OfferFolderRestore()
+    {
+        try
+        {
+            using (var k = Registry.CurrentUser.OpenSubKey(Settings.Key))
+                if (k != null && k.GetValue("Order") != null) return;
+            if (!File.Exists(FolderBackup)) return;
+            if (MessageBox.Show("There are saved Kinetik settings in this folder, from " + File.GetLastWriteTime(FolderBackup).ToString("d MMM yyyy, h:mm tt") +
+                    ".\n\nRestore them?", "Kinetik", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            var c = new Settings();
+            Profiles.Import(c, File.ReadAllText(FolderBackup));
+            c.Save();
+        }
+        catch (Exception e) { Log(e); }
     }
 
     static bool Wait(Mutex m)
@@ -10202,6 +10224,26 @@ class SettingsForm : Form
         restore.Margin = new Padding(6, 0, 0, 0);
         backupTools.Controls.Add(restore);
         Add(Icons.Gear, Theme.Accent, "Backup", "Save every setting to a file, or restore them from one", backupTools);
+        var folderTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
+        folderTools.Controls.Add(Btn("Back up", (s, e) =>
+        {
+            try
+            {
+                c.Save(); File.WriteAllText(Program.FolderBackup, Profiles.Export(c));
+                MessageBox.Show(this, "Settings backed up to\n" + Program.FolderBackup + "\n\nAfter reinstalling Windows, Kinetik offers to restore them the first time it starts from this folder.", "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                RefreshPage();
+            }
+            catch (Exception ex) { MessageBox.Show(this, "Couldn't save the backup.\n\n" + ex.Message, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        }));
+        var folderRestore = Btn("Restore", (s, e) =>
+        {
+            if (!File.Exists(Program.FolderBackup)) { MessageBox.Show(this, "There's no backup in the app folder yet.", "Kinetik"); return; }
+            if (MessageBox.Show(this, "Replace the current settings with the backup from " + File.GetLastWriteTime(Program.FolderBackup).ToString("d MMM yyyy, h:mm tt") + "?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            LoadSettings(() => { Profiles.Import(c, File.ReadAllText(Program.FolderBackup)); c.Save(); return true; });
+        });
+        folderRestore.Margin = new Padding(6, 0, 0, 0);
+        folderTools.Controls.Add(folderRestore);
+        Add(Icons.Gear, Theme.Accent, "Backup in the app folder", "Last backup: " + (File.Exists(Program.FolderBackup) ? File.GetLastWriteTime(Program.FolderBackup).ToString("d MMM yyyy, h:mm tt") : "never") + ". Kept with the app, for after a Windows reinstall", folderTools);
 
         Header("Startup & permissions");
         var startup = new Toggle { On = Program.IsStartupEnabled() };
