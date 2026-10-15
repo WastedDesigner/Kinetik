@@ -1,3 +1,31 @@
+# Kinetik v3.1.0
+
+Kinetik 3.1 adds a live dashboard (as a window and as a web page), Now playing on the taskbar, a settings backup next to the exe, and lighter animation.
+
+**Dashboard**
+- **New: dashboard window.** Cards for CPU, GPU, memory, network, disk, temperatures, power, game FPS, CPU cores and system: current readings, average and peak, and graphs of the last 1–10 minutes. Opens from the right-click menu, **Ctrl+Shift+F9** or `--dashboard` (which also reaches a copy that's already running). The grid fits the window and scales text, gauges and graphs to match.
+- **New: web dashboard.** The same dashboard in a browser on this PC or, optionally, other devices on your network. Every request needs the secret key in the link from Settings; **New link** replaces it. Profiles and backups leave the key out.
+- **Layout editor:** Settings → Dashboard → Layout reorders cards and their stats and switches them on or off. All 44 stats are available.
+- **Themes:** Modern, plus Terminal, Amber terminal and Yellow terminal looks for the window and the web page.
+- Both are off by default; extra readings are only measured while the window is open or a browser is showing the page.
+
+**Now playing**
+- **New: Now playing stat.** What's playing in Spotify, browsers and media players, read from Windows' media controls, with its cover. By default it sits on its own in the taskbar's left corner; it can also join the bar, the widget and the game overlay.
+- Click to play or pause, middle-click for the next track, scroll to change track. Hover for a card with the cover, artist, album, progress and playback buttons. Long titles scroll instead of being cut short.
+
+**Also new**
+- **Settings backup:** Settings → General → Profiles and backup has **Back up** / **Restore**, which save `Kinetik settings.kinetik` next to the exe. On a fresh Windows with no settings, Kinetik offers to restore it.
+- **Widget font:** any installed font via **More…**.
+- **Companion apps:** a companion app (such as a USB sensor-panel driver) can ask Kinetik for readings through a shared memory block readable only by your Windows account. Nothing changes while none runs.
+
+**Faster**
+- Icon glows and the widget's shadow are cached: bar frames take about 40% less time, a full widget repaint about 45% less.
+- Animations pause while the screen is off or the PC is locked, and the widget stops animating while another window covers it.
+
+**Fixed**
+- The Profiles submenu leaked a window each time it was rebuilt, and the notification timer gained a handler with every notification.
+- A normal launch while an elevated copy runs no longer crashes; it signals the running copy instead.
+
 # Kinetik v3.0.0
 
 Kinetik 3 is a big update for gaming: frame-generation-aware FPS, 1% lows, frame times and latency on the game overlay, which now shows itself, follows your game to its monitor and closes with it. There are also notifications, hover graphs on the bar, 14 new stats, profiles, and updates that install themselves.
