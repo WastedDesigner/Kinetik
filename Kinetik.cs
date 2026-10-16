@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("3.1.4.0")]
-[assembly: AssemblyFileVersion("3.1.4.0")]
-[assembly: AssemblyInformationalVersion("3.1.4")]
+[assembly: AssemblyVersion("3.2.0.0")]
+[assembly: AssemblyFileVersion("3.2.0.0")]
+[assembly: AssemblyInformationalVersion("3.2.0")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -7369,7 +7369,7 @@ class WidgetForm : Form
     // ---- fonts and theme
     void EnsureFonts()
     {
-        var fam = c.WidgetFont != "" && FontList.Has(c.WidgetFont) ? c.WidgetFont : Theme.Family;
+        var fam = c.WidgetFont != "" && FontList.Has(c.WidgetFont) ? c.WidgetFont : WidgetThemes.IsTerm(c.WidgetThemeName) ? WidgetThemes.Mono : Theme.Family;
         if (fLabel != null && Math.Abs(fontU - u) < 0.001f && fontFam == fam) return;
         DisposeFonts();
         fLabel = new Font(fam, 12.5f * u, FontStyle.Regular, GraphicsUnit.Pixel);
@@ -7713,7 +7713,7 @@ class WidgetForm : Form
         Color bg = c.WidgetBg.A != 0 ? Color.FromArgb(255, c.WidgetBg) : th.Bg;
         Color text = th.Text, sub = th.Sub;
         Color track = light ? Color.FromArgb(26, 0, 0, 0) : Color.FromArgb(34, 255, 255, 255);
-        Color line = light ? Color.FromArgb(30, 0, 0, 0) : Color.FromArgb(28, 255, 255, 255);
+        Color line = WidgetThemes.IsTerm(th.Name) ? Color.FromArgb(110, sub) : light ? Color.FromArgb(30, 0, 0, 0) : Color.FromArgb(28, 255, 255, 255);
         int alpha = (int)Math.Round(c.WidgetOpacity * 2.55);
 
         var card = new RectangleF(margin, margin, cardW, winH - margin * 2);
@@ -8661,6 +8661,23 @@ static class WidgetThemes
 {
     static Color C(int r, int g, int b) { return Color.FromArgb(r, g, b); }
 
+    // The terminal themes (the same green, amber and yellow as Kinetik's dashboard and Kinetik Screen) draw in a
+    // monospace font unless a font is picked, and their divider lines glow in the theme's colour.
+        public static bool IsTerm(string name) { return name == "Terminal" || name == "Amber terminal" || name == "Yellow terminal"; }
+    static string mono;
+    public static string Mono
+    {
+        get
+        {
+            if (mono == null)
+            {
+                mono = "Consolas";
+                try { using (var f = new Font("Cascadia Mono", 10f)) if (f.Name == "Cascadia Mono") mono = "Cascadia Mono"; } catch { }
+            }
+            return mono;
+        }
+    }
+
     public static readonly WidgetTheme[] All =
     {
         new WidgetTheme("Midnight", C(22, 22, 26), C(242, 242, 246), C(168, 168, 180), C(240, 88, 88), false),
@@ -8673,6 +8690,9 @@ static class WidgetThemes
         new WidgetTheme("Ocean", C(12, 29, 45), C(228, 242, 250), C(128, 160, 186), C(56, 198, 232), false),
         new WidgetTheme("Sunset", C(40, 23, 35), C(250, 236, 240), C(192, 150, 172), C(255, 138, 92), false),
         new WidgetTheme("Mono", C(10, 10, 10), C(245, 245, 245), C(140, 140, 140), C(245, 245, 245), false),
+        new WidgetTheme("Terminal", C(3, 10, 5), C(90, 255, 120), C(46, 170, 80), C(205, 255, 215), false),
+        new WidgetTheme("Amber terminal", C(12, 7, 0), C(255, 182, 40), C(185, 118, 22), C(255, 232, 180), false),
+        new WidgetTheme("Yellow terminal", C(0, 0, 0), C(255, 226, 0), C(200, 178, 0), C(255, 255, 190), false),
         new WidgetTheme("Light", C(246, 246, 248), C(24, 24, 28), C(96, 96, 106), C(230, 70, 70), true),
         new WidgetTheme("Paper", C(250, 246, 236), C(52, 42, 32), C(132, 116, 96), C(204, 92, 52), true),
         new WidgetTheme("Frost", C(236, 242, 250), C(20, 30, 48), C(92, 106, 132), C(40, 120, 230), true),
