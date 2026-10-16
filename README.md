@@ -15,7 +15,7 @@ Every stat can be switched on or off, reordered, restyled and grouped with divid
 
 ![Kinetik on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
 
-**Latest version: v3.1.0.** [Download it from Releases](../../releases/latest).
+**Latest published version: v3.1.0. Local maintenance build: v3.1.2.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 
@@ -402,3 +402,7 @@ Released under the [GNU General Public License v3.0](LICENSE) (GPL-3.0-or-later)
 Versions up to and including v1.2.1 were released under the MIT License.
 
 Third-party components bundled in the release exe keep their own licenses. [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) is licensed under MPL-2.0, and HidSharp under Apache-2.0.
+
+## Local maintenance build 3.1.2
+
+Includes the approved 16 October 2026 diagnostics fixes. Cross-compilation and regression results are recorded in the Apps diagnostics report; Windows GUI and hardware validation remains pending. Run `python tests/run-tests.py` for non-GUI regressions, and `build.bat package` to compile and create a hash-verified release package. Shared support is compiled into the EXE; no additional runtime DLL is required.

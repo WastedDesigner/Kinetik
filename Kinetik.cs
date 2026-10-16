@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("3.1.1.0")]
-[assembly: AssemblyFileVersion("3.1.1.0")]
-[assembly: AssemblyInformationalVersion("3.1.1")]
+[assembly: AssemblyVersion("3.1.2.0")]
+[assembly: AssemblyFileVersion("3.1.2.0")]
+[assembly: AssemblyInformationalVersion("3.1.2")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -120,6 +120,7 @@ class Settings
     // Spacing, as a percentage of the built-in default (RowGap is in pixels)
     public int GapStats = 100, GapIcon = 100, EdgePad = 100, IconScale = 100, RowGap = 0, PillRound = 100;
     public int DividerStyle = 0, DividerHeight = 100; // style: 0 line, 1 dotted, 2 dot, 3 blank space
+    public int WidgetDividerSize = 1; // desktop widget: thickness of its divider lines, in pixels at 100%
     // Warning thresholds
     public int WarnCpu = 90, WarnRam = 90, WarnGpu = 95, WarnCpuTemp = 85, WarnGpuTemp = 83, WarnBattery = 20, WarnPing = 150, WarnFreePct = 10;
     // Behaviour
@@ -293,7 +294,7 @@ class Settings
         PillOpacity = cl(PillOpacity, 0, 100); PillRound = cl(PillRound, 0, 400);
         GapStats = cl(GapStats, 0, 400); GapIcon = cl(GapIcon, 0, 400); EdgePad = cl(EdgePad, 0, 400);
         IconScale = cl(IconScale, 20, 400); RowGap = cl(RowGap, 0, 50);
-        DividerStyle = cl(DividerStyle, 0, 3); DividerHeight = cl(DividerHeight, 10, 400);
+        DividerStyle = cl(DividerStyle, 0, 3); DividerHeight = cl(DividerHeight, 10, 400); WidgetDividerSize = cl(WidgetDividerSize, 1, 8);
         DashMinutes = cl(DashMinutes, 1, 10); DashTheme = cl(DashTheme, 0, Dash.Themes.Length - 1); DashW = cl(DashW, 420, 4000); DashH = cl(DashH, 360, 3000); WebPort = cl(WebPort, 1024, 65535);
         NowPlayingChars = cl(NowPlayingChars, 12, 80); NowPlayingOffset = cl(NowPlayingOffset, 0, 3000);
         if (WidgetThemeName != "Auto" && !WidgetThemes.All.Any(t => t.Name == WidgetThemeName)) WidgetThemeName = WidgetTheme == 1 ? "Light" : WidgetTheme == 2 ? "Auto" : "Midnight";
@@ -305,7 +306,15 @@ class Settings
 
     IEnumerable<FieldInfo> Fields() { return GetType().GetFields(BindingFlags.Public | BindingFlags.Instance); }
 
+    public static bool Unreadable;
+
     public void Load()
+    {
+        try { LoadCore(); }
+        catch (Exception ex) { Unreadable = true; Sanitize(); MessageBox.Show("Kinetik could not read all saved settings. Saving is disabled until restart. " + ex.Message, "Kinetik"); }
+    }
+
+    void LoadCore()
     {
         using (var k = Registry.CurrentUser.OpenSubKey(Key))
         {
@@ -322,13 +331,14 @@ class Settings
                     else if (f.FieldType == typeof(string)) f.SetValue(this, v.ToString());
                     else if (f.FieldType == typeof(Color)) f.SetValue(this, Color.FromArgb(Convert.ToInt32(v)));
                 }
-                catch { }
+                catch { Unreadable = true; }
             }
             Sanitize();
-            if (Convert.ToInt32(k.GetValue("SettingsVersion", 1)) < 2)
+            if (Unreadable) MessageBox.Show("Some Kinetik settings could not be converted. Original values were kept; saving is disabled until restart.", "Kinetik");
+            if (k.GetValue("SettingsVersion") == null || SettingsVersion < 2)
             {
                 // v1.0 had three fixed dividers with on/off switches; keep only the ones that were switched on.
-                Order = string.Join(",", OrderList().Where(id => !IsDivider(id) || Convert.ToInt32(k.GetValue(id, 0)) == 1));
+                Order = string.Join(",", OrderList().Where(id => !IsDivider(id) || object.Equals(k.GetValue(id, 0), 1)));
                 SettingsVersion = CurrentVersion;
             }
         }
@@ -336,6 +346,8 @@ class Settings
 
     public void Save()
     {
+        if (Unreadable || KinetikSuite.RegistryFiles.CannotSave) return;
+        Sanitize();
         using (var k = Registry.CurrentUser.CreateSubKey(Key))
             foreach (var f in Fields())
             {
@@ -2238,7 +2250,8 @@ static class Program
                 string page = si + 1 < args.Length && !args[si + 1].StartsWith("--") ? args[si + 1] : null;
                 bar.Load += (s, e) => bar.BeginInvoke((Action)(() => bar.OpenSettings(page)));
             }
-            Application.Run(bar);
+            using (new KinetikSuite.Shutdown("Kinetik", () => { bar.Close(); Application.Exit(); }))
+                Application.Run(bar);
         }
     }
 
@@ -2277,7 +2290,9 @@ static class Program
     }
 
     // Returns memory the app no longer needs to Windows (after startup, closing Settings, or unloading sensors).
-    public static void TrimMemory()
+    public static void TrimMemory() { KinetikSuite.MemoryPolicy.Measure("Kinetik", TrimMemoryCore); }
+
+    static void TrimMemoryCore()
     {
         GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
         GC.Collect();
@@ -2448,7 +2463,7 @@ static class Program
             var a = new FileInfo(me); var b = new FileInfo(InstalledExe);
             Version mine, theirs;
             bool known = Version.TryParse(FileVersionInfo.GetVersionInfo(me).FileVersion, out mine) & Version.TryParse(FileVersionInfo.GetVersionInfo(InstalledExe).FileVersion, out theirs);
-            if (known && (mine > theirs || (mine == theirs && a.Length != b.Length))) File.Copy(me, InstalledExe, true);
+            if (known && (mine > theirs || (mine == theirs && Sha256(me) != Sha256(InstalledExe)))) File.Copy(me, InstalledExe, true);
             else if (!known || mine < theirs) return; // leave a newer installed copy (and its lib folder) alone
             CopyLib();
         }
@@ -2673,7 +2688,7 @@ class StatsBar : Form
     public readonly Sampler Sampler;
     public readonly GameWatch Watch;
     Snapshot watched;
-    readonly ContextMenuStrip menu = new ContextMenuStrip();
+    readonly ContextMenuStrip menu = KinetikSuite.MenuFocus.Attach(new ContextMenuStrip());
     readonly ToolTip tip = new ToolTip { InitialDelay = 400, ShowAlways = true };
     string lastTip = "";
     SettingsForm settingsForm;
@@ -2808,7 +2823,8 @@ class StatsBar : Form
         try
         {
             var sec = new System.Security.AccessControl.EventWaitHandleSecurity();
-            sec.SetSecurityDescriptorSddlForm("D:(A;;0x1F0003;;;SY)(A;;0x1F0003;;;BA)(A;;0x1F0003;;;" + WindowsIdentity.GetCurrent().User.Value + ")S:(ML;;NW;;;ME)");
+            // No integrity label ("S:(ML…)"): setting one needs a privilege apps don't hold, and the event gets this process's level anyway.
+            sec.SetSecurityDescriptorSddlForm("D:(A;;0x1F0003;;;SY)(A;;0x1F0003;;;BA)(A;;0x1F0003;;;" + WindowsIdentity.GetCurrent().User.Value + ")");
             bool created;
             return new EventWaitHandle(false, EventResetMode.AutoReset, name, out created, sec);
         }
@@ -5926,9 +5942,8 @@ static class Updates
     static readonly Regex LibEntry = new Regex(@"^lib/([A-Za-z0-9.\-_]+\.dll)$");
 
     // Downloads the release's zip into memory, checks Kinetik.exe against the SHA-256 in its release notes, and
-    // replaces this copy's files in place. Files in use can't be overwritten, but they can be renamed, so the old
-    // ones become *.old (deleted at the next start). New files are only ever created fresh, never written through
-    // something already at that path. done(error) runs on the UI thread; on success Kinetik restarts.
+    // stages and flushes the complete replacement set before moving installed files.
+    // Previous files are retained in Old Versions, and incomplete installations roll back. done(error) runs on the UI thread; on success Kinetik restarts.
     public static void Install(Release r, Action<string> done, Control owner)
     {
         ThreadPool.QueueUserWorkItem(_ =>
@@ -5940,14 +5955,23 @@ static class Updates
                 if (r.ExeSha == null) throw new IOException("This release doesn't list a checksum for Kinetik.exe, so it can't be checked.");
                 var zip = GetBytes(r.ZipUrl, 64 << 20);
                 var files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+                long expanded = 0;
                 using (var za = new System.IO.Compression.ZipArchive(new MemoryStream(zip), System.IO.Compression.ZipArchiveMode.Read))
                     foreach (var en in za.Entries)
                     {
                         var name = en.FullName.Replace('\\', '/');
                         if (name.EndsWith("/")) continue;
                         if (name != "Kinetik.exe" && name != "LICENSE" && !LibEntry.IsMatch(name)) continue; // nothing else is written
+                        expanded += en.Length;
+                        if (expanded > (128 << 20) || files.ContainsKey(name)) throw new IOException("Invalid or oversized release archive");
                         if (en.Length > 32 << 20) throw new IOException(name + " is too large");
-                        using (var st = en.Open()) using (var ms = new MemoryStream()) { st.CopyTo(ms); files[name] = ms.ToArray(); }
+                        using (var st = en.Open()) using (var ms = new MemoryStream())
+                        {
+                            var buffer = new byte[16384]; int read;
+                            while ((read = st.Read(buffer, 0, buffer.Length)) > 0) { if (ms.Length + read > en.Length || ms.Length + read > (32 << 20)) throw new IOException("Invalid archive entry size"); ms.Write(buffer, 0, read); }
+                            if (ms.Length != en.Length) throw new IOException("Incomplete archive entry");
+                            files[name] = ms.ToArray();
+                        }
                     }
                 byte[] exe;
                 if (!files.TryGetValue("Kinetik.exe", out exe)) throw new IOException("The download doesn't contain Kinetik.exe.");
@@ -5955,31 +5979,9 @@ static class Updates
                     if (BitConverter.ToString(sha.ComputeHash(exe)).Replace("-", "") != r.ExeSha)
                         throw new IOException("The downloaded Kinetik.exe doesn't match the checksum in the release notes. Nothing was changed.");
 
-                string dir = Path.GetDirectoryName(Application.ExecutablePath), me = Application.ExecutablePath;
-                Directory.CreateDirectory(Path.Combine(dir, "lib"));
-                var moved = new List<string>(); var written = new List<string>();
-                try
-                {
-                    foreach (var f in files)
-                    {
-                        string target = f.Key == "Kinetik.exe" ? me : Path.Combine(dir, f.Key.Replace('/', '\\'));
-                        if (File.Exists(target))
-                        {
-                            string old = target + ".old";
-                            if (File.Exists(old)) File.Delete(old);
-                            File.Move(target, old);
-                            moved.Add(target);
-                        }
-                        using (var fs = new FileStream(target, FileMode.CreateNew, FileAccess.Write)) fs.Write(f.Value, 0, f.Value.Length);
-                        written.Add(target);
-                    }
-                }
-                catch
-                {
-                    foreach (var w in written) try { File.Delete(w); } catch { }
-                    foreach (var m in moved) try { File.Move(m + ".old", m); } catch { }
-                    throw;
-                }
+                string dir = Path.GetDirectoryName(Application.ExecutablePath);
+                var backup = Path.Combine(dir, "Old Versions", "update-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
+                KinetikSuite.FileTransaction.Install(dir, files, backup);
             }
             catch (UnauthorizedAccessException) { err = "Kinetik can't write to its folder. Run it as administrator, or update by hand."; }
             catch (Exception e) { err = e.Message; }
@@ -5988,7 +5990,8 @@ static class Updates
                 owner.BeginInvoke((Action)(() =>
                 {
                     if (err != null) { done(err); return; }
-                    try { Process.Start(new ProcessStartInfo(Application.ExecutablePath, "--restart") { UseShellExecute = false }); } catch { }
+                    try { Process.Start(new ProcessStartInfo(Application.ExecutablePath, "--restart") { UseShellExecute = false }); }
+                    catch (Exception ex) { done("The update was installed, but restart failed: " + ex.Message); return; }
                     Application.Exit();
                 }));
             }
@@ -5999,15 +6002,8 @@ static class Updates
     // Removes the files an update left behind (see Install).
     public static void CleanUp()
     {
-        try
-        {
-            string dir = Path.GetDirectoryName(Application.ExecutablePath);
-            foreach (var d in new[] { dir, Path.Combine(dir, "lib") })
-                if (Directory.Exists(d))
-                    foreach (var f in Directory.GetFiles(d, "*.old"))
-                        try { File.Delete(f); } catch { }
-        }
-        catch { }
+        // Previous versions and legacy .old files are retained for explicit recovery.
+        // Never delete recovery material merely because a process has started.
     }
 
     // Opened through Explorer so the browser starts as the normal user, even when Kinetik runs as administrator.
@@ -7122,7 +7118,7 @@ class WidgetForm : Form
     public readonly int Layer;
     readonly DibSurface surface = new DibSurface();
     readonly ShadowCache shadow = new ShadowCache();
-    readonly ContextMenuStrip menu = new ContextMenuStrip();
+    readonly ContextMenuStrip menu = KinetikSuite.MenuFocus.Attach(new ContextMenuStrip());
     readonly Dictionary<string, Hist> history = new Dictionary<string, Hist>();
     readonly SolidBrush brush = new SolidBrush(Color.White);
     Snapshot lastSnap;
@@ -7614,14 +7610,12 @@ class WidgetForm : Form
             if (rows.Count == 0) continue;
             foreach (var rw in rows) rw.Act = IconAnim.Activity(id, s);
             var g = Group(id);
-            if (c.WidgetHeadings && g != group)
-            {
-                // A heading already separates groups, so a divider right before one is dropped.
-                items.Add(new Item { Kind = 1, Label = g.ToUpperInvariant(), Sub = c.WidgetHwNames ? HwName(g, s) : null });
-                pendingDivider = false;
-            }
-            group = g;
+            // A divider placed before the next shown stat is drawn there, above that group's heading if one starts.
+            // (Dividers with nothing shown before or after them are still skipped.)
             if (pendingDivider) { items.Add(new Item { Kind = 2 }); pendingDivider = false; }
+            if (c.WidgetHeadings && g != group)
+                items.Add(new Item { Kind = 1, Label = g.ToUpperInvariant(), Sub = c.WidgetHwNames ? HwName(g, s) : null });
+            group = g;
             items.AddRange(rows);
         }
         if (items.Count == 0 || items.All(x => x.Kind == 3))
@@ -7640,6 +7634,9 @@ class WidgetForm : Form
     }
 
     // ---- layout and drawing
+    // The divider's thickness in whole pixels, so it never falls between two rows and smears to half strength.
+    float DividerPx { get { return Math.Max(1, (float)Math.Round(c.WidgetDividerSize * u)); } }
+
     bool ShowBars { get { return c.WidgetStyle == 0 || c.WidgetStyle == 2; } }
     bool ShowGraphs { get { return c.WidgetStyle == 1 || c.WidgetStyle == 2; } }
 
@@ -7649,7 +7646,7 @@ class WidgetForm : Form
         {
             case 3: return 30 * u;
             case 1: return (first ? 18 : 30) * u;
-            case 2: return 13 * u;
+            case 2: return Math.Max(13 * u, DividerPx + 10 * u);
             case 4: return (20 + (c.WidgetStyle == 3 ? 18 : 28) + 6) * u;
             default:
                 float h = 20 * u;
@@ -7768,8 +7765,17 @@ class WidgetForm : Form
                     break;
                 }
                 case 2:
-                    using (var p = new Pen(line, 1)) g.DrawLine(p, x0, y + 6 * u, x1, y + 6 * u);
+                {
+                    // Filled on whole pixels without smoothing, in a colour strong enough to see on any theme: the card's
+                    // faint outline colour, drawn as an anti-aliased 1 px line at a fractional height, could all but vanish.
+                    float t = DividerPx, top = (float)Math.Round(y + h / 2f - t / 2f);
+                    var sm = g.SmoothingMode; var po = g.PixelOffsetMode;
+                    g.SmoothingMode = SmoothingMode.None; g.PixelOffsetMode = PixelOffsetMode.None;
+                    using (var b = new SolidBrush(light ? Color.FromArgb(70, 0, 0, 0) : Color.FromArgb(66, 255, 255, 255)))
+                        g.FillRectangle(b, (float)Math.Round(x0), top, (float)Math.Round(x1 - x0), t);
+                    g.SmoothingMode = sm; g.PixelOffsetMode = po;
                     break;
+                }
                 default:
                     DrawRow(g, it, x0, x1, y, text, sub, track, line);
                     break;
@@ -7882,7 +7888,7 @@ class OverlayForm : Form
     readonly StatsBar bar;
     readonly Settings c;
     readonly DibSurface surface = new DibSurface();
-    readonly ContextMenuStrip menu = new ContextMenuStrip();
+    readonly ContextMenuStrip menu = KinetikSuite.MenuFocus.Attach(new ContextMenuStrip());
     readonly SolidBrush brush = new SolidBrush(Color.White);
     readonly IconAnim anim = new IconAnim();
     readonly System.Windows.Forms.Timer animTimer = new System.Windows.Forms.Timer { Interval = 16 };
@@ -8600,7 +8606,7 @@ class DashboardForm : Form
 
     void ShowThemeMenu()
     {
-        var m = new ContextMenuStrip { Renderer = new DarkMenuRenderer() };
+        var m = KinetikSuite.MenuFocus.Attach(new ContextMenuStrip { Renderer = new DarkMenuRenderer() });
         for (int i = 0; i < Dash.Themes.Length; i++)
         {
             int t = i;
@@ -10119,6 +10125,7 @@ class SettingsForm : Form
         title.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { commit(); e.SuppressKeyPress = true; } };
         Add(Icons.Text, Theme.Accent, "Title", "Shown at the top. Leave empty for none.", title);
         Switch(Icons.List, Theme.Accent, "Group headings", "WidgetHeadings", "Processor, Graphics, Memory… above each group");
+        SliderRow(Icons.Divider, Theme.Accent, "Divider thickness", "WidgetDividerSize", 1, 8, " px", "Lines between stats (add dividers on the Arrange page)");
         Switch(Icons.Chip, Theme.Accent, "Hardware names", "WidgetHwNames", "CPU and GPU model next to the headings");
         var secs = new[] { 30, 60, 120, 300 };
         Add(Icons.Clock, Theme.Accent, "Graph history", null,
