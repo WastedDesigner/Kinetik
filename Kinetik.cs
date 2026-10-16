@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("3.1.0.0")]
-[assembly: AssemblyFileVersion("3.1.0.0")]
-[assembly: AssemblyInformationalVersion("3.1.0")]
+[assembly: AssemblyVersion("3.1.1.0")]
+[assembly: AssemblyFileVersion("3.1.1.0")]
+[assembly: AssemblyInformationalVersion("3.1.1")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -77,7 +77,7 @@ class Settings
     public bool WidgetShow = false;
     public string WidgetOrder = DefaultWidgetOrder, WidgetItems = DefaultWidgetItems;
     public int WidgetX = int.MinValue, WidgetY = int.MinValue; // int.MinValue = top-right corner of the main screen
-    public int WidgetWidth = 280, WidgetScale = 100, WidgetOpacity = 88, WidgetRound = 100, WidgetGraphSecs = 60;
+    public int WidgetWidth = 280, WidgetScale = 100, WidgetOpacity = CommonMenu.DefaultOpacity, WidgetRound = 100, WidgetGraphSecs = 60;
     public int WidgetStyle = 0; // 0 bars, 1 graphs, 2 bars and graphs, 3 minimal
     public int WidgetTheme = 0; // legacy: 0 dark, 1 light, 2 match Windows; only read to seed WidgetThemeName
     public string WidgetThemeName = ""; // a WidgetThemes name, or "Auto" to match Windows
@@ -4221,8 +4221,30 @@ class GameWatch
         return (now - since).TotalSeconds >= secs;
     }
 
+    // Kinetik Focus writes when the focus session it's running ends; until then the alerts wait, and any that still
+    // apply come after it. Read at most every few seconds.
+    DateTime quietChecked = DateTime.MinValue; bool quiet;
+    bool FocusQuiet(DateTime now)
+    {
+        if ((now - quietChecked).TotalSeconds < 5) return quiet;
+        quietChecked = now;
+        quiet = false;
+        try
+        {
+            using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\KinetikFocus"))
+            {
+                var v = k == null ? null : k.GetValue("QuietUntil") as string;
+                DateTime until;
+                quiet = v != null && DateTime.TryParse(v, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out until) && until.ToUniversalTime() > DateTime.UtcNow;
+            }
+        }
+        catch { }
+        return quiet;
+    }
+
     void Alerts(Snapshot s, DateTime now)
     {
+        if (FocusQuiet(now)) return;
         if (c.AlertTemps)
         {
             if (Held(ref cpuHotSince, !double.IsNaN(s.CpuTemp) && s.CpuTemp >= c.WarnCpuTemp, now, 30) && Due("cpu", 10, now))
@@ -7133,16 +7155,36 @@ class WidgetForm : Form
         clickThrough = ClickThroughWanted;
 
         menu.Renderer = new DarkMenuRenderer();
-        var lockItem = new ToolStripMenuItem("Lock position");
-        lockItem.Click += (s, e) => { c.WidgetLocked = !c.WidgetLocked; c.Save(); bar.NotifySettings("Widget"); Render(true); };
-        menu.Opening += (s, e) => lockItem.Checked = c.WidgetLocked;
-        menu.Items.Add("Widget settings…", null, (s, e) => bar.OpenSettings("Widget"));
-        menu.Items.Add(lockItem);
-        menu.Items.Add("Hide widget", null, (s, e) => bar.SetWidget(false));
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Kinetik settings…", null, (s, e) => bar.OpenSettings(null));
+        menu.Opening += (s, e) => BuildMenu();
         animTimer.Tick += (s, e) => { animTimer.Interval = 1000 / Math.Max(10, c.AnimFps); AnimFrame(); };
         animTimer.Start();
+    }
+
+    // The widget's own items, then the look and placement options shared word for word with the other Kinetik apps.
+    void BuildMenu()
+    {
+        var old = menu.Items.Cast<ToolStripItem>().ToList();
+        menu.Items.Clear();
+        foreach (var it in old) it.Dispose(); // a cleared submenu that was shown keeps its window otherwise
+        menu.Items.Add("Widget settings…", null, (s, e) => bar.OpenSettings("Widget"));
+        menu.Items.Add("Hide widget", null, (s, e) => bar.SetWidget(false));
+        menu.Items.Add(new ToolStripSeparator());
+        Action changed = () => { c.Save(); bar.NotifySettings("Widget"); Render(true); };
+        new CommonMenu
+        {
+            OpenTheme = () => bar.OpenSettings("Widget"),
+            Scale = () => c.WidgetScale, SetScale = v => { c.WidgetScale = v; changed(); },
+            Widths = new[] { 240, 280, 340 }, CardWidth = () => c.WidgetWidth, SetCardWidth = v => { c.WidgetWidth = v; changed(); },
+            FontName = () => c.WidgetFont, SetFontName = v => { c.WidgetFont = v; changed(); },
+            Opacity = () => c.WidgetOpacity, SetOpacity = v => { c.WidgetOpacity = v; changed(); },
+            Layer = () => c.WidgetLayer, SetLayer = v => { c.WidgetLayer = v; bar.SetWidget(true); }, // a new layer means a new window
+            Locked = () => c.WidgetLocked, SetLocked = v => { c.WidgetLocked = v; changed(); },
+            ClickThrough = () => c.WidgetClickThrough, SetClickThrough = v => { c.WidgetClickThrough = v; changed(); },
+            Snap = () => c.WidgetSnap, SetSnap = v => { c.WidgetSnap = v; changed(); },
+        }.AddLook(menu.Items);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Kinetik settings…", null, (s, e) => bar.OpenSettings(null));
+        foreach (var mi in menu.Items.OfType<ToolStripMenuItem>()) if (mi.HasDropDownItems) mi.DropDown.Renderer = menu.Renderer; // dark submenus too
     }
 
     // Redraws just the icon squares for the next animation frame, then re-pushes that part of the window.
@@ -10446,3 +10488,107 @@ class SettingsForm : Form
         }));
     }
 }
+
+// ======================================================================= The right-click menu every Kinetik widget shares
+// The look, placement, startup and backup options, in the same order and the same words in every Kinetik app, so they
+// feel like one set. Each app adds its own items above. Same code in every Kinetik app.
+#pragma warning disable 0649 // the hooks an app has no use for stay null
+class CommonMenu
+{
+    public static readonly int[] Scales = { 80, 90, 100, 115, 125, 150 };
+    public static readonly int[] Opacities = { 100, 95, 80, 65, 50, 30, 0 };
+    public const int DefaultOpacity = 95;
+    public static readonly string[] Fonts = { "Segoe UI Variable Text", "Segoe UI", "Bahnschrift", "Calibri", "Aptos", "Inter", "Cascadia Code", "Consolas", "Verdana", "Georgia" };
+
+    // Settings saved before the shared default changed from 92% to 95% move with it; any other choice is kept.
+    public static int Migrate(int opacity) { return opacity == 92 ? DefaultOpacity : opacity; }
+
+    public string Title, Version;
+    public Action OpenTheme;                                        // opens the theme picker (or the page with it)
+    public Func<int> Scale; public Action<int> SetScale;
+    public int[] Widths; public Func<int> CardWidth; public Action<int> SetCardWidth; // optional: Narrow, Normal, Wide
+    public Func<string> FontName; public Action<string> SetFontName;   // optional; "" = the default font
+    public Func<int> Opacity; public Action<int> SetOpacity;
+    public Func<int> Layer; public Action<int> SetLayer;
+    public Func<bool> Locked; public Action<bool> SetLocked;
+    public Func<bool> ClickThrough; public Action<bool> SetClickThrough; // optional
+    public Func<bool> Snap; public Action<bool> SetSnap;
+    public string LockText = "Lock position";
+    public Action OpenSettings;                                     // optional: the app's Settings window
+    public Func<bool> RunAtStartup; public Action<bool> SetRunAtStartup;   // optional
+    public Action BackUp, Restore; public Func<string> LastBackup; // optional
+    public Action Exit;                                         // optional
+
+    static ToolStripMenuItem Item(string text, bool check, Action click)
+    {
+        var it = new ToolStripMenuItem(text) { Checked = check };
+        it.Click += (s, e) => click();
+        return it;
+    }
+
+    static bool HasFont(string name)
+    {
+        try { using (var f = new FontFamily(name)) return f.Name == name; } catch { return false; }
+    }
+
+    // Appearance and placement: Theme, Size, Font, Background opacity, Placement.
+    public void AddLook(ToolStripItemCollection items)
+    {
+        if (OpenTheme != null) items.Add(Item("Theme…", false, OpenTheme));
+
+        var size = new ToolStripMenuItem("Size");
+        foreach (var s in Scales) { int v = s; size.DropDownItems.Add(Item(v + "%", Scale() == v, () => SetScale(v))); }
+        if (Widths != null)
+        {
+            size.DropDownItems.Add(new ToolStripSeparator());
+            string[] names = { "Narrow", "Normal", "Wide" };
+            for (int i = 0; i < Widths.Length && i < 3; i++) { int v = Widths[i]; size.DropDownItems.Add(Item(names[i], CardWidth() == v, () => SetCardWidth(v))); }
+        }
+        items.Add(size);
+
+        if (FontName != null)
+        {
+            var font = new ToolStripMenuItem("Font");
+            font.DropDownItems.Add(Item("Default", FontName() == "", () => SetFontName("")));
+            foreach (var n in Fonts.Where(HasFont)) { string v = n; font.DropDownItems.Add(Item(v, FontName() == v, () => SetFontName(v))); }
+            if (FontName() != "" && !Fonts.Contains(FontName())) font.DropDownItems.Add(Item(FontName(), true, () => { }));
+            items.Add(font);
+        }
+
+        var opacity = new ToolStripMenuItem("Background opacity");
+        foreach (var o in Opacities) { int v = o; opacity.DropDownItems.Add(Item(v + "%", Opacity() == v, () => SetOpacity(v))); }
+        if (!Opacities.Contains(Opacity())) opacity.DropDownItems.Add(Item(Opacity() + "%", true, () => { }));
+        items.Add(opacity);
+
+        var place = new ToolStripMenuItem("Placement");
+        string[] layers = { "On the desktop", "Normal window", "Always on top" };
+        for (int i = 0; i < 3; i++) { int v = i; place.DropDownItems.Add(Item(layers[i], Layer() == v, () => SetLayer(v))); }
+        place.DropDownItems.Add(new ToolStripSeparator());
+        place.DropDownItems.Add(Item(LockText, Locked(), () => SetLocked(!Locked())));
+        if (ClickThrough != null) place.DropDownItems.Add(Item("Click-through when locked", ClickThrough(), () => SetClickThrough(!ClickThrough())));
+        place.DropDownItems.Add(Item("Snap to screen edges", Snap(), () => SetSnap(!Snap())));
+        items.Add(place);
+    }
+
+    // The rest: Settings…, Run at startup, Backup, then the version and Exit.
+    public void AddEnd(ToolStripItemCollection items)
+    {
+        items.Add(new ToolStripSeparator());
+        if (OpenSettings != null) items.Add(Item("Settings…", false, OpenSettings));
+        if (RunAtStartup != null) items.Add(Item("Run at startup", RunAtStartup(), () => SetRunAtStartup(!RunAtStartup())));
+        if (BackUp != null)
+        {
+            var backup = new ToolStripMenuItem("Backup");
+            backup.DropDownItems.Add(Item("Back up settings", false, BackUp));
+            backup.DropDownItems.Add(Item("Restore settings…", false, Restore));
+            backup.DropDownItems.Add(new ToolStripMenuItem("Last backup: " + LastBackup()) { Enabled = false });
+            items.Add(backup);
+        }
+        items.Add(new ToolStripSeparator());
+        items.Add(new ToolStripMenuItem(Title + " " + Version) { Enabled = false });
+        if (Exit != null) items.Add(Item("Exit", false, Exit));
+    }
+
+    public void AddAll(ToolStripItemCollection items) { AddLook(items); AddEnd(items); }
+}
+#pragma warning restore 0649

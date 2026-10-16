@@ -3,3 +3,4 @@
 lib/
 *.zip
 dist/
+*-settings.reg
