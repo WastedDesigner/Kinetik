@@ -1,8 +1,8 @@
 param([Parameter(Mandatory=$true)][string]$App)
 $ErrorActionPreference = 'Stop'
-if ($App -eq 'Kinetik') { Write-Host 'Kinetik hardware/taskbar integration requires the manual Windows test matrix; no demo mode is available.'; exit 0 }
+if ($App -in @('Kinetik', 'KinetikScreen')) { Write-Host "$App hardware integration requires a manual Windows check; no demo mode is available."; exit 0 }
 $exe = Join-Path (Split-Path -Parent $PSScriptRoot) ($App + '.exe')
-$process = Start-Process -FilePath $exe -ArgumentList '--demo' -PassThru
+$process = Start-Process -FilePath $exe -ArgumentList '--demo' -PassThru -WindowStyle Hidden
 try {
     Start-Sleep -Seconds 3
     if ($process.HasExited) { throw "$App exited before the demo smoke check completed." }

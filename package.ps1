@@ -1,6 +1,13 @@
-param([Parameter(Mandatory=$true)][ValidatePattern('^Kinetik(?:Calendar|Clock|Dock|Feeds|Focus|Hub|Notes|Weather)?$')][string]$App)
+param([Parameter(Mandatory=$true)][ValidatePattern('^Kinetik(?:Calendar|Clock|Dock|Feeds|Focus|Hub|Notes|Screen|Weather)?$')][string]$App)
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+function Get-Sha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($sha.ComputeHash($stream)).Replace('-', '') }
+    finally { $stream.Dispose(); $sha.Dispose() }
+}
 $stage = Join-Path $PSScriptRoot ('.package-' + [Guid]::NewGuid().ToString('N'))
 $candidate = Join-Path $PSScriptRoot ($App + '.candidate.zip')
 $archive = Join-Path $PSScriptRoot ($App + '.zip')
@@ -10,7 +17,8 @@ try {
         if (-not (Test-Path -LiteralPath $name -PathType Leaf)) { throw "Missing package input: $name" }
         Copy-Item -LiteralPath $name -Destination $stage
     }
-    if ($App -eq 'Kinetik') {
+    if (Test-Path -LiteralPath 'RELEASE_NOTES_2026-10-16.md') { Copy-Item -LiteralPath 'RELEASE_NOTES_2026-10-16.md' -Destination $stage }
+    if ($App -in @('Kinetik', 'KinetikScreen')) {
         if (-not (Test-Path -LiteralPath 'lib\LibreHardwareMonitorLib.dll')) { throw 'Missing sensor library' }
         New-Item -ItemType Directory -Path (Join-Path $stage 'lib') | Out-Null
         Get-ChildItem -LiteralPath 'lib' -Filter '*.dll' | Copy-Item -Destination (Join-Path $stage 'lib')
@@ -18,14 +26,14 @@ try {
     $files = [ordered]@{}
     Get-ChildItem -LiteralPath $stage -Recurse -File | Sort-Object FullName | ForEach-Object {
         $relative = $_.FullName.Substring($stage.Length + 1).Replace('\', '/')
-        $files[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+        $files[$relative] = Get-Sha256 $_.FullName
     }
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $stage ($App + '.exe'))).FileVersion
     $manifest = [ordered]@{ app = $App; version = $version; files = $files }
     $manifest | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $stage 'release-manifest.json') -Encoding UTF8
     $files.GetEnumerator() | ForEach-Object { $_.Value + '  ' + $_.Key } | Set-Content -LiteralPath (Join-Path $stage 'SHA256SUMS') -Encoding ASCII
-    Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $candidate -Force
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    if (Test-Path -LiteralPath $candidate) { Remove-Item -LiteralPath $candidate -Force }
+    [IO.Compression.ZipFile]::CreateFromDirectory($stage, $candidate)
     $zip = [IO.Compression.ZipFile]::OpenRead($candidate)
     try {
         foreach ($file in $files.GetEnumerator()) {
@@ -42,12 +50,14 @@ try {
         Copy-Item -LiteralPath $archive -Destination (Join-Path $old ($App + '-' + [Guid]::NewGuid().ToString('N') + '.zip'))
     }
     Move-Item -LiteralPath $candidate -Destination $archive -Force
-    $zipHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+    $zipHash = Get-Sha256 $archive
     ($zipHash + '  ' + $App + '.zip') | Set-Content -LiteralPath ($archive + '.sha256') -Encoding ASCII
     Copy-Item -LiteralPath (Join-Path $stage 'release-manifest.json') -Destination 'release-manifest.json' -Force
     Write-Host "Verified $archive ($version)"
     Write-Host ('SHA-256 of `' + $App + '.exe`: `' + $files[($App + '.exe')] + '`')
 } finally {
+    $rootPath = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\') + '\'
+    if (-not [IO.Path]::GetFullPath($stage).StartsWith($rootPath, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe staging path' }
     if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
     if (Test-Path -LiteralPath $candidate) { Remove-Item -LiteralPath $candidate -Force }
 }

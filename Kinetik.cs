@@ -1,4 +1,4 @@
-﻿// Kinetik: a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
+// Kinetik: a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
 // Shows network speed and ping, CPU (usage, clock, temp, power, per-core), RAM and commit, GPU (usage, temp, clock,
 // fan, VRAM, power), disk activity / throughput / free space, processes, uptime, and battery levels of the PC and
 // connected Bluetooth devices. Every item can be reordered, given its own icon and colour, and split into groups
@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("3.1.3.0")]
-[assembly: AssemblyFileVersion("3.1.3.0")]
-[assembly: AssemblyInformationalVersion("3.1.3")]
+[assembly: AssemblyVersion("3.1.4.0")]
+[assembly: AssemblyFileVersion("3.1.4.0")]
+[assembly: AssemblyInformationalVersion("3.1.4")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]

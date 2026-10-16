@@ -197,6 +197,16 @@ namespace KinetikSuite
 
     public static class Http
     {
+        static HttpWebResponse Open(HttpWebRequest request)
+        {
+            try { return (HttpWebResponse)request.GetResponse(); }
+            catch (WebException error)
+            {
+                // Failed HTTP responses also own a connection; callers still retain the status metadata.
+                if (error.Response != null) error.Response.Close();
+                throw;
+            }
+        }
         public static byte[] Get(string url, int limit, string agent, CancellationToken cancel, int timeoutMs = 20000, string accept = null)
         {
             Uri uri;
@@ -211,7 +221,7 @@ namespace KinetikSuite
             {
                 deadline.CancelAfter(timeoutMs);
                 using (deadline.Token.Register(request.Abort))
-                using (var response = (HttpWebResponse)request.GetResponse())
+                using (var response = Open(request))
                 using (var stream = response.GetResponseStream())
                 using (var result = new MemoryStream())
                 {
@@ -370,7 +380,9 @@ namespace KinetikSuite
     public sealed class Shutdown : IDisposable
     {
         readonly EventWaitHandle signal;
-        readonly System.Windows.Forms.Timer timer;
+        readonly System.Windows.Forms.Control dispatcher;
+        readonly RegisteredWaitHandle wait;
+        int disposed;
         public Shutdown(string id, Action close)
         {
             var security = new System.Security.AccessControl.EventWaitHandleSecurity();
@@ -378,13 +390,37 @@ namespace KinetikSuite
             security.SetSecurityDescriptorSddlForm("D:(A;;0x1F0003;;;SY)(A;;0x1F0003;;;BA)(A;;0x1F0003;;;" + System.Security.Principal.WindowsIdentity.GetCurrent().User.Value + ")");
             bool created;
             signal = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\" + id + ".Shutdown", out created, security);
-            timer = new System.Windows.Forms.Timer { Interval = 250 };
-            timer.Tick += (s, e) => { if (signal.WaitOne(0)) { timer.Stop(); close(); } };
-            timer.Start();
+            // A registered wait sleeps until requested instead of waking every widget four times a second.
+            dispatcher = new System.Windows.Forms.Control();
+            dispatcher.CreateControl();
+            wait = ThreadPool.RegisterWaitForSingleObject(signal, (state, timedOut) =>
+            {
+                if (Interlocked.CompareExchange(ref disposed, 0, 0) != 0) return;
+                Ui.Post(dispatcher, () => { if (Interlocked.CompareExchange(ref disposed, 0, 0) == 0) close(); });
+            }, null, Timeout.Infinite, true);
         }
         public static bool Request(string id)
         { try { using (var e = EventWaitHandle.OpenExisting(@"Local\" + id + ".Shutdown")) e.Set(); return true; } catch { return false; } }
-        public void Dispose() { timer.Dispose(); signal.Dispose(); }
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+            wait.Unregister(null); dispatcher.Dispose(); signal.Dispose();
+        }
+    }
+
+    public static class Ui
+    {
+        // System events and worker completions can arrive after their window has closed.
+        public static bool Post(System.Windows.Forms.Control control, Action action)
+        {
+            if (control.IsDisposed || control.Disposing || !control.IsHandleCreated) return false;
+            try
+            {
+                control.BeginInvoke((Action)(() => { if (!control.IsDisposed && !control.Disposing) action(); }));
+                return true;
+            }
+            catch (InvalidOperationException) { return false; }
+        }
     }
 
     // Right-click menus close when you click anywhere else, the desktop included. The widgets never take focus, so
