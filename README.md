@@ -15,7 +15,7 @@ Every stat can be switched on or off, reordered, restyled and grouped with divid
 
 ![Kinetik on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
 
-**Latest version: v3.1.2.** [Download it from Releases](../../releases/latest).
+**Latest version: v3.1.3.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 

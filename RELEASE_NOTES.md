@@ -1,3 +1,9 @@
+# Kinetik v3.1.3
+
+A fix for the Settings window.
+
+- **Fixed: Settings opened again as soon as you closed it** when Kinetik's taskbar button was on. Closing Settings handed the focus to the taskbar button's hidden window, which took that as a click and reopened Settings. Now only a real click on the taskbar button opens it.
+
 # Kinetik v3.1.2
 
 Fixes and polish for the taskbar bar and desktop widget.

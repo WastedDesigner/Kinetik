@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("3.1.2.0")]
-[assembly: AssemblyFileVersion("3.1.2.0")]
-[assembly: AssemblyInformationalVersion("3.1.2")]
+[assembly: AssemblyVersion("3.1.3.0")]
+[assembly: AssemblyFileVersion("3.1.3.0")]
+[assembly: AssemblyInformationalVersion("3.1.3")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -2839,12 +2839,17 @@ class StatsBar : Form
         t.Start();
     }
 
+    // When Settings last closed: the taskbar button's window ignores being activated just after, since that's Windows
+    // passing activation along, not a click.
+    public DateTime SettingsClosedUtc = DateTime.MinValue;
+
     public void OpenSettings(string page)
     {
         if (settingsForm == null || settingsForm.IsDisposed)
         {
             settingsForm = new SettingsForm(this);
-            settingsForm.FormClosed += (s, e) => { settingsForm = null; TrimSoon(1500); };
+            settingsForm.FormClosing += (s, e) => SettingsClosedUtc = DateTime.UtcNow;
+            settingsForm.FormClosed += (s, e) => { settingsForm = null; SettingsClosedUtc = DateTime.UtcNow; TrimSoon(1500); };
         }
         if (page != null) settingsForm.ShowPage(page);
         settingsForm.Show(); settingsForm.Activate();
@@ -6200,17 +6205,23 @@ class TaskbarButtonForm : Form
 
     protected override bool ShowWithoutActivation { get { return true; } }
 
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+
     protected override void WndProc(ref Message m)
     {
         // Clicking the button of the active window asks it to minimise; open Settings instead.
         if (m.Msg == 0x112 && ((int)m.WParam & 0xFFF0) == 0xF020) { bar.OpenSettings(null); return; }
+        // WM_ACTIVATE: open Settings when this window is activated from another app (a click on its taskbar button), but
+        // not when Windows falls back to it because one of Kinetik's own windows closed, such as Settings itself.
+        // Without this, closing Settings activated this window, which opened Settings again.
+        if (m.Msg == 0x0006 && ((int)m.WParam & 0xFFFF) != 0)
+        {
+            uint pid = 0;
+            if (m.LParam != IntPtr.Zero) GetWindowThreadProcessId(m.LParam, out pid);
+            bool fromKinetik = pid == (uint)Process.GetCurrentProcess().Id || (DateTime.UtcNow - bar.SettingsClosedUtc).TotalSeconds < 1;
+            if (!fromKinetik) BeginInvoke((Action)(() => bar.OpenSettings(null)));
+        }
         base.WndProc(ref m);
-    }
-
-    protected override void OnActivated(EventArgs e)
-    {
-        base.OnActivated(e);
-        BeginInvoke((Action)(() => bar.OpenSettings(null)));
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
