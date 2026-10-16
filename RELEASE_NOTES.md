@@ -1,3 +1,23 @@
+# Kinetik v3.1.2
+
+Fixes and polish for the taskbar bar and desktop widget.
+
+**Desktop widget**
+- **Dividers always show.** They were drawn as a faint, smoothed 1-pixel line that could all but vanish; now they're crisp, visible on every theme, and kept even right before a group heading
+- **New: Divider thickness** (1–8 px) in Settings → Widget
+- **More in the right-click menu:** Theme, Size, Font, Background opacity and Placement, the same as the other Kinetik apps
+- **Right-click menus close when you click elsewhere,** the desktop included. They used to stay open
+
+**Updating**
+- The built-in updater stages the new files, checks them, then swaps them in, and rolls back if anything fails. A half-finished update can no longer leave a broken exe, and its recovery files are kept
+- Same-version updates are compared by SHA-256, not just file size
+
+**Also**
+- **Closes cleanly when Kinetik Hub asks it to,** so Hub can restart and update it without force-closing it
+- **Safer settings:** out-of-range values are backed up and corrected when the app starts, and settings that can't be read are never saved over
+- Default widget background opacity is 95%
+- `build.bat` keeps the exe it replaces in `..\Old Versions`, and `build.bat package` checks every file in the release zip against its SHA-256 hash
+
 # Kinetik v3.1.0
 
 Kinetik 3.1 adds a live dashboard (as a window and as a web page), Now playing on the taskbar, a settings backup next to the exe, and lighter animation.

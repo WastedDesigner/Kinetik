@@ -5,3 +5,5 @@ lib/
 dist/
 *-settings.reg
 .github/
+*.zip.sha256
+release-manifest.json

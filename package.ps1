@@ -6,7 +6,7 @@ $candidate = Join-Path $PSScriptRoot ($App + '.candidate.zip')
 $archive = Join-Path $PSScriptRoot ($App + '.zip')
 try {
     New-Item -ItemType Directory -Path $stage | Out-Null
-    foreach ($name in @($App + '.exe', 'README.md', 'LICENSE')) {
+    foreach ($name in @(($App + '.exe'), 'README.md', 'LICENSE')) {
         if (-not (Test-Path -LiteralPath $name -PathType Leaf)) { throw "Missing package input: $name" }
         Copy-Item -LiteralPath $name -Destination $stage
     }

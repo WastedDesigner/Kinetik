@@ -15,7 +15,7 @@ Every stat can be switched on or off, reordered, restyled and grouped with divid
 
 ![Kinetik on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
 
-**Latest published version: v3.1.0. Local maintenance build: v3.1.2.** [Download it from Releases](../../releases/latest).
+**Latest version: v3.1.2.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 
@@ -393,6 +393,10 @@ No Visual Studio or SDK needed. It compiles with the .NET Framework compiler tha
 
 Found a bug or want a feature? [Open an issue](../../issues) and include your Windows version, CPU/GPU, and a screenshot if possible. Pull requests are welcome too.
 
+## Tests and packaging
+
+`python tests/run-tests.py` runs the regression checks (no window opens). `build.bat package` builds the exe and makes the release zip, checking every file in it against its SHA-256 hash. The shared support code (`SuiteSupport.cs`) is compiled into the exe, so there's no extra DLL.
+
 ## License
 
 Copyright © 2026 Akila Sella Hennedige.
@@ -402,7 +406,3 @@ Released under the [GNU General Public License v3.0](LICENSE) (GPL-3.0-or-later)
 Versions up to and including v1.2.1 were released under the MIT License.
 
 Third-party components bundled in the release exe keep their own licenses. [LibreHardwareMonitorLib](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) is licensed under MPL-2.0, and HidSharp under Apache-2.0.
-
-## Local maintenance build 3.1.2
-
-Includes the approved 16 October 2026 diagnostics fixes. Cross-compilation and regression results are recorded in the Apps diagnostics report; Windows GUI and hardware validation remains pending. Run `python tests/run-tests.py` for non-GUI regressions, and `build.bat package` to compile and create a hash-verified release package. Shared support is compiled into the EXE; no additional runtime DLL is required.
