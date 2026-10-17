@@ -22,6 +22,8 @@ Every stat can be switched on or off, reordered, restyled and grouped with divid
 - [Features](#features)
 - [Desktop widget](#desktop-widget)
 - [Game overlay](#game-overlay)
+- [Dashboard](#dashboard)
+- [Now playing](#now-playing)
 - [Notifications](#notifications)
 - [Download and use](#download-and-use)
 - [Settings guide](#settings-guide)
@@ -149,6 +151,23 @@ Everything about the overlay is set on the **Overlay** page in Settings:
 
 ![The Overlay page in Settings](screenshots/settings-overlay.png)
 
+## Dashboard
+
+A full-screen view of everything Kinetik measures, as a window or a web page. Both are off by default, and the extra readings are only measured while the window is open or a browser is showing the page.
+
+- **Dashboard window:** cards for CPU, GPU, memory, network, disk, temperatures, power, game FPS, CPU cores and system, each with the current reading, average, peak and a graph of the last 1–10 minutes. Open it from the right-click menu, **Ctrl+Shift+F9** or `Kinetik.exe --dashboard`. The grid fits the window and scales its text, gauges and graphs to match.
+- **Web dashboard:** the same dashboard in a browser on this PC or, if you allow it, other devices on your network. Every request needs the secret key in the link shown in Settings, and **New link** replaces it. Profiles and backups leave the key out.
+- **Layout editor:** **Settings → Dashboard → Layout** reorders cards and their stats and switches them on or off. All 44 stats are available.
+- **Themes:** Modern, plus Terminal, Amber terminal and Yellow terminal looks.
+
+## Now playing
+
+Shows what's playing in Spotify, browsers and media players, with its cover art, read from Windows' media controls. By default it sits on its own in the taskbar's left corner, and it can also join the bar, the widget and the game overlay.
+
+- Click to play or pause, middle-click for the next track, and scroll to change track
+- Hover for a card with the cover, artist, album, progress and playback buttons
+- Long titles scroll instead of being cut short
+
 ## Notifications
 
 Kinetik can tell you when something needs attention, using Windows' own notifications (so Focus assist and Do not disturb apply). Pick them in **Settings → General → Notifications**:
@@ -179,6 +198,7 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 | **Appearance** | Font and size, one or two lines, spacing sliders (with **Reset spacing**), divider style and height, hover graphs, animated icons and their frame rate, and the background pill's opacity and corner roundness. |
 | **Colours** | Match the taskbar theme, text and warning colours, a colour for each icon group, and the background colour. |
 | **Overlay** | Turn the game overlay on, show it automatically in games, move it to the game's monitor, close it with the game, the Ctrl+Shift+F10 hotkey, lock (click-through), position, session summaries, benchmark recording (Ctrl+Shift+F11), text labels or icons, size, background opacity, and its own **Contents** list. |
+| **Dashboard** | Turn the dashboard window and web dashboard on, share the web dashboard on your network, **New link**, theme, graph length, and the **Layout** editor for cards and their stats. |
 | **Widget** | Turn the desktop widget on, and set its placement, lock, click-through and snapping, style, theme, colours, size, width, roundness, shadow, animated icons, title, headings and graph history. Its **Contents** list works like the Arrange page. |
 | **General** | Settings window background colour, update interval, shift left, left-click action, hide in fullscreen, show on all taskbars, tray icon (spinning, with a choice of backgrounds), taskbar button, desktop shortcut, warning limits, notifications, profiles and backup, run at startup, restart as administrator, and restore default settings. |
 | **About** | Version number, **Check for updates** (installs a newer version for you), **Include test versions**, and copyright. |
@@ -247,6 +267,26 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v3.1.3
+
+- Fixed Settings reopening as soon as you closed it while Kinetik's taskbar button was on.
+
+### v3.1.2
+
+- **Desktop widget:** dividers are now crisp and visible on every theme, a new **Divider thickness** setting (1–8 px), more options in the widget's right-click menu, and right-click menus close when you click elsewhere.
+- **Safer updates:** the updater stages and checks the new files before swapping them in, and rolls back if anything fails.
+- **Safer settings:** out-of-range values are backed up and corrected at startup, and settings that can't be read are never saved over.
+- Default widget background opacity is now 95%.
+
+### v3.1.0: dashboard and Now playing
+
+- **Dashboard** as a window and a web page, with a layout editor and four themes ([see above](#dashboard)).
+- **Now playing** on the taskbar, with cover art and playback controls ([see above](#now-playing)).
+- **Settings backup** saved next to the exe, offered for restore on a fresh Windows install. Any installed font for the widget.
+- **Companion apps** (such as a USB sensor-panel driver) can read Kinetik's stats through shared memory that only your Windows account can open.
+- **Faster:** bar frames take about 40% less time and full widget repaints about 45% less. Animations pause while the screen is off, the PC is locked or the widget is covered.
+- **Fixed:** a window leak in the Profiles menu, a notification timer leak, and a crash when launching normally while an elevated copy was running.
 
 ### v3.0.0: gaming update
 
