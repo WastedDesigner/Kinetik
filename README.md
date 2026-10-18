@@ -1,5 +1,7 @@
 # Kinetik: taskbar system monitor, FPS counter and game overlay for Windows
 
+![Kinetik: the taskbar bar, game overlay and desktop widget](screenshots/social-preview.png)
+
 [![Latest release](https://img.shields.io/github/v/release/WastedDesigner/Kinetik?label=download)](../../releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/WastedDesigner/Kinetik/total)](../../releases)
 [![License: GPL v3](https://img.shields.io/github/license/WastedDesigner/Kinetik)](LICENSE)
