@@ -13,7 +13,7 @@ Every stat can be switched on or off, reordered, restyled and grouped with divid
 
 > **About this project:** I originally made this for my own personal use and decided to share it in case anyone else finds it useful. If you run into a bug or have an idea for a feature, please [open an issue](../../issues). I'll do my best to look into it and implement what I can.
 
-![Kinetik on the taskbar, one-line layout with dividers](screenshots/bar-one-line.png)
+![Kinetik on the taskbar, one-line layout with dividers](screenshots/v3.2/bar-one-line.png)
 
 **Latest version: v3.1.3.** [Download it from Releases](../../releases/latest).
 
@@ -59,11 +59,11 @@ Each one can be turned on or off. There are 44 in total.
 
 The same bar can look very different. Here it is in the compact two-line layout:
 
-![Two-line layout](screenshots/bar-two-line.png)
+![Two-line layout](screenshots/v3.2/bar-two-line.png)
 
 And with text labels instead of icons and dot-style dividers:
 
-![Text labels and dot dividers](screenshots/bar-text-labels.png)
+![Text labels and dot dividers](screenshots/v3.2/bar-text-labels.png)
 
 
 - **Arrange page:** drag rows to set the left-to-right order. Rows follow the mouse, the others slide out of the way, and the page scrolls by itself when you drag near the edge. You can also use the ▲ / ▼ buttons, or select a row and press **Alt+↑ / Alt+↓**.
@@ -80,7 +80,7 @@ And with text labels instead of icons and dot-style dividers:
 
 ## Desktop widget
 
-<img src="screenshots/widget.png" alt="The desktop widget in the Mono theme" align="right" width="300">
+<img src="screenshots/v3.2/widget.png" alt="The desktop widget in the Mono theme" align="right" width="300">
 
 Alongside the taskbar bar, Kinetik can show a floating panel on your desktop, similar to LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or in **Settings → Widget**.
 
@@ -100,7 +100,7 @@ The widget costs nothing while it's switched off. Stats are only measured when t
 
 Everything about the widget is set on the **Widget** page in Settings:
 
-![The Widget page in Settings](screenshots/settings-widget.png)
+![The Widget page in Settings](screenshots/v3.2/settings-widget.png)
 
 ### Quality of life
 
@@ -128,11 +128,11 @@ Everything about the widget is set on the **Widget** page in Settings:
 
 A slim strip that stays on top of your game so you can watch your stats while you play.
 
-![The game overlay with text labels](screenshots/overlay-text.png)
+![The game overlay with text labels](screenshots/v3.2/overlay-text.png)
 
 The same overlay with icons instead of text labels:
 
-![The game overlay with icons](screenshots/overlay-icons.png)
+![The game overlay with icons](screenshots/v3.2/overlay-icons.png)
 
 Turn it on from the bar's right-click menu (**Game overlay**), in **Settings → Overlay**, or with **Ctrl+Shift+F10**, which also works from inside a game.
 
@@ -149,7 +149,7 @@ Turn it on from the bar's right-click menu (**Game overlay**), in **Settings →
 
 Everything about the overlay is set on the **Overlay** page in Settings:
 
-![The Overlay page in Settings](screenshots/settings-overlay.png)
+![The Overlay page in Settings](screenshots/v3.2/settings-overlay.png)
 
 ## Dashboard
 
@@ -206,11 +206,11 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 ### Screenshots
 
 <table>
-<tr><td width="50%" valign="top"><img src="screenshots/settings-stats.png" alt="Stats page"><br><sub><b>Stats</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-arrange.png" alt="Arrange page"><br><sub><b>Arrange</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/settings-appearance.png" alt="Appearance page"><br><sub><b>Appearance</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-colours.png" alt="Colours page"><br><sub><b>Colours</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/settings-widget.png" alt="Widget page"><br><sub><b>Widget</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-overlay.png" alt="Overlay page"><br><sub><b>Overlay</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/settings-dashboard.png" alt="Dashboard page"><br><sub><b>Dashboard</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-general.png" alt="General page"><br><sub><b>General</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td><td width="50%" valign="top"></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v3.2/settings-stats.png" alt="Stats page"><br><sub><b>Stats</b></sub></td><td width="50%" valign="top"><img src="screenshots/v3.2/settings-arrange.png" alt="Arrange page"><br><sub><b>Arrange</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v3.2/settings-appearance.png" alt="Appearance page"><br><sub><b>Appearance</b></sub></td><td width="50%" valign="top"><img src="screenshots/v3.2/settings-colours.png" alt="Colours page"><br><sub><b>Colours</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v3.2/settings-widget.png" alt="Widget page"><br><sub><b>Widget</b></sub></td><td width="50%" valign="top"><img src="screenshots/v3.2/settings-overlay.png" alt="Overlay page"><br><sub><b>Overlay</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v3.2/settings-dashboard.png" alt="Dashboard page"><br><sub><b>Dashboard</b></sub></td><td width="50%" valign="top"><img src="screenshots/v3.2/settings-general.png" alt="General page"><br><sub><b>General</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v3.2/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td><td width="50%" valign="top"></td></tr>
 </table>
 
 ## Tips and shortcuts

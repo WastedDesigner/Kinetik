@@ -1,4 +1,4 @@
-// Kinetik: a TrafficMonitor-style overlay that sits on the taskbar, left of the tray.
+// Kinetik: a stats overlay that sits on the taskbar, left of the tray.
 // Shows network speed and ping, CPU (usage, clock, temp, power, per-core), RAM and commit, GPU (usage, temp, clock,
 // fan, VRAM, power), disk activity / throughput / free space, processes, uptime, and battery levels of the PC and
 // connected Bluetooth devices. Every item can be reordered, given its own icon and colour, and split into groups
