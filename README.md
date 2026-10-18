@@ -80,7 +80,7 @@ And with text labels instead of icons and dot-style dividers:
 
 ## Desktop widget
 
-<img src="screenshots/widget.png" alt="The desktop widget in the Bars style" align="right" width="300">
+<img src="screenshots/widget.png" alt="The desktop widget in the Mono theme" align="right" width="300">
 
 Alongside the taskbar bar, Kinetik can show a floating panel on your desktop, similar to LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or in **Settings → Widget**.
 
@@ -208,8 +208,9 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 <table>
 <tr><td width="50%" valign="top"><img src="screenshots/settings-stats.png" alt="Stats page"><br><sub><b>Stats</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-arrange.png" alt="Arrange page"><br><sub><b>Arrange</b></sub></td></tr>
 <tr><td width="50%" valign="top"><img src="screenshots/settings-appearance.png" alt="Appearance page"><br><sub><b>Appearance</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-colours.png" alt="Colours page"><br><sub><b>Colours</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/settings-widget.png" alt="Widget page"><br><sub><b>Widget</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-general.png" alt="General page"><br><sub><b>General</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/settings-overlay.png" alt="Overlay page"><br><sub><b>Overlay</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/settings-widget.png" alt="Widget page"><br><sub><b>Widget</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-overlay.png" alt="Overlay page"><br><sub><b>Overlay</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/settings-dashboard.png" alt="Dashboard page"><br><sub><b>Dashboard</b></sub></td><td width="50%" valign="top"><img src="screenshots/settings-general.png" alt="General page"><br><sub><b>General</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td><td width="50%" valign="top"></td></tr>
 </table>
 
 ## Tips and shortcuts
