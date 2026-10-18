@@ -5,7 +5,7 @@
 [![License: GPL v3](https://img.shields.io/github/license/WastedDesigner/Kinetik)](LICENSE)
 ![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
 
-**Kinetik** is a free, open-source system monitor for the Windows 11 and Windows 10 taskbar, with a game overlay and an FPS counter. It shows live **CPU and GPU temperature, usage, clock speed and power draw**, **RAM**, **network upload and download speed**, **ping**, **disk activity**, and **Bluetooth headphone and controller battery levels**, right next to the system tray, like TrafficMonitor.
+**Kinetik** is a free, open-source system monitor for the Windows 11 and Windows 10 taskbar, with a game overlay and an FPS counter. It shows live **CPU and GPU temperature, usage, clock speed and power draw**, **RAM**, **network upload and download speed**, **ping**, **disk activity**, and **Bluetooth headphone and controller battery levels**, right next to the system tray.
 
 For gaming, its always-on-top **FPS overlay** shows the frame rate with **1% lows**, a **frame-time graph**, **render latency** and the **base frame rate before DLSS or FSR frame generation**, for DirectX, Vulkan and OpenGL games, without hooking into them. There's also a desktop widget with live graphs, notifications when your PC runs hot, and benchmark recording to CSV.
 
