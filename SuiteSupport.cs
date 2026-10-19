@@ -797,6 +797,57 @@ namespace KinetikSuite
         }
     }
 
+    // A settings row. Rows one after another join into one rounded card split by hairlines, as in Kinetik's settings.
+    public class CardRow : System.Windows.Forms.Panel
+    {
+        bool first = true, last = true;
+        readonly float scale;
+        public CardRow(float scale)
+        {
+            this.scale = scale;
+            SetStyle(System.Windows.Forms.ControlStyles.AllPaintingInWmPaint | System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer | System.Windows.Forms.ControlStyles.UserPaint | System.Windows.Forms.ControlStyles.ResizeRedraw, true);
+            BackColor = Look.Current.Card;
+            Margin = new System.Windows.Forms.Padding(0, 0, 0, (int)(8 * scale));
+        }
+        protected override void OnParentChanged(EventArgs e)
+        {
+            base.OnParentChanged(e);
+            if (Parent == null) return;
+            Parent.ControlAdded -= Rejoin; Parent.ControlAdded += Rejoin;
+            Parent.ControlRemoved -= Rejoin; Parent.ControlRemoved += Rejoin;
+            Rejoin(Parent, null);
+        }
+        static void Rejoin(object sender, System.Windows.Forms.ControlEventArgs e)
+        {
+            var kids = ((System.Windows.Forms.Control)sender).Controls;
+            for (int i = 0; i < kids.Count; i++)
+            {
+                var row = kids[i] as CardRow;
+                if (row == null) continue;
+                bool f = i == 0 || !(kids[i - 1] is CardRow), l = i == kids.Count - 1 || !(kids[i + 1] is CardRow);
+                if (f == row.first && l == row.last) continue;
+                row.first = f; row.last = l;
+                row.Margin = new System.Windows.Forms.Padding(0, 0, 0, l ? (int)(8 * row.scale) : 0);
+                row.Invalidate();
+            }
+        }
+        protected override void OnPaint(System.Windows.Forms.PaintEventArgs e)
+        {
+            var g = e.Graphics; var lk = Look.Current; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(Parent != null ? Parent.BackColor : lk.Bg);
+            var r = new System.Drawing.RectangleF(0, 0, Width - 1, last ? Height - 1 : Height);
+            float d = 16 * scale;
+            using (var p = new System.Drawing.Drawing2D.GraphicsPath())
+            {
+                if (first) { p.AddArc(r.X, r.Y, d, d, 180, 90); p.AddArc(r.Right - d, r.Y, d, d, 270, 90); } else p.AddLine(r.X, r.Y, r.Right, r.Y);
+                if (last) { p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); p.AddArc(r.X, r.Bottom - d, d, d, 90, 90); } else p.AddLine(r.Right, r.Bottom, r.X, r.Bottom);
+                p.CloseFigure();
+                using (var b = new System.Drawing.SolidBrush(BackColor)) g.FillPath(b, p);
+            }
+            if (!first) using (var pen = new System.Drawing.Pen(lk.Border, 1)) g.DrawLine(pen, 16 * scale, 0, Width - 16 * scale, 0);
+        }
+    }
+
     // A drop-down list whose closed box and open list are both drawn in the theme (Windows draws a light arrow box otherwise).
     public class Dropdown : System.Windows.Forms.ComboBox
     {

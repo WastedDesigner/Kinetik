@@ -195,7 +195,7 @@ Two pages in Settings that help answer "what changed?" and "why did that crash?"
 
 **Settings → Theme** sets how Kinetik's own windows, menus and hover cards look: **Match Windows**, Graphite, OLED black, Midnight, Nord, Mocha, Forest, Light or Paper, with a Sky, Violet, Mint, Amber, Rose or Coral accent, or your Windows accent colour. The title bar follows the theme too.
 
-The theme is shared by every Kinetik app (the Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather), so picking it once changes them all. Each app's right-click menu also has **App theme**. Widget themes are separate and stay as they are.
+The theme is shared by every Kinetik app (the Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather), so picking it once changes them all. Each app's right-click menu also has **App theme**. Widgets keep their own themes, which now include **OLED black** and **Mocha**, plus **Match app theme**, which follows the app theme and accent colour.
 
 ## Notifications
 

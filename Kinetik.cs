@@ -299,7 +299,7 @@ class Settings
         DividerStyle = cl(DividerStyle, 0, 3); DividerHeight = cl(DividerHeight, 10, 400); WidgetDividerSize = cl(WidgetDividerSize, 1, 8);
         DashMinutes = cl(DashMinutes, 1, 10); DashTheme = cl(DashTheme, 0, Dash.Themes.Length - 1); DashW = cl(DashW, 420, 4000); DashH = cl(DashH, 360, 3000); WebPort = cl(WebPort, 1024, 65535);
         NowPlayingChars = cl(NowPlayingChars, 12, 80); NowPlayingOffset = cl(NowPlayingOffset, 0, 3000);
-        if (WidgetThemeName != "Auto" && !WidgetThemes.All.Any(t => t.Name == WidgetThemeName)) WidgetThemeName = WidgetTheme == 1 ? "Light" : WidgetTheme == 2 ? "Auto" : "Midnight";
+        if (WidgetThemeName != "Auto" && WidgetThemeName != "App" && !WidgetThemes.All.Any(t => t.Name == WidgetThemeName)) WidgetThemeName = WidgetTheme == 1 ? "Light" : WidgetTheme == 2 ? "Auto" : "Midnight";
         TrayStyle = cl(TrayStyle, 0, TrayIconArt.Styles.Length - 1); AppBackground = cl(AppBackground, 0, Theme.Backgrounds.Length - 1);
         if (float.IsNaN(FontSize) || FontSize < 0 || FontSize > 72) FontSize = 0;
         if (string.IsNullOrWhiteSpace(FontName) || FontName.Length > 100) FontName = DefaultFont();
@@ -9815,6 +9815,8 @@ static class WidgetThemes
         new WidgetTheme("Ocean", C(12, 29, 45), C(228, 242, 250), C(128, 160, 186), C(56, 198, 232), false),
         new WidgetTheme("Sunset", C(40, 23, 35), C(250, 236, 240), C(192, 150, 172), C(255, 138, 92), false),
         new WidgetTheme("Mono", C(10, 10, 10), C(245, 245, 245), C(140, 140, 140), C(245, 245, 245), false),
+        new WidgetTheme("OLED black", C(0, 0, 0), C(242, 242, 245), C(136, 136, 146), C(76, 194, 255), false),
+        new WidgetTheme("Mocha", C(30, 30, 46), C(205, 214, 244), C(147, 153, 178), C(203, 166, 247), false),
         new WidgetTheme("Terminal", C(3, 10, 5), C(90, 255, 120), C(46, 170, 80), C(205, 255, 215), false),
         new WidgetTheme("Amber terminal", C(12, 7, 0), C(255, 182, 40), C(185, 118, 22), C(255, 232, 180), false),
         new WidgetTheme("Yellow terminal", C(0, 0, 0), C(255, 226, 0), C(200, 178, 0), C(255, 255, 190), false),
@@ -9823,7 +9825,12 @@ static class WidgetThemes
         new WidgetTheme("Frost", C(236, 242, 250), C(20, 30, 48), C(92, 106, 132), C(40, 120, 230), true),
     };
 
-    public static WidgetTheme Get(string name) { return All.FirstOrDefault(t => t.Name == name) ?? All[0]; }
+    public static WidgetTheme Get(string name)
+    {
+        // "App" follows the theme and accent colour every Kinetik app shares.
+        if (name == "App") { var l = KinetikSuite.Look.Current; return new WidgetTheme("App", l.Card, l.Text, l.Sub, l.Accent, l.Light); }
+        return All.FirstOrDefault(t => t.Name == name) ?? All[0];
+    }
 
     // "Auto" follows the Windows light / dark app setting.
     public static WidgetTheme Resolve(string name) { return name == "Auto" ? Get(WidgetForm.WindowsLight() ? "Light" : "Midnight") : Get(name); }
@@ -9878,7 +9885,7 @@ class WidgetThemeTile : Control
             g.Restore(st);
         }
         else Mini(g, inner, WidgetThemes.Get(ThemeName));
-        TextRenderer.DrawText(g, ThemeName == "Auto" ? "Match Windows" : ThemeName, Theme.UI(9f), new Rectangle(0, Height - 26, Width, 20), selected ? Theme.Text : Theme.Sub,
+        TextRenderer.DrawText(g, ThemeName == "Auto" ? "Match Windows" : ThemeName == "App" ? "Match app theme" : ThemeName, Theme.UI(9f), new Rectangle(0, Height - 26, Width, 20), selected ? Theme.Text : Theme.Sub,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
     }
 
@@ -12222,7 +12229,7 @@ class SettingsForm : Form
             Combo(new[] { "Bars", "Graphs", "Bars and graphs", "Minimal" }, c.WidgetStyle, i => { c.WidgetStyle = i; Apply(); }, 170));
         Header("Theme");
         var tiles = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MaximumSize = new Size(RowW, 0), WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 4) };
-        foreach (var name in new[] { "Auto" }.Concat(WidgetThemes.All.Select(t => t.Name)))
+        foreach (var name in new[] { "Auto", "App" }.Concat(WidgetThemes.All.Select(t => t.Name)))
         {
             var tile = new WidgetThemeTile(name, name == c.WidgetThemeName);
             tile.Click += (s, e) =>
