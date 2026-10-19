@@ -2301,7 +2301,7 @@ static class Program
                 string page = si + 1 < args.Length && !args[si + 1].StartsWith("--") ? args[si + 1] : null;
                 bar.Load += (s, e) => bar.BeginInvoke((Action)(() => bar.OpenSettings(page)));
             }
-            using (new KinetikSuite.Shutdown(AppName, () => { bar.Close(); Application.Exit(); }))
+            using (new KinetikSuite.Shutdown(AppName, Quit))
                 Application.Run(bar);
         }
     }
@@ -2463,12 +2463,21 @@ static class Program
 
     public static void RestartAsAdmin()
     {
-        try
-        {
-            Process.Start(new ProcessStartInfo(Application.ExecutablePath, "--restart") { UseShellExecute = true, Verb = "runas" });
-            Application.Exit();
-        }
-        catch { } // user cancelled UAC
+        try { Process.Start(new ProcessStartInfo(Application.ExecutablePath, "--restart") { UseShellExecute = true, Verb = "runas" }); }
+        catch { return; } // user cancelled UAC
+        Quit();
+    }
+
+    // Ends the app. Closing the bar first closes Settings, the dashboard and its other windows, and ends Application.Run.
+    // Application.Exit on its own walks the open windows while raising FormClosing, and the bar's FormClosing closes
+    // Settings, which changes that list under it: it then throws and the app keeps running. With --restart, the new
+    // copy gives up waiting for it after 15 seconds, leaving only the old one.
+    public static void Quit()
+    {
+        try { foreach (var bar in Application.OpenForms.OfType<StatsBar>().ToArray()) bar.Close(); }
+        catch (Exception e) { Log(e); }
+        try { Application.Exit(); }
+        catch (Exception e) { Log(e); Application.ExitThread(); }
     }
 
     // ---- Startup.
@@ -7204,7 +7213,7 @@ static class Updates
                     if (err != null) { done(err); return; }
                     try { Process.Start(new ProcessStartInfo(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), Program.ExeName), "--restart") { UseShellExecute = false }); }
                     catch (Exception ex) { done("The update was installed, but restart failed: " + ex.Message); return; }
-                    Application.Exit();
+                    Program.Quit();
                 }));
             }
             catch { }
