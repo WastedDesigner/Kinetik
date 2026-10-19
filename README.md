@@ -1,13 +1,15 @@
-# Kinetik: taskbar system monitor, FPS counter and game overlay for Windows
+# Kinetik Stats: taskbar system monitor, FPS counter and game overlay for Windows
 
-![Kinetik: the taskbar bar, game overlay and desktop widget](screenshots/social-preview.png)
+![Kinetik Stats: the taskbar bar, game overlay and desktop widget](screenshots/social-preview.png)
 
 [![Latest release](https://img.shields.io/github/v/release/WastedDesigner/Kinetik?label=download)](../../releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/WastedDesigner/Kinetik/total)](../../releases)
 [![License: GPL v3](https://img.shields.io/github/license/WastedDesigner/Kinetik)](LICENSE)
 ![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
 
-**Kinetik** is a free, open-source system monitor for the Windows 11 and Windows 10 taskbar, with a game overlay and an FPS counter. It shows live **CPU and GPU temperature, usage, clock speed and power draw**, **RAM**, **network upload and download speed**, **ping**, **disk activity**, and **Bluetooth headphone and controller battery levels**, right next to the system tray.
+**Kinetik Stats** is a free, open-source system monitor for the Windows 11 and Windows 10 taskbar, with a game overlay and an FPS counter. It shows live **CPU and GPU temperature, usage, clock speed and power draw**, **RAM**, **network upload and download speed**, **ping**, **disk activity**, and **Bluetooth headphone and controller battery levels**, right next to the system tray.
+
+Kinetik Stats is one of the **Kinetik** apps, alongside Kinetik Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather. Up to v3.2 it was called just Kinetik; the exe, its settings and this repository keep that name, so nothing changes when you update.
 
 For gaming, its always-on-top **FPS overlay** shows the frame rate with **1% lows**, a **frame-time graph**, **render latency** and the **base frame rate before DLSS or FSR frame generation**, for DirectX, Vulkan and OpenGL games, without hooking into them. There's also a desktop widget with live graphs, notifications when your PC runs hot, and benchmark recording to CSV.
 
@@ -15,7 +17,7 @@ Every stat can be switched on or off, reordered, restyled and grouped with divid
 
 > **About this project:** I originally made this for my own personal use and decided to share it in case anyone else finds it useful. If you run into a bug or have an idea for a feature, please [open an issue](../../issues). I'll do my best to look into it and implement what I can.
 
-![Kinetik on the taskbar, one-line layout with dividers](screenshots/v3.2/bar-one-line.png)
+![Kinetik Stats on the taskbar, one-line layout with dividers](screenshots/v3.2/bar-one-line.png)
 
 **Latest version: v3.1.3.** [Download it from Releases](../../releases/latest).
 
@@ -87,7 +89,7 @@ And with text labels instead of icons and dot-style dividers:
 
 <img src="screenshots/v3.2/widget.png" alt="The desktop widget in the Mono theme" align="right" width="300">
 
-Alongside the taskbar bar, Kinetik can show a floating panel on your desktop, similar to LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or in **Settings → Widget**.
+Alongside the taskbar bar, Kinetik Stats can show a floating panel on your desktop, similar to LibreHardwareMonitor's gadget but more polished. Turn it on from the bar's right-click menu (**Desktop widget**) or in **Settings → Widget**.
 
 - **Grouped and labelled:** stats sit under headings (Processor, Graphics, Memory, Network, Storage, System, Battery), with your CPU and GPU model names next to them
 - **Bars and graphs:** each stat can have a coloured usage bar and a scrolling history graph. CPU cores get a per-thread bar chart.
@@ -116,7 +118,7 @@ Everything about the widget is set on the **Widget** page in Settings:
 - **Hover graphs:** hover over any stat on the bar for its last minute as a graph, its minimum, average and maximum, and the processes using the most CPU, memory, GPU, disk or network
 - **Every monitor:** optionally put the bar on each monitor's taskbar
 - **Profiles:** save setups such as Gaming and Work and switch between them from the right-click menu, or back up every setting to a file
-- **Updates install themselves:** **Settings → About → Check for updates** downloads the new version, checks it against the checksum in the release notes, and restarts Kinetik
+- **Updates install themselves:** **Settings → About → Check for updates** downloads the new version, checks it against the checksum in the release notes, and restarts Kinetik Stats
 - Optional run at startup. When it's running as admin, it's set up as an elevated scheduled task that runs a protected copy in `C:\Program Files\Kinetik`, so there's no UAC prompt at login.
 - Update interval from 0.5 to 5 seconds
 - Shift the bar left if it overlaps other taskbar icons
@@ -141,7 +143,7 @@ The same overlay with icons instead of text labels:
 
 Turn it on from the bar's right-click menu (**Game overlay**), in **Settings → Overlay**, or with **Ctrl+Shift+F10**, which also works from inside a game.
 
-- **FPS counter:** shows the frame rate of whichever app is in front. It counts the frames Windows' graphics system reports, the same way PresentMon does, so it works with DirectX 9–12, OpenGL and Vulkan games without hooking into them. It needs Kinetik to run as administrator.
+- **FPS counter:** shows the frame rate of whichever app is in front. It counts the frames Windows' graphics system reports, the same way PresentMon does, so it works with DirectX 9–12, OpenGL and Vulkan games without hooking into them. It needs Kinetik Stats to run as administrator.
 - **Its own contents:** choose which stats to show and drag them into any order, with optional dividers. The FPS counter can also go on the bar or the widget.
 - **Your look:** text labels (`CPU`, `GPU`, `FPS`…) or icons, size, and background opacity. Text has a soft shadow so it stays readable over bright scenes.
 - **Moving it:** drag it anywhere. It snaps to the screen's edges and top centre. **Lock position** makes it click-through, so your clicks go to the game. Unlock it from the bar's right-click menu.
@@ -158,7 +160,7 @@ Everything about the overlay is set on the **Overlay** page in Settings:
 
 ## Dashboard
 
-A full-screen view of everything Kinetik measures, as a window or a web page. Both are off by default, and the extra readings are only measured while the window is open or a browser is showing the page.
+A full-screen view of everything Kinetik Stats measures, as a window or a web page. Both are off by default, and the extra readings are only measured while the window is open or a browser is showing the page.
 
 - **Dashboard window:** cards for CPU, GPU, memory, network, disk, temperatures, power, game FPS, CPU cores and system, each with the current reading, average, peak and a graph of the last 1–10 minutes. Open it from the right-click menu, **Ctrl+Shift+F9** or `Kinetik.exe --dashboard`. The grid fits the window and scales its text, gauges and graphs to match.
 - **Web dashboard:** the same dashboard in a browser on this PC or, if you allow it, other devices on your network. Every request needs the secret key in the link shown in Settings, and **New link** replaces it. Profiles and backups leave the key out.
@@ -180,7 +182,7 @@ How long you used each app, day by day, and what each one asked of your PC. Open
 - **Today, yesterday, the last 7 or 30 days, or any earlier day:** total screen time, first and last use, the most used app, the busiest hour (or day), unlocks and how many apps you used
 - **Hour by hour** for a day, or **day by day** for a range, as a bar chart. Hover a bar for its time.
 - **Apps:** each app with its icon and how long it was in front, plus the processor time, average memory and disk reads and writes it used, in front or in the background. Sort by any of them.
-- **How it counts:** Kinetik notes the app in front every 5 seconds. After 5 minutes without keyboard or mouse input it stops counting, unless a video or game fills the screen, and it doesn't count while the PC is locked. Processor, memory and disk use are added up for every app once a minute.
+- **How it counts:** Kinetik Stats notes the app in front every 5 seconds. After 5 minutes without keyboard or mouse input it stops counting, unless a video or game fills the screen, and it doesn't count while the PC is locked. Processor, memory and disk use are added up for every app once a minute.
 - **What's kept:** app names and their exe paths only, never window titles or what's on screen. One small file a day in `%LocalAppData%\Kinetik\ScreenTime`, deleted after 400 days. Switch it off or clear it on the same page.
 
 ## Timeline and Crashes
@@ -188,18 +190,18 @@ How long you used each app, day by day, and what each one asked of your PC. Open
 Two pages in Settings that help answer "what changed?" and "why did that crash?". Everything stays on your PC.
 
 - **Timeline:** what was installed, updated, removed or switched on, day by day: apps, Windows updates, graphics, audio and network drivers, apps that start with Windows, BIOS, memory, drives, the power plan, Game Mode, hardware-accelerated GPU scheduling and Memory integrity. A **This PC now** card sums up the current Windows version, graphics driver, BIOS, memory and power plan, with when each last changed. Filter by kind or search.
-  - Windows updates and Windows Installer apps come from Windows' own logs, with their exact time. Everything else is noticed by comparing a small snapshot of the PC (in `%LocalAppData%\Kinetik\Timeline.json`) when Kinetik starts and every 3 hours, so its time is approximate (shown with a `~`). Turn it off with **Notice changes** on the same page.
+  - Windows updates and Windows Installer apps come from Windows' own logs, with their exact time. Everything else is noticed by comparing a small snapshot of the PC (in `%LocalAppData%\Kinetik\Timeline.json`) when Kinetik Stats starts and every 3 hours, so its time is approximate (shown with a `~`). Turn it off with **Notice changes** on the same page.
 - **Crashes:** app crashes, apps that stopped responding, graphics driver resets, blue screens, sudden shutdowns and hardware (WHEA) errors from the last 60 days, read from Windows' event logs. Click one for what it means in plain words, what to try, and what changed on the PC in the 3 days before. A crash inside a graphics driver or an overlay (Steam, Discord, RivaTuner, OBS) says so. Neither page needs admin rights.
 
 ## Themes
 
-**Settings → Theme** sets how Kinetik's own windows, menus and hover cards look: **Match Windows**, Graphite, OLED black, Midnight, Nord, Mocha, Forest, Light or Paper, with a Sky, Violet, Mint, Amber, Rose or Coral accent, or your Windows accent colour. The title bar follows the theme too.
+**Settings → Theme** sets how Kinetik Stats' own windows, menus and hover cards look: **Match Windows**, Graphite, OLED black, Midnight, Nord, Mocha, Forest, Light or Paper, with a Sky, Violet, Mint, Amber, Rose or Coral accent, or your Windows accent colour. The title bar follows the theme too.
 
 The theme is shared by every Kinetik app (the Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather), so picking it once changes them all. Each app's right-click menu also has **App theme**. Widgets keep their own themes, which now include **OLED black** and **Mocha**, plus **Match app theme**, which follows the app theme and accent colour.
 
 ## Notifications
 
-Kinetik can tell you when something needs attention, using Windows' own notifications (so Focus assist and Do not disturb apply). Pick them in **Settings → General → Notifications**:
+Kinetik Stats can tell you when something needs attention, using Windows' own notifications (so Focus assist and Do not disturb apply). Pick them in **Settings → General → Notifications**:
 
 - the CPU or GPU staying above its warning temperature for 30 seconds
 - a Bluetooth device's battery, or the laptop's, dropping below its warning level
@@ -212,7 +214,7 @@ Kinetik can tell you when something needs attention, using Windows' own notifica
 2. Run `Kinetik.exe`. The bar appears on your taskbar next to the tray icons.
 3. **Right-click** the bar and choose **Settings…** to customise it, or **Arrange stats…** to go straight to the order and icons.
 
-It's portable, with no installer. Keep the `lib` folder next to `Kinetik.exe`: it holds the LibreHardwareMonitor library that reads CPU temperature and AMD / Intel GPUs. Kinetik checks each DLL in it against the version it was built with and won't load one that's been changed. (If you turn on Run at startup as administrator, Kinetik copies itself to `C:\Program Files\Kinetik` along with its `lib` folder, so the elevated startup task runs a copy only admins can change.) Settings are saved in the registry at `HKCU\Software\Kinetik`.
+It's portable, with no installer. Keep the `lib` folder next to `Kinetik.exe`: it holds the LibreHardwareMonitor library that reads CPU temperature and AMD / Intel GPUs. Kinetik Stats checks each DLL in it against the version it was built with and won't load one that's been changed. (If you turn on Run at startup as administrator, Kinetik Stats copies itself to `C:\Program Files\Kinetik` along with its `lib` folder, so the elevated startup task runs a copy only admins can change.) Settings are saved in the registry at `HKCU\Software\Kinetik`.
 
 **Updating:** from v3.0.0 on, use **Settings → About → Check for updates**, which installs the new version for you. Or right-click the bar, choose **Exit**, extract the new zip over your old folder (replacing `Kinetik.exe` and `lib`) and run it again. Your settings carry over. Versions up to v2.0.3 were a single exe; for those, put the new `Kinetik.exe` and `lib` folder where the old exe was.
 
@@ -261,12 +263,12 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 
 ## CPU temperature
 
-Windows doesn't provide CPU temperatures to normal apps, so Kinetik reads them through [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)'s library, which ships in the `lib` folder next to the exe. This requires:
+Windows doesn't provide CPU temperatures to normal apps, so Kinetik Stats reads them through [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)'s library, which ships in the `lib` folder next to the exe. This requires:
 
 - **Administrator rights:** right-click the bar and choose **Restart as administrator**. To have it start elevated automatically, turn on **Run at startup** while it's running as admin.
-- **The PawnIO driver:** it's installed along with the LibreHardwareMonitor app, or you can get it from [pawnio.eu](https://pawnio.eu). If it's missing, **Settings → General** says so and has a **Get PawnIO** button. Restart Kinetik after installing it.
+- **The PawnIO driver:** it's installed along with the LibreHardwareMonitor app, or you can get it from [pawnio.eu](https://pawnio.eu). If it's missing, **Settings → General** says so and has a **Get PawnIO** button. Restart Kinetik Stats after installing it.
 
-Without these, Kinetik falls back to what Windows provides itself:
+Without these, Kinetik Stats falls back to what Windows provides itself:
 
 - **CPU power** comes from Windows' built-in power meter, which works without admin rights or a driver on most PCs.
 - **CPU temperature** comes from the ACPI thermal zone on PCs that report a believable one, which most laptops do. It's approximate, and the bar's tooltip says so. Desktops usually report a fixed dummy value, which is ignored.
@@ -304,7 +306,7 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 
 ### v3.1.3
 
-- Fixed Settings reopening as soon as you closed it while Kinetik's taskbar button was on.
+- Fixed Settings reopening as soon as you closed it while Kinetik Stats' taskbar button was on.
 
 ### v3.1.2
 
@@ -318,7 +320,7 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - **Dashboard** as a window and a web page, with a layout editor and four themes ([see above](#dashboard)).
 - **Now playing** on the taskbar, with cover art and playback controls ([see above](#now-playing)).
 - **Settings backup** saved next to the exe, offered for restore on a fresh Windows install. Any installed font for the widget.
-- **Companion apps** (such as a USB sensor-panel driver) can read Kinetik's stats through shared memory that only your Windows account can open.
+- **Companion apps** (such as a USB sensor-panel driver) can read Kinetik Stats' stats through shared memory that only your Windows account can open.
 - **Faster:** bar frames take about 40% less time and full widget repaints about 45% less. Animations pause while the screen is off, the PC is locked or the widget is covered.
 - **Fixed:** a window leak in the Profiles menu, a notification timer leak, and a crash when launching normally while an elevated copy was running.
 
@@ -334,7 +336,7 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 ### v2.0.4: zip download
 
 - The download is now `Kinetik.zip`, with `Kinetik.exe` and a `lib` folder. The LibreHardwareMonitor DLLs are no longer packed inside the exe, a pattern antivirus software is wary of.
-- Each DLL in `lib` is checked against the version Kinetik was built with before it loads.
+- Each DLL in `lib` is checked against the version Kinetik Stats was built with before it loads.
 
 ### v2.0.3: game overlay and FPS counter
 
@@ -348,13 +350,13 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 
 ### v2.0.1: security fixes and update check
 
-- Elevated startup now runs a protected copy in `C:\Program Files\Kinetik`, so other programs can't swap the exe to gain admin rights. Run Kinetik once as administrator after updating to move an existing startup entry over.
+- Elevated startup now runs a protected copy in `C:\Program Files\Kinetik`, so other programs can't swap the exe to gain admin rights. Run Kinetik Stats once as administrator after updating to move an existing startup entry over.
 - Native DLLs and helper programs load only from System32, and startup tasks are registered through the Task Scheduler API rather than a temporary file.
 - New **Check for updates** button in Settings → About.
 
-### v2.0.0: Kinetik
+### v2.0.0: Kinetik Stats
 
-- **New name: PC Stats Bar is now Kinetik**, with a new logo. Your settings are carried over automatically the first time Kinetik runs. If you had **Run at startup** on, start Kinetik once as administrator (right-click → **Restart as administrator**) so it can replace the old startup entry.
+- **New name: PC Stats Bar is now Kinetik Stats**, with a new logo. Your settings are carried over automatically the first time Kinetik Stats runs. If you had **Run at startup** on, start Kinetik Stats once as administrator (right-click → **Restart as administrator**) so it can replace the old startup entry.
 - **Animated icons** on the bar and the widget: fans spin with fan speed, arrows stream with throughput, thermometers fill up, bolts crackle, gauges swing and more, all driven by live readings. Turn them on or off separately for the bar and the widget, and pick 15, 30 or 60 fps.
 - **Tray icon:** the fan logo spins faster the busier your CPU is (can be turned off), and you can pick from 11 backgrounds. Optional taskbar button and desktop shortcut.
 - **Fullscreen hiding is now per monitor:** a fullscreen game only hides the bar or widget on its own screen.
@@ -461,7 +463,7 @@ No Visual Studio or SDK needed. It compiles with the .NET Framework compiler tha
 
    This produces `Kinetik.exe` with the app icon embedded. It loads the DLLs from the `lib\` folder next to it, so it runs straight from the source folder. `build.bat package` also makes `Kinetik.zip` (the exe, `lib\*.dll` and the license) for a release.
 
-   Kinetik only loads DLLs whose SHA-256 matches the list in `LibHashes` in `Kinetik.cs`. If you use different versions of the DLLs, update that list.
+   Kinetik Stats only loads DLLs whose SHA-256 matches the list in `LibHashes` in `Kinetik.cs`. If you use different versions of the DLLs, update that list.
 
 ## Feedback
 

@@ -34,9 +34,9 @@ using System.Threading;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
-[assembly: AssemblyTitle("Kinetik")]
-[assembly: AssemblyDescription("Taskbar overlay showing PC stats and device battery levels")]
-[assembly: AssemblyProduct("Kinetik")]
+[assembly: AssemblyTitle("Kinetik Stats")]
+[assembly: AssemblyDescription("Kinetik Stats: taskbar overlay showing PC stats and device battery levels")]
+[assembly: AssemblyProduct("Kinetik Stats")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
 [assembly: AssemblyVersion("3.2.0.0")]
@@ -313,7 +313,7 @@ class Settings
     public void Load()
     {
         try { LoadCore(); }
-        catch (Exception ex) { Unreadable = true; Sanitize(); MessageBox.Show("Kinetik could not read all saved settings. Saving is disabled until restart. " + ex.Message, "Kinetik"); }
+        catch (Exception ex) { Unreadable = true; Sanitize(); MessageBox.Show("Kinetik Stats could not read all saved settings. Saving is disabled until restart. " + ex.Message, "Kinetik Stats"); }
     }
 
     void LoadCore()
@@ -336,7 +336,7 @@ class Settings
                 catch { Unreadable = true; }
             }
             Sanitize();
-            if (Unreadable) MessageBox.Show("Some Kinetik settings could not be converted. Original values were kept; saving is disabled until restart.", "Kinetik");
+            if (Unreadable) MessageBox.Show("Some Kinetik Stats settings could not be converted. Original values were kept; saving is disabled until restart.", "Kinetik Stats");
             if (k.GetValue("SettingsVersion") == null || SettingsVersion < 2)
             {
                 // v1.0 had three fixed dividers with on/off switches; keep only the ones that were switched on.
@@ -2323,8 +2323,8 @@ static class Program
             using (var k = Registry.CurrentUser.OpenSubKey(Settings.Key))
                 if (k != null && k.GetValue("Order") != null) return;
             if (!File.Exists(FolderBackup)) return;
-            if (MessageBox.Show("There are saved Kinetik settings in this folder, from " + File.GetLastWriteTime(FolderBackup).ToString("d MMM yyyy, h:mm tt") +
-                    ".\n\nRestore them?", "Kinetik", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            if (MessageBox.Show("There are saved Kinetik Stats settings in this folder, from " + File.GetLastWriteTime(FolderBackup).ToString("d MMM yyyy, h:mm tt") +
+                    ".\n\nRestore them?", "Kinetik Stats", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             var c = new Settings();
             Profiles.Import(c, File.ReadAllText(FolderBackup));
             c.Save();
@@ -2582,7 +2582,7 @@ static class Program
         var xml =
             "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
             "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n" +
-            "  <RegistrationInfo><Description>Starts Kinetik when you sign in.</Description></RegistrationInfo>\r\n" +
+            "  <RegistrationInfo><Description>Starts Kinetik Stats when you sign in.</Description></RegistrationInfo>\r\n" +
             "  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + user + "</UserId></LogonTrigger></Triggers>\r\n" +
             "  <Principals><Principal id=\"Author\"><UserId>" + user + "</UserId><LogonType>InteractiveToken</LogonType>" +
             "<RunLevel>" + (elevated ? "HighestAvailable" : "LeastPrivilege") + "</RunLevel></Principal></Principals>\r\n" +
@@ -2964,7 +2964,7 @@ class StatsBar : Form
         if (Cfg.TrayIcon && tray == null)
         {
             trayStyle = Cfg.TrayStyle;
-            tray = new NotifyIcon { Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, 0), Text = "Kinetik", ContextMenuStrip = menu };
+            tray = new NotifyIcon { Icon = TrayIconArt.Frame(trayStyle, SystemInformation.SmallIconSize.Width, 0), Text = "Kinetik Stats", ContextMenuStrip = menu };
             tray.MouseClick += (s, e) => { if (e.Button == MouseButtons.Left) OpenSettings(null); };
             tray.BalloonTipClicked += (s, e) => { if (noteClick != null) noteClick(); };
             tray.Visible = true;
@@ -2981,7 +2981,7 @@ class StatsBar : Form
         if (Cfg.Wants("Cpu")) parts.Add("CPU " + s.Cpu.ToString("0") + "%");
         parts.Add("RAM " + s.RamLoad + "%");
         if (s.HasGpu) parts.Add("GPU " + s.GpuUtil.ToString("0") + "%");
-        var text = "Kinetik\n" + string.Join(" · ", parts);
+        var text = "Kinetik Stats\n" + string.Join(" · ", parts);
         if (text.Length > 63) text = text.Substring(0, 63);
         if (text != trayText) { trayText = text; tray.Text = text; }
     }
@@ -4012,7 +4012,7 @@ class StatsBar : Form
         {
             if (noteIcon == null)
             {
-                noteIcon = new NotifyIcon { Icon = TrayIconArt.Frame(Cfg.TrayStyle, SystemInformation.SmallIconSize.Width, 0), Text = "Kinetik" };
+                noteIcon = new NotifyIcon { Icon = TrayIconArt.Frame(Cfg.TrayStyle, SystemInformation.SmallIconSize.Width, 0), Text = "Kinetik Stats" };
                 noteIcon.BalloonTipClicked += (s, e) => { if (noteClick != null) noteClick(); };
             }
             if (!noteTimerHooked)
@@ -4226,9 +4226,9 @@ class GameWatch
     {
         if (writer != null) { StopRecording(); return; }
         var s = bar.Sampler.Snap;
-        string app = s.GameName != "" ? s.GameName : s.FpsApp != "" ? s.FpsApp : "Kinetik";
+        string app = s.GameName != "" ? s.GameName : s.FpsApp != "" ? s.FpsApp : "Kinetik Stats";
         app = new string(app.Where(ch => char.IsLetterOrDigit(ch) || ch == '-' || ch == '_').ToArray());
-        if (app == "") app = "Kinetik";
+        if (app == "") app = "Kinetik Stats";
         recordPath = Path.Combine(BenchDir,
             app + " " + DateTime.Now.ToString("yyyy-MM-dd HH.mm.ss") + ".csv");
         try
@@ -4240,7 +4240,7 @@ class GameWatch
         catch (Exception e) { writer = null; bar.Notify("Couldn't start recording", e.Message, null); return; }
         rows = 0; recFpsSum = 0; recFpsCount = 0;
         c.Recording = true;
-        bar.Notify("Recording benchmark", (c.BenchHotkey ? "Press Ctrl+Shift+F11 again to stop." : "Use the Kinetik menu to stop.") + (Program.IsAdmin ? "" : " FPS needs admin."), null);
+        bar.Notify("Recording benchmark", (c.BenchHotkey ? "Press Ctrl+Shift+F11 again to stop." : "Use the Kinetik Stats menu to stop.") + (Program.IsAdmin ? "" : " FPS needs admin."), null);
     }
 
     void Record(Snapshot s)
@@ -5478,7 +5478,7 @@ static class WebDash
         if (path == "/favicon.ico") { Send(stream, 404, "text/plain", ""); return; }
         if (string.IsNullOrEmpty(c.WebKey) || !Same(key, c.WebKey))
         {
-            Send(stream, 403, "text/html; charset=utf-8", "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><body style='font:16px system-ui;background:#141418;color:#ececf0;padding:24px'><h2>Kinetik</h2><p>This link isn't valid any more. Get the current one from Kinetik: Settings, Dashboard.</p>");
+            Send(stream, 403, "text/html; charset=utf-8", "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><body style='font:16px system-ui;background:#141418;color:#ececf0;padding:24px'><h2>Kinetik Stats</h2><p>This link isn't valid any more. Get the current one from Kinetik Stats: Settings, Dashboard.</p>");
             return;
         }
         if (path == "/") Send(stream, 200, "text/html; charset=utf-8", Page);
@@ -5509,7 +5509,7 @@ static class WebDash
 
     // The page itself: no external files, so it works offline and leaks nothing. It polls /data once per update.
     const string Page = @"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
-<meta name='theme-color' content='#141418'><title>Kinetik dashboard</title>
+<meta name='theme-color' content='#141418'><title>Kinetik Stats dashboard</title>
 <style>
 :root{--bg:#141418;--card:#1e1e24;--line:#2c2c34;--text:#ececf0;--sub:#9696a2;--dim:#2a2a32;--alt:#4cc2ff}
 body.term{--bg:#030a05;--card:#030a05;--line:#228c3e;--text:#5aff78;--sub:#2eaa50;--dim:rgba(90,255,120,.22);--alt:#cdffd7}
@@ -5568,7 +5568,7 @@ body.mono .cores div i{border-radius:0;background:repeating-linear-gradient(0deg
 .note{color:var(--sub);font-size:12px;margin-top:8px}
 body.mono::after{content:'';position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
 </style></head><body>
-<header><h1 id='h1'>Kinetik</h1><div id='meta'></div><select id='theme' aria-label='Theme'></select><div id='rng'></div></header>
+<header><h1 id='h1'>Kinetik Stats</h1><div id='meta'></div><select id='theme' aria-label='Theme'></select><div id='rng'></div></header>
 <div id='off'></div>
 <main id='grid'></main>
 <script>
@@ -5581,11 +5581,11 @@ function css(v){return getComputedStyle(document.body).getPropertyValue(v).trim(
 function mono(){return theme>=1}
 function save(k,v){try{localStorage.setItem(k,v)}catch(e){}}
 function load(k){try{return localStorage.getItem(k)}catch(e){return null}}
-function build(){const g=$('grid');g.textContent='';if(!cards.length)el('p','note',g).textContent='No cards are switched on. Choose them in Kinetik: Settings, Dashboard.';for(const c of cards){const s=el('section','card',g),t=el('div','t',s),o={dot:el('i','',t)};el('span','tt',t).textContent=c.t;o.n=el('span','n',t);
+function build(){const g=$('grid');g.textContent='';if(!cards.length)el('p','note',g).textContent='No cards are switched on. Choose them in Kinetik Stats: Settings, Dashboard.';for(const c of cards){const s=el('section','card',g),t=el('div','t',s),o={dot:el('i','',t)};el('span','tt',t).textContent=c.t;o.n=el('span','n',t);
  if(c.k){o.cores=el('div','cores',s);o.note=el('div','note',s)}else{const top=el('div','top',s),l=el('div','lft',top);o.big=el('div','big',l);o.bl=el('div','bl',l);o.st=el('div','st',l);o.rows=el('div','rows',top);if(c.g.length>1)o.leg=el('div','leg',s);if(c.g.length)o.cv=el('canvas','',s)}els[c.t]=o}}
 function rng(){const r=$('rng');r.textContent='';for(const m of [1,2,5,10]){const b=el('button',m===minutes?'on':'',r);b.textContent=mono()?m+'m':m+' min';b.onclick=()=>{minutes=m;save('kinetik-min',m);rng();render()}}}
 function applyTheme(t){theme=t;document.body.className=['','mono term','mono amber','mono yellow'][t]||'';$('theme').value=t;save('kinetik-theme',t);
- const h=$('h1');h.textContent=t?'kinetik:~$ dashboard --live':'Kinetik';if(t)el('span','cur',h);
+ const h=$('h1');h.textContent=t?'kinetik:~$ dashboard --live':'Kinetik Stats';if(t)el('span','cur',h);
  document.querySelector('meta[name=theme-color]').setAttribute('content',css('--bg'));rng();render()}
 function span(){return Math.max(2,Math.min(cap,Math.round(minutes*60000/interval)))}
 function fmt(id,v){if(v==null||isNaN(v))return '--';
@@ -5627,7 +5627,7 @@ function render(){if(!cards||!last)return;const d=last,m=mono(),text=css('--text
 async function poll(){if(dead)return;let wait=interval;
  if(document.hidden){needHist=true;setTimeout(poll,2000);return}
  try{const r=await fetch('data?k='+encodeURIComponent(key)+(needHist?'&hist=1':''),{cache:'no-store'});
-  if(r.status===403){dead=true;$('off').textContent='This link isn\'t valid any more. Get the current one from Kinetik: Settings, Dashboard.';$('off').style.display='block';return}
+  if(r.status===403){dead=true;$('off').textContent='This link isn\'t valid any more. Get the current one from Kinetik Stats: Settings, Dashboard.';$('off').style.display='block';return}
   if(!r.ok)throw new Error(r.status);
   const d=await r.json();interval=d.interval||1000;cap=d.cap||600;colors=d.colors||colors;
   if(d.cards&&(d.lv!==lv||!cards)){cards=d.cards;lv=d.lv;build()}
@@ -5638,7 +5638,7 @@ async function poll(){if(dead)return;let wait=interval;
   seq=d.seq;last=d;fails=0;$('off').style.display='none';
   if(!minutes){const m=+load('kinetik-min');minutes=[1,2,5,10].includes(m)?m:(d.minutes||5)}
   if(theme<0){const t=load('kinetik-theme');applyTheme(t!==null&&+t>=0&&+t<(d.themes||[]).length?+t:(d.theme||0))}else render()}
- catch(e){fails++;needHist=true;if(fails>1){$('off').textContent='Lost contact with Kinetik. Retrying…';$('off').style.display='block'}wait=Math.min(10000,interval*fails)}
+ catch(e){fails++;needHist=true;if(fails>1){$('off').textContent='Lost contact with Kinetik Stats. Retrying…';$('off').style.display='block'}wait=Math.min(10000,interval*fails)}
  setTimeout(poll,wait)}
 window.addEventListener('resize',render);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)render()});
@@ -7112,7 +7112,7 @@ static class Updates
                 var backup = Path.Combine(dir, "Old Versions", "update-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
                 KinetikSuite.FileTransaction.Install(dir, files, backup);
             }
-            catch (UnauthorizedAccessException) { err = "Kinetik can't write to its folder. Run it as administrator, or update by hand."; }
+            catch (UnauthorizedAccessException) { err = "Kinetik Stats can't write to its folder. Run it as administrator, or update by hand."; }
             catch (Exception e) { err = e.Message; }
             try
             {
@@ -7318,7 +7318,7 @@ class TaskbarButtonForm : Form
     public TaskbarButtonForm(StatsBar bar)
     {
         this.bar = bar;
-        Text = "Kinetik";
+        Text = "Kinetik Stats";
         ShowInTaskbar = true;
         FormBorderStyle = FormBorderStyle.None;
         StartPosition = FormStartPosition.Manual;
@@ -7423,7 +7423,7 @@ static class Shortcuts
             Action<string, object> set = (name, v) => t.InvokeMember(name, BindingFlags.SetProperty, null, lnk, new[] { v });
             set("TargetPath", Application.ExecutablePath);
             set("WorkingDirectory", Path.GetDirectoryName(Application.ExecutablePath));
-            set("Description", "Kinetik: live PC stats on your taskbar and desktop");
+            set("Description", "Kinetik Stats: live PC stats on your taskbar and desktop");
             string ico;
             try { ico = IconFile(style) + ",0"; } catch (Exception ex) { ico = Application.ExecutablePath + ",0"; Program.Log(ex); }
             set("IconLocation", ico);
@@ -8315,7 +8315,7 @@ class WidgetForm : Form
             Snap = () => c.WidgetSnap, SetSnap = v => { c.WidgetSnap = v; changed(); },
         }.AddLook(menu.Items);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Kinetik settings…", null, (s, e) => bar.OpenSettings(null));
+        menu.Items.Add("Kinetik Stats settings…", null, (s, e) => bar.OpenSettings(null));
         foreach (var mi in menu.Items.OfType<ToolStripMenuItem>()) if (mi.HasDropDownItems) mi.DropDown.Renderer = menu.Renderer; // dark submenus too
     }
 
@@ -9063,7 +9063,7 @@ class OverlayForm : Form
         menu.Items.Add(lockItem);
         menu.Items.Add("Hide overlay", null, (s, e) => bar.SetOverlay(false));
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Kinetik settings…", null, (s, e) => bar.OpenSettings(null));
+        menu.Items.Add("Kinetik Stats settings…", null, (s, e) => bar.OpenSettings(null));
         animTimer.Tick += (s, e) => { animTimer.Interval = 1000 / Math.Max(10, c.AnimFps); AnimFrame(); };
         animTimer.Start();
     }
@@ -9365,7 +9365,7 @@ class DashboardForm : Form
     {
         this.bar = bar;
         var c = bar.Cfg;
-        Text = "Kinetik dashboard";
+        Text = "Kinetik Stats dashboard";
         Icon = TrayIconArt.Frame(c.TrayStyle, SystemInformation.IconSize.Width, 0);
         using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("icon.ico"))
             if (st != null) Icon = new Icon(st);
@@ -11293,7 +11293,7 @@ class SettingsForm : Form
     {
         this.bar = bar; c = bar.Cfg;
         Theme.Use(); // another Kinetik app may have changed the suite's theme since
-        Text = "Kinetik";
+        Text = "Kinetik Stats";
         Icon = TrayIconArt.Frame(c.TrayStyle, SystemInformation.IconSize.Width, 0);
         ClientSize = new Size(880, 700);
         MinimumSize = new Size(800, 520);
@@ -11329,7 +11329,7 @@ class SettingsForm : Form
             var g = e.Graphics; g.Clear(Theme.Nav);
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             if (logo != null) g.DrawImage(logo, new Rectangle(22, 24, 24, 24));
-            TextRenderer.DrawText(g, "Kinetik", Theme.UI(12.5f, FontStyle.Bold), new Point(54, 25), Theme.Text, TextFormatFlags.NoPadding);
+            TextRenderer.DrawText(g, "Kinetik Stats", Theme.UI(12.5f, FontStyle.Bold), new Point(54, 25), Theme.Text, TextFormatFlags.NoPadding);
         };
         brand.Disposed += (s, e) => { if (logo != null) logo.Dispose(); };
         version = new Label { Text = "v" + VersionText, Font = Theme.UI(8.5f), ForeColor = Theme.Sub, BackColor = Theme.Nav, AutoSize = false, Height = 40, Dock = DockStyle.Bottom, Padding = new Padding(22, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
@@ -11387,7 +11387,7 @@ class SettingsForm : Form
         { "Screen time", "How long you used each app, day by day, and what each one asked of your PC." },
         { "Timeline", "What was installed, updated, removed or switched on, day by day." },
         { "Crashes", "Crashes, freezes, driver resets, blue screens and sudden shutdowns, explained." },
-        { "Theme", "How Kinetik and the other Kinetik apps look." },
+        { "Theme", "How Kinetik Stats and the other Kinetik apps look." },
         { "General", "Updates, warnings, notifications, profiles and startup." },
         { "About", "Version, updates and licence." },
     };
@@ -11537,7 +11537,7 @@ class SettingsForm : Form
         else BuildAbout();
 
         content.ResumeLayout();
-        if (ActiveControl is Picker) ActiveControl = null; // no focus ring on the first drop-down until it's used
+        if (ActiveControl is Picker || ActiveControl is KButton) ActiveControl = null; // no focus ring on the first control until it's used
         UpdatePreview();
     }
 
@@ -11673,7 +11673,7 @@ class SettingsForm : Form
         addBtn.Margin = new Padding(0, 0, 8, 0);
         var resetBtn = Btn("Reset order", (s, e) =>
         {
-            if (MessageBox.Show(this, "Put every stat back in its original order and remove all dividers?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Put every stat back in its original order and remove all dividers?", "Kinetik Stats", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.Order = Settings.DefaultOrder;
             Apply(); RefreshPage();
         });
@@ -11952,7 +11952,7 @@ class SettingsForm : Form
         Header("Changes");
         var counts = PcHistory.Kinds.Select(k => h.Events.Count(e => e.K == k)).ToArray();
         var filters = new[] { "Everything (" + h.Events.Count + ")" }.Concat(PcHistory.KindNames.Select((n, i) => n + " (" + counts[i] + ")")).ToArray();
-        var feed = new Feed(RowW) { Empty = h.Events.Count == 0 ? "No changes yet. Kinetik will list them here as it notices them." : "No changes match." };
+        var feed = new Feed(RowW) { Empty = h.Events.Count == 0 ? "No changes yet. Kinetik Stats will list them here as it notices them." : "No changes match." };
         int kind = 0; string query = "";
         Action show = () => feed.SetItems(h.Events
             .Where(e => (kind == 0 || e.K == PcHistory.Kinds[kind - 1]) && (query == "" || (e.X + " " + e.V + " " + e.W + " " + e.S).IndexOf(query, StringComparison.CurrentCultureIgnoreCase) >= 0))
@@ -11962,8 +11962,8 @@ class SettingsForm : Form
         show();
         list.Controls.Add(feed);
         Hint(h.Since == DateTime.MaxValue
-            ? "Kinetik takes its first snapshot of this PC a minute after it starts. Until then, this shows what Windows recorded itself."
-            : "Kinetik has been noticing changes since " + h.Since.ToString("d MMMM yyyy") + ". Earlier entries are what Windows recorded itself, and ~ means roughly when.", 44);
+            ? "Kinetik Stats takes its first snapshot of this PC a minute after it starts. Until then, this shows what Windows recorded itself."
+            : "Kinetik Stats has been noticing changes since " + h.Since.ToString("d MMMM yyyy") + ". Earlier entries are what Windows recorded itself, and ~ means roughly when.", 44);
 
         Header("Tracking");
         Switch(Icons.Clock, Theme.Accent, "Notice changes", "TrackChanges", "Compares apps, drivers and settings every 3 hours. Kept on this PC only.");
@@ -12128,7 +12128,7 @@ class SettingsForm : Form
         Add(Icons.Info, Theme.Accent, "What's kept", "App names only, never window titles or what's on screen. On this PC, for 400 days.", null);
         Add(Icons.Layers, Theme.Accent, "Clear history", "Deletes every saved day", Btn("Clear…", (s, e) =>
         {
-            if (MessageBox.Show(this, "Delete all saved screen time? This can't be undone.", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Delete all saved screen time? This can't be undone.", "Kinetik Stats", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             ScreenTime.Clear(); RefreshPage();
         }));
     }
@@ -12150,7 +12150,7 @@ class SettingsForm : Form
         var dots = new AccentPicker(accent, Theme.Light);
         dots.Changed += (s, e) => SetLook(null, dots.Selected);
         Add(Icons.Palette, Theme.Accent, accent == KinetikSuite.Look.WindowsAccent ? "Your Windows accent colour" : accent, "Switches, buttons and the page you're on", dots);
-        Hint("Every Kinetik app uses this theme for its windows and menus: Kinetik, the Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather. Widgets keep their own themes.", 46);
+        Hint("Every Kinetik app uses this theme for its windows and menus: Kinetik Stats, the Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather. Widgets keep their own themes.", 46);
     }
 
     // Saves the suite's theme and repaints this window in it.
@@ -12174,7 +12174,7 @@ class SettingsForm : Form
         logo.Image = LoadLogo(128);
         logo.Disposed += (s, e) => { if (logo.Image != null) logo.Image.Dispose(); };
         list.Controls.Add(logo);
-        list.Controls.Add(new Label { Text = "Kinetik", Font = Theme.UI(16f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 0, 0, 0) });
+        list.Controls.Add(new Label { Text = "Kinetik Stats", Font = Theme.UI(16f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 0, 0, 0) });
         Hint("A lightweight stats overlay for the Windows taskbar.", 28);
         Add(Icons.Info, Theme.Accent, "Version", null, new Label { Text = VersionText, AutoSize = false, Size = new Size(120, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Text, BackColor = Theme.Card, Font = Theme.UI(10f) });
         KButton upd = null;
@@ -12184,14 +12184,14 @@ class SettingsForm : Form
             if (newer != null)
             {
                 if (newer.ZipUrl == null || newer.ExeSha == null) { Updates.OpenUrl(newer.Url); return; } // older releases: by hand
-                if (MessageBox.Show(this, "Download Kinetik " + newer.Name + " from GitHub and install it?\n\nKinetik checks the download against the checksum in the release notes, replaces its files and restarts.",
-                    "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+                if (MessageBox.Show(this, "Download Kinetik Stats " + newer.Name + " from GitHub and install it?\n\nKinetik Stats checks the download against the checksum in the release notes, replaces its files and restarts.",
+                    "Kinetik Stats", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
                 upd.Text = "Installing…"; upd.Enabled = false;
                 Updates.Install(newer, err =>
                 {
                     if (upd.IsDisposed) return;
                     upd.Enabled = true; upd.Text = "Install " + newer.Name;
-                    MessageBox.Show(this, "The update wasn't installed.\n\n" + err, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(this, "The update wasn't installed.\n\n" + err, "Kinetik Stats", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }, this);
                 return;
             }
@@ -12302,7 +12302,7 @@ class SettingsForm : Form
         addBtn.Margin = new Padding(0, 0, 8, 0);
         var resetBtn = Btn("Reset contents", (s, e) =>
         {
-            if (MessageBox.Show(this, "Put the widget's stats back to the default selection and order, and remove its dividers?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Put the widget's stats back to the default selection and order, and remove its dividers?", "Kinetik Stats", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.WidgetOrder = Settings.DefaultWidgetOrder;
             c.WidgetItems = Settings.DefaultWidgetItems;
             Apply(); RefreshPage();
@@ -12368,7 +12368,7 @@ class SettingsForm : Form
         addBtn.Margin = new Padding(0, 0, 8, 0);
         var resetBtn = Btn("Reset contents", (s, e) =>
         {
-            if (MessageBox.Show(this, "Put the overlay's stats back to the default selection and order, and remove its dividers?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Put the overlay's stats back to the default selection and order, and remove its dividers?", "Kinetik Stats", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.OverlayOrder = Settings.DefaultOverlayOrder;
             c.OverlayItems = Settings.DefaultOverlayItems;
             Apply(); RefreshPage();
@@ -12472,7 +12472,7 @@ class SettingsForm : Form
         Add(Icons.Globe, Theme.Accent, "Web dashboard", "The same dashboard as a web page, for a browser on this PC or your phone", web);
         var lan = new Toggle { On = c.WebLan };
         lan.Changed += (s, e) => { c.WebLan = lan.On; Apply(); BeginInvoke((Action)RefreshPage); };
-        Add(Icons.Wifi, Theme.Accent, "Allow other devices on my network", "Phones, tablets and PCs on the same network can open it with the link below. Windows may ask to let Kinetik through its firewall.", lan);
+        Add(Icons.Wifi, Theme.Accent, "Allow other devices on my network", "Phones, tablets and PCs on the same network can open it with the link below. Windows may ask to let Kinetik Stats through its firewall.", lan);
         var port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = Math.Max(1024, Math.Min(65535, c.WebPort)), Width = 90, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle };
         port.ValueChanged += (s, e) => { c.WebPort = (int)port.Value; Apply(); };
         Add(Icons.Spacing, Theme.Accent, "Port", "Change it if another app already uses this one", port);
@@ -12488,7 +12488,7 @@ class SettingsForm : Form
         var copy = Btn("Copy link", (s, e) => { try { Clipboard.SetText(WebDash.Link(c)); } catch { } }); copy.Margin = new Padding(0, 0, 8, 0);
         var renew = Btn("New link", (s, e) =>
         {
-            if (MessageBox.Show(this, "Make a new link? The old one stops working, so devices using it will need the new one.", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Make a new link? The old one stops working, so devices using it will need the new one.", "Kinetik Stats", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.WebKey = WebDash.NewKey(); Apply(); RefreshPage();
         });
         tools.Controls.Add(open); tools.Controls.Add(copy); tools.Controls.Add(renew);
@@ -12501,7 +12501,7 @@ class SettingsForm : Form
     void LoadSettings(Func<bool> load)
     {
         try { if (!load()) return; }
-        catch (Exception ex) { MessageBox.Show(this, "Couldn't load those settings.\n\n" + ex.Message, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
+        catch (Exception ex) { MessageBox.Show(this, "Couldn't load those settings.\n\n" + ex.Message, "Kinetik Stats", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
         bar.Render(true);
         var b = bar; var p = page;
         BeginInvoke((Action)(() => { Close(); b.OpenSettings(p); }));
@@ -12524,7 +12524,7 @@ class SettingsForm : Form
         Switch(Icons.Monitor, Theme.Accent, "Show on the taskbar", "TaskbarButton", "A taskbar button like other running apps. Click it for Settings.");
         var lnk = new Toggle { On = File.Exists(Shortcuts.DesktopPath) };
         lnk.Changed += (s, e) => { if (lnk.On) Shortcuts.CreateDesktop(c.TrayStyle); else Shortcuts.RemoveDesktop(); lnk.On = File.Exists(Shortcuts.DesktopPath); };
-        Add(Icons.Star, Theme.Accent, "Desktop shortcut", "Opens Kinetik, or its Settings if it's already running", lnk);
+        Add(Icons.Star, Theme.Accent, "Desktop shortcut", "Opens Kinetik Stats, or its Settings if it's already running", lnk);
         Add(Icons.Palette, Theme.Accent, "Icon background", "For the tray icon and the taskbar button",
             Combo(TrayIconArt.Styles.Select(x => x.Key).ToArray(), Math.Max(0, Math.Min(TrayIconArt.Styles.Length - 1, c.TrayStyle)), i =>
             {
@@ -12549,7 +12549,7 @@ class SettingsForm : Form
         Switch((g, r, col) => Icons.Battery(g, r, col, 20), c.BatColor, "Low batteries", "AlertBattery", "When a Bluetooth device or the laptop drops below its warning limit");
         Switch(Icons.Pie, c.DiskColor, "Drive almost full", "AlertDisk", "When the free-space drive drops below its warning limit (at most every 6 hours)");
         Switch(Icons.Signal, c.UpColor, "High ping", "AlertPing", "When ping stays above its warning limit or times out for 30 seconds. Pings even while ping isn't shown.");
-        Add(Icons.Info, Theme.Accent, "Test", "Notifications use Windows' own, so Focus assist and Do not disturb apply", Btn("Send a test", (s, e) => bar.Notify("Kinetik", "Notifications are working.", null)));
+        Add(Icons.Info, Theme.Accent, "Test", "Notifications use Windows' own, so Focus assist and Do not disturb apply", Btn("Send a test", (s, e) => bar.Notify("Kinetik Stats", "Notifications are working.", null)));
 
         Header("Profiles and backup");
         var names = Profiles.List();
@@ -12561,7 +12561,7 @@ class SettingsForm : Form
         profTools.Controls.Add(Btn("Load", (s, e) => { if (names.Count > 0) LoadSettings(() => Profiles.Load(c, names[pick.SelectedIndex])); }));
         var del = Btn("Delete", (s, e) =>
         {
-            if (names.Count == 0 || MessageBox.Show(this, "Delete the profile \"" + names[pick.SelectedIndex] + "\"?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (names.Count == 0 || MessageBox.Show(this, "Delete the profile \"" + names[pick.SelectedIndex] + "\"?", "Kinetik Stats", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             Profiles.Delete(names[pick.SelectedIndex]); RefreshPage();
         });
         del.Margin = new Padding(6, 0, 0, 0);
@@ -12576,20 +12576,20 @@ class SettingsForm : Form
             var n = Profiles.Clean(newName.Text);
             if (n == "") { newName.Focus(); return; }
             try { c.Save(); Profiles.Save(c, n); RefreshPage(); }
-            catch (Exception ex) { MessageBox.Show(this, "Couldn't save the profile.\n\n" + ex.Message, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            catch (Exception ex) { MessageBox.Show(this, "Couldn't save the profile.\n\n" + ex.Message, "Kinetik Stats", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }, true));
         Add(Icons.Star, Theme.Accent, "Save current settings as a profile", "Give it a name", saveTools);
         var backupTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
         backupTools.Controls.Add(Btn("Back up…", (s, e) =>
         {
-            using (var dlg = new SaveFileDialog { Filter = "Kinetik settings (*.kinetik)|*.kinetik", FileName = "Kinetik settings.kinetik" })
+            using (var dlg = new SaveFileDialog { Filter = "Kinetik Stats settings (*.kinetik)|*.kinetik", FileName = "Kinetik settings.kinetik" })
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                     try { c.Save(); File.WriteAllText(dlg.FileName, Profiles.Export(c)); }
-                    catch (Exception ex) { MessageBox.Show(this, "Couldn't save the backup.\n\n" + ex.Message, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+                    catch (Exception ex) { MessageBox.Show(this, "Couldn't save the backup.\n\n" + ex.Message, "Kinetik Stats", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }));
         var restore = Btn("Restore…", (s, e) =>
         {
-            using (var dlg = new OpenFileDialog { Filter = "Kinetik settings (*.kinetik)|*.kinetik" })
+            using (var dlg = new OpenFileDialog { Filter = "Kinetik Stats settings (*.kinetik)|*.kinetik" })
                 if (dlg.ShowDialog(this) == DialogResult.OK) LoadSettings(() => { Profiles.Import(c, File.ReadAllText(dlg.FileName)); c.Save(); return true; });
         });
         restore.Margin = new Padding(6, 0, 0, 0);
@@ -12601,15 +12601,15 @@ class SettingsForm : Form
             try
             {
                 c.Save(); File.WriteAllText(Program.FolderBackup, Profiles.Export(c));
-                MessageBox.Show(this, "Settings backed up to\n" + Program.FolderBackup + "\n\nAfter reinstalling Windows, Kinetik offers to restore them the first time it starts from this folder.", "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(this, "Settings backed up to\n" + Program.FolderBackup + "\n\nAfter reinstalling Windows, Kinetik Stats offers to restore them the first time it starts from this folder.", "Kinetik Stats", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 RefreshPage();
             }
-            catch (Exception ex) { MessageBox.Show(this, "Couldn't save the backup.\n\n" + ex.Message, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            catch (Exception ex) { MessageBox.Show(this, "Couldn't save the backup.\n\n" + ex.Message, "Kinetik Stats", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         }));
         var folderRestore = Btn("Restore", (s, e) =>
         {
-            if (!File.Exists(Program.FolderBackup)) { MessageBox.Show(this, "There's no backup in the app folder yet.", "Kinetik"); return; }
-            if (MessageBox.Show(this, "Replace the current settings with the backup from " + File.GetLastWriteTime(Program.FolderBackup).ToString("d MMM yyyy, h:mm tt") + "?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (!File.Exists(Program.FolderBackup)) { MessageBox.Show(this, "There's no backup in the app folder yet.", "Kinetik Stats"); return; }
+            if (MessageBox.Show(this, "Replace the current settings with the backup from " + File.GetLastWriteTime(Program.FolderBackup).ToString("d MMM yyyy, h:mm tt") + "?", "Kinetik Stats", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             LoadSettings(() => { Profiles.Import(c, File.ReadAllText(Program.FolderBackup)); c.Save(); return true; });
         });
         folderRestore.Margin = new Padding(6, 0, 0, 0);
@@ -12623,7 +12623,7 @@ class SettingsForm : Form
         if (!Program.IsAdmin)
             Add(Icons.Thermo, c.TempColor, "Run as administrator", "Required for an exact CPU temperature", Btn("Restart as admin", (s, e) => Program.RestartAsAdmin(), true));
         else if (!Program.PawnIOInstalled)
-            Add(Icons.Thermo, c.TempColor, "Install the PawnIO driver", "Required for an exact CPU temperature. Restart Kinetik after installing.", Btn("Get PawnIO", (s, e) =>
+            Add(Icons.Thermo, c.TempColor, "Install the PawnIO driver", "Required for an exact CPU temperature. Restart Kinetik Stats after installing.", Btn("Get PawnIO", (s, e) =>
             {
                 try { Process.Start(new ProcessStartInfo("https://pawnio.eu") { UseShellExecute = true }); } catch { }
             }, true));
@@ -12633,7 +12633,7 @@ class SettingsForm : Form
         Header("Reset");
         Add(Icons.Gear, Theme.Sub, "Restore default settings", "Every option, including the order and custom icons", Btn("Reset", (s, e) =>
         {
-            if (MessageBox.Show(this, "Reset every setting to its default?", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            if (MessageBox.Show(this, "Reset every setting to its default?", "Kinetik Stats", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.ResetToDefaults(); Apply(); RefreshPage();
         }));
     }
