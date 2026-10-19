@@ -132,6 +132,8 @@ class Settings
     public bool UpdateBeta = false;   // offer test versions in the update check
     // Notifications
     public bool AlertTemps = true, AlertBattery = true, AlertDisk = true, AlertPing = false;
+    public bool TrackScreenTime = true; // the Screen time page's record of which app is in front (ScreenTime)
+    public bool TrackChanges = true; // the Timeline page's snapshots of installed apps, drivers and settings (PcHistory)
     public int AnimFps = 60, TrayStyle = 0, AppBackground = 0; // icon animation frame rate; tray icon background (see TrayIconArt.Styles)
 
     // Every stat that can appear on the bar, in default order. Dividers ("Sep1", "Sep2", ...) are added by the user.
@@ -2008,6 +2010,14 @@ static class Icons
         }
     }
 
+    // A half-filled circle: light and dark.
+    public static void Contrast(Graphics g, RectangleF r, Color c)
+    {
+        float s = r.Width; var e = new RectangleF(r.X + s * 0.1f, r.Y + s * 0.1f, s * 0.8f, s * 0.8f);
+        using (var p = P(c, s)) g.DrawEllipse(p, e);
+        using (var b = new SolidBrush(c)) g.FillPie(b, e.X, e.Y, e.Width, e.Height, 90, 180);
+    }
+
     public static void Info(Graphics g, RectangleF r, Color c)
     {
         float s = r.Width, cx = r.X + s / 2, d = s * 0.13f;
@@ -2095,6 +2105,44 @@ static class Icons
             for (int i = 0; i < 2; i++)
                 for (int j = 0; j < 3; j++)
                     g.FillEllipse(b, r.X + r.Width * (0.3f + i * 0.28f), r.Y + r.Height * (0.18f + j * 0.28f), d, d);
+    }
+
+    // A circular arrow: something updated.
+    public static void Refresh(Graphics g, RectangleF r, Color c)
+    {
+        float s = r.Width, cx = r.X + s / 2, cy = r.Y + s / 2, rad = s * 0.34f, end = 300 * (float)Math.PI / 180, w = s * 0.2f;
+        using (var p = P(c, s))
+        {
+            g.DrawArc(p, cx - rad, cy - rad, rad * 2, rad * 2, 0, 300);
+            var tip = new PointF(cx + rad * (float)Math.Cos(end), cy + rad * (float)Math.Sin(end));
+            // The arrowhead points along the arc, clockwise.
+            float dx = -(float)Math.Sin(end), dy = (float)Math.Cos(end);
+            g.DrawLines(p, new[] { new PointF(tip.X - w * dx + w * 0.7f * dy, tip.Y - w * dy - w * 0.7f * dx), tip, new PointF(tip.X - w * dx - w * 0.7f * dy, tip.Y - w * dy + w * 0.7f * dx) });
+        }
+    }
+
+    // The power symbol: starts with Windows.
+    public static void Power(Graphics g, RectangleF r, Color c)
+    {
+        float s = r.Width, cx = r.X + s / 2, cy = r.Y + s * 0.55f, rad = s * 0.36f;
+        using (var p = P(c, s))
+        {
+            g.DrawArc(p, cx - rad, cy - rad, rad * 2, rad * 2, -55, 290);
+            g.DrawLine(p, cx, r.Y + s * 0.08f, cx, cy - s * 0.04f);
+        }
+    }
+
+    // A warning triangle: something went wrong.
+    public static void Alert(Graphics g, RectangleF r, Color c)
+    {
+        float s = r.Width, cx = r.X + s / 2;
+        using (var p = P(c, s)) using (var b = new SolidBrush(c))
+        {
+            g.DrawPolygon(p, new[] { new PointF(cx, r.Y + s * 0.1f), new PointF(r.Right - s * 0.06f, r.Bottom - s * 0.12f), new PointF(r.X + s * 0.06f, r.Bottom - s * 0.12f) });
+            g.DrawLine(p, cx, r.Y + s * 0.4f, cx, r.Y + s * 0.6f);
+            float d = s * 0.13f;
+            g.FillEllipse(b, cx - d / 2, r.Y + s * 0.7f - d / 2, d, d);
+        }
     }
 
     public static IconFn ForDevice(string name, int pct)
@@ -2700,7 +2748,10 @@ class StatsBar : Form
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
         Cfg.Load();
-        Theme.Use(Cfg.AppBackground);
+        Theme.Migrate(Cfg.AppBackground);
+        Theme.Use();
+        PcHistory.Start(() => Cfg.TrackChanges);
+        ScreenTime.Start(() => Cfg.TrackScreenTime);
 
         menu.Renderer = new DarkMenuRenderer();
         menu.Items.Add("Settings…", null, (s, e) => OpenSettings(null));
@@ -2730,6 +2781,7 @@ class StatsBar : Form
         menu.Items.Add(profilesItem);
         menu.Opening += (s, e) =>
         {
+            Theme.Use(); // the Kinetik apps' theme may have changed in another app
             widgetItem.Checked = Cfg.WidgetShow; unlockItem.Visible = Cfg.WidgetShow && Cfg.WidgetLocked;
             overlayItem.Checked = Cfg.OverlayShow || Watch.AutoOverlay; overlayItem.ShortcutKeyDisplayString = Cfg.OverlayHotkey ? "Ctrl+Shift+F10" : null;
             benchItem.Checked = Watch.IsRecording; benchItem.Text = Watch.IsRecording ? "Stop recording benchmark" : "Record benchmark";
@@ -2742,7 +2794,7 @@ class StatsBar : Form
             foreach (var name in Profiles.List())
             {
                 var n = name;
-                profilesItem.DropDownItems.Add(n, null, (s2, e2) => { if (Profiles.Load(Cfg, n)) { Theme.Use(Cfg.AppBackground); if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.Close(); Render(true); } });
+                profilesItem.DropDownItems.Add(n, null, (s2, e2) => { if (Profiles.Load(Cfg, n)) { if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.Close(); Render(true); } });
             }
             if (profilesItem.DropDownItems.Count == 0) profilesItem.DropDownItems.Add(new ToolStripMenuItem("Save one in Settings → General") { Enabled = false });
             unlockOverlay.Visible = Cfg.OverlayShow && Cfg.OverlayLocked;
@@ -5816,6 +5868,1078 @@ static class WifiSignal
     }
 }
 
+// ======================================================================= Timeline
+// What was installed, updated, removed or switched on this PC. Windows logs some of that itself (Windows updates,
+// Windows Installer apps, its own install date), and those are read from its logs when the Timeline page opens.
+// Everything else (every app, drivers, startup apps, BIOS, power plan, memory, drives…) is noticed by comparing a
+// small snapshot of the PC with the previous one, when Kinetik starts and every 3 hours. It all stays on this PC.
+class PcChange
+{
+    public long T;                // local time, in DateTime ticks
+    public bool Approx, DateOnly; // noticed between two snapshots, so only roughly when / only the day is known
+    public string Key = "", K = "", A = "", X = "", V = "", W = "", S = ""; // snapshot key, kind, action (add / update / remove / set), text, version, what it was, second line
+    public DateTime Time() { return new DateTime(T); }
+}
+
+class PcHistoryStore
+{
+    public long Since, Last; // when the first and the latest snapshot were taken
+    public Dictionary<string, string> Snap = new Dictionary<string, string>();
+    public List<PcChange> Events = new List<PcChange>();
+}
+
+class PcHistoryView
+{
+    public List<PcChange> Events;
+    public Dictionary<string, string> Snap;
+    public DateTime Since; // DateTime.MaxValue until the first snapshot
+}
+
+static class PcHistory
+{
+    public static readonly string[] Kinds = { "App", "Startup", "Driver", "Windows", "Hardware", "Setting" };
+    public static readonly string[] KindNames = { "Apps", "Start with Windows", "Drivers", "Windows updates", "Hardware", "Settings" };
+    const int MaxEvents = 3000;
+    static readonly object gate = new object();
+    static PcHistoryStore store;
+    static System.Threading.Timer timer;
+
+    [DllImport("kernel32.dll")] static extern bool GetPhysicallyInstalledSystemMemory(out ulong kb);
+    [DllImport("powrprof.dll")] static extern uint PowerGetActiveScheme(IntPtr root, out IntPtr scheme);
+    [DllImport("powrprof.dll")] static extern uint PowerReadFriendlyName(IntPtr root, IntPtr scheme, IntPtr sub, IntPtr setting, byte[] buffer, ref uint size);
+    [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr p);
+
+    static string FilePath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik", "Timeline.json"); } }
+
+    // Looks a minute after starting, then every 3 hours, while Settings → Timeline → Notice changes is on.
+    public static void Start(Func<bool> enabled)
+    {
+        timer = new System.Threading.Timer(s => { if (enabled()) Check(); }, null, TimeSpan.FromMinutes(1), TimeSpan.FromHours(3));
+    }
+
+    public static DateTime LastCheck { get { lock (gate) { Load(); return new DateTime(store.Last); } } }
+
+    static void Load()
+    {
+        if (store != null) return;
+        try
+        {
+            var f = new FileInfo(FilePath);
+            if (f.Exists && f.Length < (8 << 20))
+                store = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 8 << 20 }.Deserialize<PcHistoryStore>(File.ReadAllText(f.FullName));
+        }
+        catch (Exception e) { Program.Log(e); }
+        if (store == null) store = new PcHistoryStore();
+        if (store.Snap == null) store.Snap = new Dictionary<string, string>();
+        if (store.Events == null) store.Events = new List<PcChange>();
+        store.Events.RemoveAll(e => e == null || string.IsNullOrEmpty(e.X));
+    }
+
+    // Takes a snapshot and records how it differs from the last one.
+    public static void Check()
+    {
+        try
+        {
+            var failed = new HashSet<string>();
+            var now = Snapshot(failed);
+            lock (gate)
+            {
+                Load();
+                // A part that couldn't be read this time keeps its last values, so it doesn't look like everything in it was removed.
+                foreach (var kv in store.Snap) if (failed.Contains(Prefix(kv.Key))) now[kv.Key] = kv.Value;
+                var t = DateTime.Now;
+                if (store.Since == 0 || store.Snap.Count == 0) store.Since = t.Ticks;
+                else Diff(store.Snap, now, new DateTime(store.Last), t, store.Events);
+                store.Snap = now; store.Last = t.Ticks;
+                if (store.Events.Count > MaxEvents) store.Events.RemoveRange(0, store.Events.Count - MaxEvents);
+                SafeFile.Write(FilePath, new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 8 << 20 }.Serialize(store));
+            }
+        }
+        catch (Exception e) { Program.Log(e); }
+    }
+
+    // Everything for the Timeline page, newest first.
+    public static PcHistoryView Read()
+    {
+        var v = new PcHistoryView { Events = new List<PcChange>() };
+        lock (gate)
+        {
+            Load();
+            v.Events.AddRange(store.Events);
+            v.Snap = store.Snap.Count > 0 ? new Dictionary<string, string>(store.Snap) : null;
+            v.Since = store.Since == 0 ? DateTime.MaxValue : new DateTime(store.Since);
+        }
+        if (v.Snap == null) v.Snap = Snapshot(new HashSet<string>());
+        try { WindowsUpdates(v.Events); } catch (Exception e) { Program.Log(e); }
+        // Before the first snapshot, Windows' own records are all there is.
+        try { InstallerLog(v.Events, v.Since); } catch (Exception e) { Program.Log(e); }
+        try { InstallDates(v.Events, v.Since); } catch (Exception e) { Program.Log(e); }
+        v.Events.Sort((a, b) => b.T.CompareTo(a.T));
+        return v;
+    }
+
+    static string Prefix(string key) { int i = key.IndexOf('|'); return i < 0 ? key : key.Substring(0, i); }
+
+    // ---- the snapshot: "part|name" → value
+    static Dictionary<string, string> Snapshot(HashSet<string> failed)
+    {
+        var d = new Dictionary<string, string>();
+        Part(d, failed, "app", p => EachApp((name, version, date) => { if (!p.ContainsKey(name)) p[name] = version; }));
+        Part(d, failed, "run", StartupApps);
+        Part(d, failed, "drv", Drivers);
+        Part(d, failed, "sys", SystemInfo);
+        Part(d, failed, "disk", Disks);
+        return d;
+    }
+
+    static void Part(Dictionary<string, string> d, HashSet<string> failed, string prefix, Action<Dictionary<string, string>> read)
+    {
+        var part = new Dictionary<string, string>();
+        try { read(part); foreach (var kv in part) d[prefix + "|" + kv.Key] = kv.Value; }
+        catch (Exception e) { failed.Add(prefix); Program.Log(e); }
+    }
+
+    // Each installed desktop app in Programs and Features: name, version, install date (yyyyMMdd or "").
+    static void EachApp(Action<string, string, string> found)
+    {
+        const string path = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
+        var roots = new[] { RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64), RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry32), RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64) };
+        foreach (var root in roots)
+            using (root)
+            using (var list = root.OpenSubKey(path))
+            {
+                if (list == null) continue;
+                foreach (var sub in list.GetSubKeyNames())
+                    try
+                    {
+                        using (var k = list.OpenSubKey(sub))
+                        {
+                            if (k == null) continue;
+                            var name = (k.GetValue("DisplayName") as string ?? "").Trim();
+                            if (name == "" || k.GetValue("ParentKeyName") != null || Convert.ToInt32(k.GetValue("SystemComponent", 0)) == 1) continue;
+                            var type = k.GetValue("ReleaseType") as string ?? "";
+                            if (type.IndexOf("update", StringComparison.OrdinalIgnoreCase) >= 0 || type.IndexOf("hotfix", StringComparison.OrdinalIgnoreCase) >= 0) continue;
+                            found(name, (k.GetValue("DisplayVersion") ?? "").ToString().Trim(), (k.GetValue("InstallDate") ?? "").ToString().Trim());
+                        }
+                    }
+                    catch { }
+            }
+    }
+
+    // Apps that start with Windows, as Task Manager's Startup apps lists them (leaving out the ones switched off there).
+    static void StartupApps(Dictionary<string, string> d)
+    {
+        const string run = @"Software\Microsoft\Windows\CurrentVersion\Run", approved = @"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\";
+        RunKey(d, Registry.CurrentUser, run, approved + "Run");
+        RunKey(d, Registry.LocalMachine, run, approved + "Run");
+        RunKey(d, Registry.LocalMachine, @"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run", approved + "Run32");
+        StartupFolder(d, Environment.GetFolderPath(Environment.SpecialFolder.Startup), Registry.CurrentUser, approved + "StartupFolder");
+        StartupFolder(d, Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), Registry.LocalMachine, approved + "StartupFolder");
+    }
+
+    static bool SwitchedOff(RegistryKey root, string approvedPath, string name)
+    {
+        using (var k = root.OpenSubKey(approvedPath))
+        {
+            var b = k == null ? null : k.GetValue(name) as byte[];
+            return b != null && b.Length > 0 && (b[0] & 1) == 1;
+        }
+    }
+
+    static void RunKey(Dictionary<string, string> d, RegistryKey root, string path, string approvedPath)
+    {
+        using (var k = root.OpenSubKey(path))
+            if (k != null)
+                foreach (var n in k.GetValueNames())
+                    if (n != "" && !SwitchedOff(root, approvedPath, n)) d[n] = "";
+    }
+
+    static void StartupFolder(Dictionary<string, string> d, string dir, RegistryKey root, string approvedPath)
+    {
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+        foreach (var f in Directory.GetFiles(dir))
+        {
+            var file = Path.GetFileName(f);
+            if (file.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase) || SwitchedOff(root, approvedPath, file)) continue;
+            d[Path.GetFileNameWithoutExtension(f)] = "";
+        }
+    }
+
+    // Graphics, audio and network drivers: "Class|device" → version.
+    static readonly string[][] DriverClasses =
+    {
+        new[] { "{4d36e968-e325-11ce-bfc1-08002be10318}", "Graphics" },
+        new[] { "{4d36e96c-e325-11ce-bfc1-08002be10318}", "Audio" },
+        new[] { "{4d36e972-e325-11ce-bfc1-08002be10318}", "Network" },
+    };
+
+    static void Drivers(Dictionary<string, string> d)
+    {
+        foreach (var cls in DriverClasses)
+            using (var list = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\Class\" + cls[0]))
+            {
+                if (list == null) continue;
+                foreach (var sub in list.GetSubKeyNames())
+                {
+                    if (sub.Length != 4 || !sub.All(char.IsDigit)) continue;
+                    try
+                    {
+                        using (var k = list.OpenSubKey(sub))
+                        {
+                            if (k == null) continue;
+                            var desc = (k.GetValue("DriverDesc") as string ?? "").Trim();
+                            var ver = (k.GetValue("DriverVersion") as string ?? "").Trim();
+                            if (desc == "" || ver == "") continue;
+                            if (cls[1] == "Network" && (Convert.ToInt32(k.GetValue("Characteristics", 0)) & 4) == 0) continue; // virtual adapters
+                            d[cls[1] + "|" + desc] = DriverVersion(desc, ver);
+                        }
+                    }
+                    catch { }
+                }
+            }
+    }
+
+    // NVIDIA's Windows driver version 32.0.15.8142 is the 581.42 it's known by.
+    public static string DriverVersion(string device, string v)
+    {
+        var p = v.Split('.');
+        if (device.IndexOf("NVIDIA", StringComparison.OrdinalIgnoreCase) >= 0 && p.Length == 4 && p[3].Length == 4 && (p[2] + p[3]).Length >= 5)
+        {
+            var s = p[2] + p[3]; s = s.Substring(s.Length - 5);
+            return s.Substring(0, 3) + "." + s.Substring(3);
+        }
+        return v;
+    }
+
+    static void Try(Action a) { try { a(); } catch { } }
+
+    static void SystemInfo(Dictionary<string, string> d)
+    {
+        Try(() =>
+        {
+            using (var k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+            {
+                int build; int.TryParse(k.GetValue("CurrentBuild") as string, out build);
+                var disp = k.GetValue("DisplayVersion") as string ?? "";
+                d["win"] = (build >= 22000 ? "Windows 11 " : "Windows 10 ") + (disp != "" ? disp + " " : "") + "(" + build + "." + k.GetValue("UBR", 0) + ")";
+            }
+        });
+        Try(() => { using (var k = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\BIOS")) { var v = (k.GetValue("BIOSVersion") ?? "").ToString().Trim(); if (v != "") d["bios"] = v; } });
+        Try(() => { ulong kb; if (GetPhysicallyInstalledSystemMemory(out kb)) d["ram"] = Math.Round(kb / 1048576.0) + " GB"; });
+        Try(() => { var p = PowerPlan(); if (!string.IsNullOrEmpty(p)) d["power"] = p; });
+        Try(() => { using (var k = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\GameBar")) { var v = k == null ? null : k.GetValue("AutoGameModeEnabled"); d["game"] = v == null || Convert.ToInt32(v) != 0 ? "on" : "off"; } });
+        Try(() => { using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\GraphicsDrivers")) { var v = k == null ? null : k.GetValue("HwSchMode"); if (v != null) d["hags"] = Convert.ToInt32(v) == 2 ? "on" : "off"; } });
+        Try(() => { using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity")) d["hvci"] = k != null && Convert.ToInt32(k.GetValue("Enabled", 0)) == 1 ? "on" : "off"; });
+    }
+
+    static string PowerPlan()
+    {
+        IntPtr scheme;
+        if (PowerGetActiveScheme(IntPtr.Zero, out scheme) != 0) return null;
+        try
+        {
+            uint size = 0;
+            PowerReadFriendlyName(IntPtr.Zero, scheme, IntPtr.Zero, IntPtr.Zero, null, ref size);
+            if (size == 0 || size > 4096) return null;
+            var buf = new byte[size];
+            if (PowerReadFriendlyName(IntPtr.Zero, scheme, IntPtr.Zero, IntPtr.Zero, buf, ref size) != 0) return null;
+            return Encoding.Unicode.GetString(buf).TrimEnd('\0').Trim();
+        }
+        finally { LocalFree(scheme); }
+    }
+
+    static void Disks(Dictionary<string, string> d)
+    {
+        foreach (var di in DriveInfo.GetDrives())
+            try
+            {
+                if (di.DriveType != DriveType.Fixed || !di.IsReady) continue;
+                double gb = di.TotalSize / 1e9;
+                d[di.Name.TrimEnd('\\')] = (di.VolumeLabel == "" ? "Local Disk" : di.VolumeLabel) + ", " + (gb >= 1000 ? (gb / 1000).ToString("0.#") + " TB" : Math.Round(gb) + " GB");
+            }
+            catch { }
+    }
+
+    // ---- what changed between two snapshots
+    static void Diff(Dictionary<string, string> old, Dictionary<string, string> now, DateTime from, DateTime to, List<PcChange> events)
+    {
+        Dictionary<string, DateTime> exact = null;
+        Func<string, DateTime?> when = name =>
+        {
+            if (exact == null) { exact = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase); try { InstallerTimes(from, to, exact); } catch { } }
+            DateTime t; return exact.TryGetValue(name, out t) ? t : (DateTime?)null;
+        };
+        var found = new List<PcChange>();
+        foreach (var kv in now)
+        {
+            string was;
+            bool had = old.TryGetValue(kv.Key, out was);
+            if (had && was == kv.Value) continue;
+            var ch = Describe(kv.Key, had ? was : null, kv.Value);
+            if (ch != null) found.Add(ch);
+        }
+        foreach (var kv in old)
+            if (!now.ContainsKey(kv.Key)) { var ch = Describe(kv.Key, kv.Value, null); if (ch != null) found.Add(ch); }
+        foreach (var ch in found)
+        {
+            ch.T = to.Ticks; ch.Approx = true;
+            if (ch.K == "App") { var t = when(ch.Key.Substring(4)); if (t.HasValue) { ch.T = t.Value.Ticks; ch.Approx = false; } }
+        }
+        events.AddRange(found.OrderBy(ch => ch.T));
+    }
+
+    static PcChange Describe(string key, string was, string now)
+    {
+        var part = Prefix(key);
+        var name = key.Substring(Math.Min(key.Length, part.Length + 1));
+        var ch = new PcChange { Key = key, A = was == null ? "add" : now == null ? "remove" : "update" };
+        if (part == "app")
+        {
+            ch.K = "App";
+            if (was == null) { ch.X = name + " installed"; ch.V = now; }
+            else if (now == null) { ch.X = name + " removed"; ch.V = was; }
+            else { ch.X = now != "" ? name + " updated to " + now : name + " updated"; ch.W = was; }
+        }
+        else if (part == "run")
+        {
+            if (was != null && now != null) return null;
+            ch.K = "Startup"; ch.X = name + (now != null ? " now starts with Windows" : " no longer starts with Windows");
+        }
+        else if (part == "drv")
+        {
+            ch.K = "Driver";
+            int bar = name.IndexOf('|');
+            string cls = bar < 0 ? "" : name.Substring(0, bar), device = name.Substring(bar + 1);
+            string label = cls == "Graphics" ? "Graphics driver" : device + " driver";
+            if (was == null) { ch.X = device + " driver installed"; ch.V = now; }
+            else if (now == null) { ch.X = device + " removed"; ch.V = was; }
+            else { ch.X = label + " updated to " + now; ch.W = was; if (cls == "Graphics") ch.S = device; }
+        }
+        else if (part == "sys")
+        {
+            if (was == null || now == null) return null; // a reading that's new or went missing isn't a change
+            ch.A = "set";
+            if (name == "win") { ch.K = "Windows"; ch.A = "update"; ch.X = "Windows updated to " + now.Replace("Windows 11 ", "").Replace("Windows 10 ", ""); ch.W = was.Replace("Windows 11 ", "").Replace("Windows 10 ", ""); }
+            else if (name == "bios") { ch.K = "Hardware"; ch.A = "update"; ch.X = "BIOS updated to " + now; ch.W = was; }
+            else if (name == "ram") { ch.K = "Hardware"; ch.X = "Memory changed to " + now; ch.W = was; }
+            else if (name == "power") { ch.K = "Setting"; ch.X = "Power plan changed to " + now; ch.W = was; }
+            else if (name == "game") { ch.K = "Setting"; ch.X = "Game Mode turned " + now; }
+            else if (name == "hags") { ch.K = "Setting"; ch.X = "Hardware-accelerated GPU scheduling turned " + now; }
+            else if (name == "hvci") { ch.K = "Setting"; ch.X = "Memory integrity turned " + now; }
+            else return null;
+        }
+        else if (part == "disk")
+        {
+            ch.K = "Hardware";
+            if (was == null) { ch.X = "Drive " + name + " added"; ch.V = now; }
+            else if (now == null) { ch.X = "Drive " + name + " removed"; ch.V = was; }
+            else { ch.X = "Drive " + name + " is now " + now; ch.W = was; }
+        }
+        else return null;
+        return ch;
+    }
+
+    // ---- Windows' own records
+    public static IEnumerable<System.Diagnostics.Eventing.Reader.EventRecord> Events(string log, string xpath, int max)
+    {
+        var q = new System.Diagnostics.Eventing.Reader.EventLogQuery(log, System.Diagnostics.Eventing.Reader.PathType.LogName, xpath) { ReverseDirection = true };
+        using (var r = new System.Diagnostics.Eventing.Reader.EventLogReader(q))
+            for (int n = 0; n < max; n++)
+            {
+                var e = r.ReadEvent();
+                if (e == null) yield break;
+                using (e) yield return e;
+            }
+    }
+
+    public static string Prop(System.Diagnostics.Eventing.Reader.EventRecord e, int i)
+    {
+        if (e.Properties.Count <= i || e.Properties[i].Value == null) return "";
+        var v = e.Properties[i].Value.ToString().Trim();
+        return v == "(NULL)" ? "" : v;
+    }
+
+    public static DateTime Local(System.Diagnostics.Eventing.Reader.EventRecord e) { return e.TimeCreated.HasValue ? e.TimeCreated.Value : DateTime.Now; }
+
+    static string Utc(DateTime t) { return t.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture); }
+
+    // When Windows Installer installed or removed each app in a time range.
+    static void InstallerTimes(DateTime from, DateTime to, Dictionary<string, DateTime> times)
+    {
+        var xp = "*[System[Provider[@Name='MsiInstaller'] and (EventID=1033 or EventID=1034) and TimeCreated[@SystemTime>='" + Utc(from) + "' and @SystemTime<='" + Utc(to.AddMinutes(1)) + "']]]";
+        foreach (var e in Events("Application", xp, 500))
+        {
+            var name = Prop(e, 0);
+            if (name != "" && !times.ContainsKey(name)) times[name] = Local(e);
+        }
+    }
+
+    // Windows updates and drivers from Windows Update. Defender's definition updates, several a day, are left out.
+    static void WindowsUpdates(List<PcChange> list)
+    {
+        var seen = new HashSet<string>();
+        foreach (var e in Events("System", "*[System[Provider[@Name='Microsoft-Windows-WindowsUpdateClient'] and EventID=19]]", 1500))
+        {
+            var title = Prop(e, 0);
+            if (title == "" || title.Contains("Security Intelligence Update") || title.Contains("Definition Update") || title.Contains("Malicious Software Removal Tool") || !seen.Add(title)) continue;
+            var ch = new PcChange { T = Local(e).Ticks, A = "update", S = title };
+            // Store apps come through as "9WZDNCRFJBMP-Microsoft.WindowsStore": the part after the dash is the package.
+            var store = Regex.Match(title, @"^[0-9A-Z]{12}-(?:Microsoft\.)?(.+)$", RegexOptions.IgnoreCase);
+            if (store.Success)
+            {
+                ch.K = "App"; ch.X = store.Groups[1].Value + " updated"; ch.S = "From the Microsoft Store";
+                list.Add(ch);
+                continue;
+            }
+            var parts = title.Split(new[] { " - " }, StringSplitOptions.None);
+            var kb = Regex.Match(title, @"KB\d{6,8}");
+            if (parts.Length >= 3 && !kb.Success)
+            {
+                ch.K = "Driver";
+                var ver = parts[parts.Length - 1].Trim();
+                ch.X = parts[0].Trim() + " " + parts[1].Trim().ToLowerInvariant() + " driver updated to " + DriverVersion(parts[0], ver);
+                ch.S = "";
+            }
+            else
+            {
+                ch.K = "Windows";
+                ch.X = kb.Success ? (title.Contains(".NET") ? ".NET update " : title.Contains("Cumulative Update") || title.StartsWith("20") ? "Windows update " : "Update ") + kb.Value : title;
+                if (!kb.Success) ch.S = "";
+            }
+            list.Add(ch);
+        }
+    }
+
+    // Apps Windows Installer set up or removed before the first snapshot. Repairs log the same event, so only the first of each version counts.
+    static void InstallerLog(List<PcChange> list, DateTime before)
+    {
+        var seen = new Dictionary<string, PcChange>();
+        foreach (var e in Events("Application", "*[System[Provider[@Name='MsiInstaller'] and (EventID=1033 or EventID=1034)]]", 3000))
+        {
+            var t = Local(e);
+            if (t >= before) continue;
+            string name = Prop(e, 0), ver = Prop(e, 1);
+            if (name == "" || (e.Id == 1033 && Prop(e, 3) != "0")) continue;
+            var ch = new PcChange { T = t.Ticks, K = "App", Key = "app|" + name, A = e.Id == 1033 ? "add" : "remove", X = name + (e.Id == 1033 ? " installed" : " removed"), V = ver };
+            seen[e.Id + "|" + name + "|" + ver] = ch; // reading newest first, so the oldest ends up kept
+        }
+        list.AddRange(seen.Values);
+    }
+
+    // The install date each app recorded (a day, no time), and when Windows itself was installed.
+    static void InstallDates(List<PcChange> list, DateTime before)
+    {
+        var days = new HashSet<string>(list.Where(c => c.K == "App").Select(c => c.Key + "|" + c.Time().Date.Ticks));
+        var seen = new HashSet<string>();
+        EachApp((name, version, date) =>
+        {
+            DateTime d;
+            if (!seen.Add(name) || !DateTime.TryParseExact(date, "yyyyMMdd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d) || d >= before.Date || d.Year < 2000) return;
+            if (days.Contains("app|" + name + "|" + d.Ticks)) return;
+            list.Add(new PcChange { T = d.Ticks, DateOnly = true, K = "App", Key = "app|" + name, A = "add", X = name + " installed", V = version });
+        });
+        using (var k = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
+        {
+            var secs = k == null ? null : k.GetValue("InstallDate");
+            if (secs == null) return;
+            var t = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(Convert.ToInt64(secs)).ToLocalTime();
+            if (t >= before) return;
+            var disp = k.GetValue("DisplayVersion") as string ?? "";
+            list.Add(new PcChange { T = t.Ticks, K = "Windows", Key = "sys|win", A = "add", X = "Windows " + (disp != "" ? disp + " " : "") + "installed" });
+        }
+    }
+}
+
+// ======================================================================= Crashes
+// App crashes, freezes, graphics driver resets, blue screens, sudden shutdowns and hardware errors, read from
+// Windows' event logs and explained in plain words. Reading those logs doesn't need admin rights.
+class CrashInfo
+{
+    public DateTime When;
+    public string K = "", Title = "", Tag = "", What = "", Try = "", App = "";
+}
+
+static class CrashLog
+{
+    public const int Days = 60;
+    public static readonly string[] Kinds = { "App", "Hang", "Graphics", "Blue", "Power", "Hardware" };
+    public static readonly string[] KindNames = { "App crashes", "Stopped responding", "Graphics driver resets", "Blue screens", "Sudden shutdowns", "Hardware errors" };
+
+    public static List<CrashInfo> Read()
+    {
+        var list = new List<CrashInfo>();
+        string within = "TimeCreated[timediff(@SystemTime) <= " + (Days * 86400000L) + "]";
+        try
+        {
+            foreach (var e in PcHistory.Events("Application", "*[System[((Provider[@Name='Application Error'] and EventID=1000) or (Provider[@Name='Application Hang'] and EventID=1002) or (Provider[@Name='Windows Error Reporting'] and EventID=1001)) and " + within + "]]", 2000))
+            {
+                var p = e.ProviderName;
+                if (p == "Application Error") list.Add(AppCrash(e));
+                else if (p == "Application Hang") list.Add(Hang(e));
+                else if (PcHistory.Prop(e, 2) == "LiveKernelEvent") { var c = LiveKernel(e); if (c != null) list.Add(c); }
+            }
+        }
+        catch (Exception ex) { Program.Log(ex); }
+        var power = new List<KeyValuePair<DateTime, uint>>();
+        var whea = new Dictionary<string, CrashInfo>();
+        var wheaCount = new Dictionary<string, int>();
+        try
+        {
+            foreach (var e in PcHistory.Events("System", "*[System[((Provider[@Name='Display'] and EventID=4101) or (Provider[@Name='Microsoft-Windows-WER-SystemErrorReporting'] and EventID=1001) or (Provider[@Name='Microsoft-Windows-Kernel-Power'] and EventID=41) or Provider[@Name='Microsoft-Windows-WHEA-Logger']) and " + within + "]]", 3000))
+            {
+                var p = e.ProviderName;
+                if (p == "Display") list.Add(GpuReset(PcHistory.Local(e), PcHistory.Prop(e, 0)));
+                else if (p == "Microsoft-Windows-WER-SystemErrorReporting") { var m = Regex.Match(PcHistory.Prop(e, 0), "^0x([0-9a-fA-F]+)"); list.Add(BlueScreen(PcHistory.Local(e), m.Success ? Convert.ToUInt32(m.Groups[1].Value, 16) : 0)); }
+                else if (p == "Microsoft-Windows-Kernel-Power") { uint code; uint.TryParse(PcHistory.Prop(e, 0), out code); power.Add(new KeyValuePair<DateTime, uint>(PcHistory.Local(e), code)); }
+                else Hardware(e, whea, wheaCount);
+            }
+        }
+        catch (Exception ex) { Program.Log(ex); }
+        foreach (var kv in whea) { int n = wheaCount[kv.Key]; if (n > 1) kv.Value.Tag = n + " times"; list.Add(kv.Value); }
+        // Kernel-Power 41 is logged on the next start after any unclean shutdown, blue screens included.
+        foreach (var kv in power)
+        {
+            var t = kv.Key;
+            if (list.Any(c => c.K == "Blue" && Math.Abs((c.When - t).TotalMinutes) < 30)) continue;
+            list.Add(kv.Value != 0 ? BlueScreen(t, kv.Value) : new CrashInfo
+            {
+                When = t, K = "Power", Title = "PC shut down unexpectedly",
+                What = "Windows didn't get to shut down properly. The power was cut, the PC was switched off with its power button, or it froze so hard it had to be restarted.",
+                Try = "If it happens while gaming or under heavy load, check temperatures and the power supply, and undo any overclock or undervolt. If it happens while idle or asleep, update the BIOS and chipset drivers.",
+            });
+        }
+        // A driver reset is often logged twice (Display and LiveKernelEvent); keep one.
+        list.Sort((a, b) => a.When.CompareTo(b.When));
+        DateTime lastGpu = DateTime.MinValue;
+        list.RemoveAll(c =>
+        {
+            if (c.K != "Graphics") return false;
+            bool dupe = (c.When - lastGpu).TotalMinutes < 2;
+            lastGpu = c.When;
+            return dupe;
+        });
+        list.Reverse();
+        return list;
+    }
+
+    static readonly Dictionary<string, string> names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    // "Discord" rather than "Discord.exe", from the exe's description when it has a sensible one.
+    static string AppName(string exe, string path)
+    {
+        string n;
+        lock (names)
+            if (names.TryGetValue(path + "|" + exe, out n)) return n;
+        n = exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? exe.Substring(0, exe.Length - 4) : exe;
+        try
+        {
+            if (path != "" && File.Exists(path))
+            {
+                var d = (FileVersionInfo.GetVersionInfo(path).FileDescription ?? "").Trim();
+                if (d.Length > 1 && d.Length <= 40 && !d.Contains(".dll")) n = d;
+            }
+        }
+        catch { }
+        lock (names) names[path + "|" + exe] = n;
+        return n;
+    }
+
+    static CrashInfo AppCrash(System.Diagnostics.Eventing.Reader.EventRecord e)
+    {
+        string exe = PcHistory.Prop(e, 0), module = PcHistory.Prop(e, 3), code = PcHistory.Prop(e, 6).ToLowerInvariant().Replace("0x", "");
+        var c = new CrashInfo { When = PcHistory.Local(e), K = "App", App = AppName(exe, PcHistory.Prop(e, 10)) };
+        c.Title = c.App + " crashed";
+        bool own = module == "" || module.Equals(exe, StringComparison.OrdinalIgnoreCase);
+        if (!own) c.Tag = "in " + module;
+        var m = module.ToLowerInvariant();
+        if (new[] { "nvwgf2um", "nvd3dum", "nvoglv", "nvcuda", "nvgpucomp", "amdxx64", "atidxx64", "atio6axx", "amdvlk", "aticfx", "igd10", "igd11", "igd12", "igdumd", "igxelp", "igc64", "igvk" }.Any(m.StartsWith))
+        {
+            c.What = "The crash happened inside the graphics driver, while the app was drawing.";
+            c.Try = "Update the graphics driver, or reinstall it cleanly. If it started after a driver update, go back to the previous version. Undo any GPU overclock.";
+            return c;
+        }
+        if (new[] { "rtsshooks", "gameoverlayrenderer", "discordhook", "graphics-hook", "nvspcap", "overlay" }.Any(m.Contains))
+        {
+            c.What = "The crash happened inside an overlay that draws over the app (" + module + ").";
+            c.Try = "Turn that overlay off for this app (Steam, Discord, RivaTuner, OBS or the NVIDIA overlay) and see if the crashes stop.";
+            return c;
+        }
+        string what, tryThis = "Update or reinstall the app. If it keeps happening, check whether it started after one of the changes below.";
+        switch (code.TrimStart('0'))
+        {
+            case "c0000005": what = "It tried to use memory it wasn't allowed to. That's usually a bug in the app or in one of its add-ons, mods or plug-ins."; tryThis = "Update the app and turn off mods, plug-ins and overlays. If lots of different apps crash like this, test the memory and undo any overclock."; break;
+            case "c0000409": what = "It stopped itself on purpose after a safety check failed, which usually means a bug or a damaged file."; tryThis = "Update or reinstall the app. For a game, verify its files in the launcher."; break;
+            case "e0434352": what = "This .NET app hit an error it wasn't written to handle."; tryThis = "Update the app. Its own error message or log usually says what went wrong."; break;
+            case "c000027b": what = "This Windows app hit an error it wasn't written to handle."; tryThis = "Update it from the Microsoft Store, or repair it in Settings → Apps → Installed apps → Advanced options."; break;
+            case "c0000374": what = "The app's memory got corrupted, usually by a bug in the app or an add-on."; tryThis = "Update the app and turn off its add-ons. If many apps do this, test the memory."; break;
+            case "c00000fd": what = "The app ran out of stack space, usually because of a bug that keeps calling itself."; break;
+            case "80000003": what = "The app hit a check its developers put in to stop it when something has gone badly wrong."; break;
+            case "c000001d": what = "The processor was asked to run an instruction it doesn't support, or ran it wrongly."; tryThis = "Undo any CPU overclock or undervolt and update the BIOS. Some apps also need a newer processor."; break;
+            case "c0000006": what = "Windows couldn't read part of the app from the drive."; tryThis = "Check the drive's health and reinstall the app."; break;
+            case "c0000135": case "c0000142": case "c0000139": what = "A file the app needs to start was missing or wouldn't load."; tryThis = "Reinstall the app and the Microsoft Visual C++ Redistributables, then restart."; break;
+            case "40000015": case "c0000602": what = "The app shut itself down after an error it couldn't recover from."; break;
+            default: what = "The app ran into an error it couldn't recover from (code 0x" + code + ")."; break;
+        }
+        c.What = what; c.Try = tryThis;
+        return c;
+    }
+
+    static CrashInfo Hang(System.Diagnostics.Eventing.Reader.EventRecord e)
+    {
+        string exe = PcHistory.Prop(e, 0), pkg = PcHistory.Prop(e, 8), type = PcHistory.Prop(e, 9);
+        // Explorer extensions run inside dllhost.exe; their package name says which one it was.
+        var app = exe.Equals("dllhost.exe", StringComparison.OrdinalIgnoreCase) && pkg != "" ? pkg.Substring(pkg.LastIndexOf('.') + 1) : AppName(exe, PcHistory.Prop(e, 5));
+        bool closing = type.IndexOf("Quiesce", StringComparison.OrdinalIgnoreCase) >= 0;
+        return new CrashInfo
+        {
+            When = PcHistory.Local(e), K = "Hang", App = app, Title = app + (closing ? " stopped responding while closing" : " stopped responding"),
+            What = closing ? "It didn't finish closing in time, so Windows ended it." : "It froze, and Windows closed it, or it was closed while it wasn't responding.",
+            Try = "If it keeps happening, update the app, and check whether the drive or the processor was very busy at the time.",
+        };
+    }
+
+    static CrashInfo GpuReset(DateTime t, string driver)
+    {
+        var d = driver.ToLowerInvariant();
+        string vendor = d.StartsWith("nvlddmkm") ? "NVIDIA" : d.StartsWith("amdkmd") || d.StartsWith("atikmd") ? "AMD" : d.StartsWith("igdkmd") ? "Intel" : "";
+        return new CrashInfo
+        {
+            When = t, K = "Graphics", Title = "Graphics driver stopped responding and recovered", Tag = vendor != "" ? vendor : driver,
+            What = "The graphics card didn't answer in time, so Windows restarted its driver. The screen may have gone black for a moment, and a game may have crashed.",
+            Try = "Update or cleanly reinstall the graphics driver. Undo any GPU overclock or undervolt, check the GPU temperature, and make sure its power cables are pushed fully in.",
+        };
+    }
+
+    static CrashInfo LiveKernel(System.Diagnostics.Eventing.Reader.EventRecord e)
+    {
+        var code = PcHistory.Prop(e, 5).ToLowerInvariant();
+        if (code != "141" && code != "117" && code != "116" && code != "1a1") return null; // the graphics ones
+        var c = GpuReset(PcHistory.Local(e), "");
+        c.Tag = "LiveKernelEvent " + code;
+        return c;
+    }
+
+    // Stop code → name, what it means in a few words, what happened, what to try.
+    static readonly Dictionary<uint, string[]> stops = new Dictionary<uint, string[]>
+    {
+        { 0x133, new[] { "DPC_WATCHDOG_VIOLATION", "a driver took too long", "A driver kept the processor busy for too long. Storage and network drivers are the usual cause.", "Update the chipset, storage (SATA or NVMe) and network drivers, and your SSD's firmware." } },
+        { 0x124, new[] { "WHEA_UNCORRECTABLE_ERROR", "a hardware error", "The hardware reported an error it couldn't fix, usually in the processor or memory.", "Set any overclock, undervolt or XMP / EXPO memory profile back to default, check temperatures and update the BIOS. If it continues, the power supply or processor may be failing." } },
+        { 0x101, new[] { "CLOCK_WATCHDOG_TIMEOUT", "a processor core stopped responding", "One of the processor's cores stopped responding.", "Undo any CPU overclock or undervolt, and update the BIOS." } },
+        { 0xA, new[] { "IRQL_NOT_LESS_OR_EQUAL", "a driver or memory problem", "A driver used memory the wrong way. A faulty driver or unstable memory causes this.", "Update your drivers, starting with any that changed recently, and test the memory with Windows Memory Diagnostic." } },
+        { 0xD1, new[] { "DRIVER_IRQL_NOT_LESS_OR_EQUAL", "a driver problem", "A driver used memory the wrong way.", "Update the drivers that changed recently, especially network and graphics drivers." } },
+        { 0x50, new[] { "PAGE_FAULT_IN_NONPAGED_AREA", "a driver or memory problem", "Windows or a driver tried to read memory that wasn't there.", "Update recently changed drivers and test the memory with Windows Memory Diagnostic." } },
+        { 0x1A, new[] { "MEMORY_MANAGEMENT", "a memory problem", "Windows found its memory in a state that shouldn't be possible. Faulty or unstable RAM is the usual cause.", "Turn off XMP / EXPO to test, run Windows Memory Diagnostic, and try one memory stick at a time." } },
+        { 0x3B, new[] { "SYSTEM_SERVICE_EXCEPTION", "a driver error", "A driver or part of Windows hit an error while running. Graphics drivers are a common cause.", "Update the graphics driver and any driver that changed recently." } },
+        { 0x7E, new[] { "SYSTEM_THREAD_EXCEPTION_NOT_HANDLED", "a driver error", "A driver hit an error it didn't handle.", "Update the drivers that changed recently." } },
+        { 0x1E, new[] { "KMODE_EXCEPTION_NOT_HANDLED", "a driver error", "A driver hit an error it didn't handle.", "Update the drivers that changed recently, and test the memory." } },
+        { 0x116, new[] { "VIDEO_TDR_FAILURE", "the graphics driver couldn't recover", "The graphics card stopped responding and Windows couldn't restart its driver.", "Update or cleanly reinstall the graphics driver, undo any GPU overclock, and check the GPU's temperature and power cables." } },
+        { 0x117, new[] { "VIDEO_TDR_TIMEOUT_DETECTED", "the graphics card stopped responding", "The graphics card stopped responding.", "Update or cleanly reinstall the graphics driver, and undo any GPU overclock." } },
+        { 0x119, new[] { "VIDEO_SCHEDULER_INTERNAL_ERROR", "a graphics driver error", "The graphics driver got into a state it couldn't recover from.", "Update or cleanly reinstall the graphics driver." } },
+        { 0x10E, new[] { "VIDEO_MEMORY_MANAGEMENT_INTERNAL", "a graphics driver error", "The graphics driver lost track of the card's memory.", "Update or cleanly reinstall the graphics driver, and undo any GPU memory overclock." } },
+        { 0x9F, new[] { "DRIVER_POWER_STATE_FAILURE", "a driver failed during sleep or wake", "A driver didn't respond while the PC was going to sleep, waking up or shutting down.", "Update your drivers (especially network, graphics and USB) and the BIOS." } },
+        { 0xEF, new[] { "CRITICAL_PROCESS_DIED", "a vital Windows process stopped", "A process Windows can't run without stopped unexpectedly.", "Run sfc /scannow and DISM /Online /Cleanup-Image /RestoreHealth in an admin terminal, and check the drive's health." } },
+        { 0x139, new[] { "KERNEL_SECURITY_CHECK_FAILURE", "a driver failed a safety check", "A driver or damaged data failed one of Windows' safety checks.", "Update the drivers that changed recently, and test the memory." } },
+        { 0x109, new[] { "CRITICAL_STRUCTURE_CORRUPTION", "core Windows data was damaged", "A driver or faulty memory changed data Windows protects.", "Test the memory, update drivers, and remove old system tweaking tools." } },
+        { 0x7A, new[] { "KERNEL_DATA_INPAGE_ERROR", "Windows couldn't read from the drive", "Windows couldn't read data it needed from the drive.", "Check the drive's health and its cable, and update the storage driver and SSD firmware." } },
+        { 0x154, new[] { "UNEXPECTED_STORE_EXCEPTION", "a drive problem", "Windows couldn't read compressed memory back from the drive.", "Check the drive's health, and update the storage driver and SSD firmware." } },
+        { 0x19, new[] { "BAD_POOL_HEADER", "a driver damaged memory", "A driver damaged memory that Windows shares between drivers.", "Update the drivers that changed recently, and test the memory." } },
+        { 0xC2, new[] { "BAD_POOL_CALLER", "a driver misused memory", "A driver asked for memory in a way it isn't allowed to.", "Update the drivers that changed recently." } },
+        { 0xE2, new[] { "MANUALLY_INITIATED_CRASH", "started on purpose", "The blue screen was started on purpose, from the keyboard or a debugging tool.", "Nothing to fix." } },
+    };
+
+    static CrashInfo BlueScreen(DateTime t, uint code)
+    {
+        if ((code & 0xF0000000) == 0x10000000) code &= 0x0FFFFFFF; // the "_M" variants
+        string[] s;
+        if (!stops.TryGetValue(code, out s))
+            s = new[] { "0x" + code.ToString("X"), "a serious error", "Something went seriously wrong in a driver or the hardware.", "Check whether it started after one of the changes below, and update drivers and the BIOS." };
+        return new CrashInfo { When = t, K = "Blue", Title = "Blue screen: " + s[1], Tag = s[0], What = s[2], Try = s[3] };
+    }
+
+    // One row per day for each kind of hardware error, since corrected errors can come in hundreds.
+    static void Hardware(System.Diagnostics.Eventing.Reader.EventRecord e, Dictionary<string, CrashInfo> byDay, Dictionary<string, int> count)
+    {
+        var t = PcHistory.Local(e);
+        int id = e.Id;
+        string kind = id == 17 ? "pcie" : id == 19 || id == 47 ? "fixed" : "fatal";
+        var key = t.Date.Ticks + kind;
+        int n;
+        count.TryGetValue(key, out n); count[key] = n + 1;
+        if (n > 0) return; // reading newest first, so the row keeps the latest time
+        var c = new CrashInfo { When = t, K = "Hardware" };
+        if (kind == "pcie")
+        {
+            c.Title = "A PCI Express device reported a corrected error";
+            c.What = "A device on PCI Express (usually the graphics card, an NVMe drive or the chipset) had an error that the hardware fixed by itself.";
+            c.Try = "Usually harmless. If it's frequent, update the chipset driver and BIOS, or turn off PCI Express link state power management in Power Options.";
+        }
+        else if (kind == "fixed")
+        {
+            c.Title = "The processor or memory corrected an error";
+            c.What = "The processor or memory caught an error and fixed it before it caused a problem.";
+            c.Try = "Often a sign of an unstable overclock, undervolt or XMP / EXPO memory profile. Set them back to default and see if it stops.";
+        }
+        else
+        {
+            c.Title = "The hardware reported a serious error";
+            c.What = "The processor or another part reported an error it couldn't fix. This often comes with a blue screen or a sudden restart.";
+            c.Try = "Set any overclock, undervolt or memory profile back to default, check temperatures, and update the BIOS. If it continues, the power supply or processor may be failing.";
+        }
+        byDay[key] = c;
+    }
+
+}
+
+// ======================================================================= Screen time
+// How long each app was in front, hour by hour and day by day, and how much processor time, memory and disk each
+// app used, in front or not. Only app names and their exe paths are kept: no window titles, keystrokes or anything
+// on screen. One small file a day in %LocalAppData%\Kinetik\ScreenTime, kept for 400 days.
+class AppUsage
+{
+    public string Name = "", Path = ""; // a friendly name, and the exe (for its icon)
+    public int Secs;                    // seconds in front while the PC was in use
+    public double Cpu;                  // processor time, in seconds, all cores added together
+    public long Disk;                   // bytes read and written
+    public double MemSum; public int MemN; public long MemPeak; // memory in use: sum of the minute samples (MB), how many, the most (bytes)
+}
+
+class DayUsage
+{
+    public string Date = "";              // yyyy-MM-dd
+    public int[] Hours = new int[24];     // seconds in use in each hour
+    public int Unlocks;
+    public long First, Last;              // when the PC was first and last in use, in ticks
+    public Dictionary<string, AppUsage> Apps = new Dictionary<string, AppUsage>(); // by exe name, lower case
+}
+
+static class ScreenTime
+{
+    const int TickSecs = 5, IdleSecs = 300, KeepDays = 400;
+    static readonly object gate = new object();
+    static DayUsage today;
+    static bool dirty;
+    static DateTime lastTick = DateTime.MinValue;
+    static Func<bool> enabled = () => false;
+    static System.Threading.Timer tick, sample, save;
+    static volatile bool locked;
+    static readonly HashSet<string> skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "LockApp.exe", "LogonUI.exe", "ScreenClippingHost.exe" };
+
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+    [StructLayout(LayoutKind.Sequential)] struct LastInput { public uint Size, Time; }
+    [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LastInput li);
+    [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool QueryFullProcessImageName(IntPtr h, int flags, StringBuilder path, ref int size);
+    [DllImport("kernel32.dll")] static extern bool GetProcessTimes(IntPtr h, out long created, out long exited, out long kernel, out long user);
+    [StructLayout(LayoutKind.Sequential)] struct IoCounters { public ulong ReadOps, WriteOps, OtherOps, ReadBytes, WriteBytes, OtherBytes; }
+    [DllImport("kernel32.dll")] static extern bool GetProcessIoCounters(IntPtr h, out IoCounters c);
+    [StructLayout(LayoutKind.Sequential)] struct Rect { public int L, T, R, B; }
+    [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out Rect r);
+    delegate bool EnumProc(IntPtr h, IntPtr l);
+    [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc proc, IntPtr l);
+    const uint QueryLimited = 0x1000; // PROCESS_QUERY_LIMITED_INFORMATION
+
+    public static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik", "ScreenTime"); } }
+
+    // Watches while Settings → Screen time → Keep screen time is on.
+    public static void Start(Func<bool> on)
+    {
+        enabled = on;
+        tick = new System.Threading.Timer(s => Safe(Tick), null, 5000, TickSecs * 1000);
+        sample = new System.Threading.Timer(s => Safe(Sample), null, 20000, 60000);
+        save = new System.Threading.Timer(s => Safe(() => Save(false)), null, 300000, 300000);
+        SystemEvents.SessionSwitch += (s, e) =>
+        {
+            if (e.Reason == SessionSwitchReason.SessionLock) locked = true;
+            else if (e.Reason == SessionSwitchReason.SessionUnlock)
+            {
+                locked = false;
+                if (enabled()) lock (gate) { Day(DateTime.Now).Unlocks++; dirty = true; }
+            }
+        };
+        Application.ApplicationExit += (s, e) => Safe(() => Save(true));
+        ThreadPool.QueueUserWorkItem(_ => Safe(Prune));
+    }
+
+    static void Safe(Action a) { try { a(); } catch (Exception e) { Program.Log(e); } }
+
+    static string FileFor(string date) { return Path.Combine(Dir, date + ".json"); }
+    static string Key(DateTime t) { return t.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+
+    static DayUsage Read(string date)
+    {
+        try
+        {
+            var f = new FileInfo(FileFor(date));
+            if (f.Exists && f.Length < (4 << 20))
+            {
+                var d = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 4 << 20 }.Deserialize<DayUsage>(File.ReadAllText(f.FullName));
+                if (d != null)
+                {
+                    if (d.Hours == null || d.Hours.Length != 24) d.Hours = new int[24];
+                    if (d.Apps == null) d.Apps = new Dictionary<string, AppUsage>();
+                    d.Date = date;
+                    return d;
+                }
+            }
+        }
+        catch (Exception e) { Program.Log(e); }
+        return null;
+    }
+
+    // Today's record, starting a new one (and saving yesterday's) when the date changes. Call inside the lock.
+    static DayUsage Day(DateTime t)
+    {
+        var key = Key(t);
+        if (today != null && today.Date == key) return today;
+        if (today != null && dirty) Write(today);
+        today = Read(key) ?? new DayUsage { Date = key };
+        dirty = false;
+        return today;
+    }
+
+    static void Write(DayUsage d)
+    {
+        SafeFile.Write(FileFor(d.Date), new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 4 << 20 }.Serialize(d));
+    }
+
+    public static void Save(bool force)
+    {
+        lock (gate)
+        {
+            if (today == null || (!dirty && !force)) return;
+            Write(today); dirty = false;
+        }
+    }
+
+    static AppUsage App(DayUsage d, string exe, string path)
+    {
+        var key = exe.ToLowerInvariant();
+        AppUsage a;
+        if (!d.Apps.TryGetValue(key, out a)) d.Apps[key] = a = new AppUsage { Name = FriendlyName(exe, path), Path = path ?? "" };
+        else if (a.Path == "" && !string.IsNullOrEmpty(path)) { a.Path = path; a.Name = FriendlyName(exe, path); }
+        return a;
+    }
+
+    static readonly Dictionary<string, string> names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    // "Discord" rather than "Discord.exe": the exe's description when it has a sensible one.
+    static string FriendlyName(string exe, string path)
+    {
+        string n;
+        var key = path ?? exe;
+        lock (names) if (names.TryGetValue(key, out n)) return n;
+        n = exe.EndsWith(".exe", StringComparison.OrdinalIgnoreCase) ? exe.Substring(0, exe.Length - 4) : exe;
+        try
+        {
+            if (!string.IsNullOrEmpty(path) && File.Exists(path))
+            {
+                var d = (FileVersionInfo.GetVersionInfo(path).FileDescription ?? "").Trim();
+                if (d.Length > 1 && d.Length <= 40 && !d.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) n = d;
+            }
+        }
+        catch { }
+        lock (names) names[key] = n;
+        return n;
+    }
+
+    static string ImagePath(uint pid)
+    {
+        var h = OpenProcess(QueryLimited, false, pid);
+        if (h == IntPtr.Zero) return null;
+        try
+        {
+            var sb = new StringBuilder(1024); int size = sb.Capacity;
+            return QueryFullProcessImageName(h, 0, sb, ref size) ? sb.ToString() : null;
+        }
+        finally { CloseHandle(h); }
+    }
+
+    static int IdleSeconds()
+    {
+        var li = new LastInput { Size = (uint)Marshal.SizeOf(typeof(LastInput)) };
+        return GetLastInputInfo(ref li) ? (int)(unchecked((uint)Environment.TickCount - li.Time) / 1000) : 0;
+    }
+
+    // A video or game filling the screen counts as in use even with no input.
+    static bool FillsScreen(IntPtr h)
+    {
+        Rect r;
+        if (!GetWindowRect(h, out r)) return false;
+        var screen = Screen.FromHandle(h).Bounds;
+        return r.L <= screen.Left && r.T <= screen.Top && r.R >= screen.Right && r.B >= screen.Bottom;
+    }
+
+    static void Tick()
+    {
+        var now = DateTime.Now;
+        double gap = lastTick == DateTime.MinValue ? TickSecs : (now - lastTick).TotalSeconds;
+        lastTick = now;
+        if (!enabled() || locked) return;
+        int secs = (int)Math.Round(Math.Min(gap, TickSecs * 2)); // a longer gap means sleep or a stall, not use
+        if (secs <= 0) return;
+        var h = GetForegroundWindow();
+        if (h == IntPtr.Zero) return;
+        uint pid; GetWindowThreadProcessId(h, out pid);
+        if (pid == 0) return;
+        var path = ImagePath(pid);
+        // Store apps run inside ApplicationFrameHost; the app itself owns a window inside it.
+        if (path != null && Path.GetFileName(path).Equals("ApplicationFrameHost.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            uint inner = 0;
+            EnumChildWindows(h, (c, l) => { uint p; GetWindowThreadProcessId(c, out p); if (p != pid) { inner = p; return false; } return true; }, IntPtr.Zero);
+            if (inner != 0) { var p2 = ImagePath(inner); if (p2 != null) path = p2; }
+        }
+        if (path == null) return;
+        var exe = Path.GetFileName(path);
+        if (skip.Contains(exe)) return;
+        if (IdleSeconds() >= IdleSecs && !FillsScreen(h)) return;
+        lock (gate)
+        {
+            var d = Day(now);
+            App(d, exe, path).Secs += secs;
+            d.Hours[now.Hour] = Math.Min(3600, d.Hours[now.Hour] + secs);
+            if (d.First == 0) d.First = now.Ticks;
+            d.Last = now.Ticks;
+            dirty = true;
+        }
+    }
+
+    static Dictionary<int, long[]> prev = new Dictionary<int, long[]>(); // pid → created, processor time (100 ns), disk bytes
+
+    // Every minute: each app's processor time, disk use and memory, added up across its processes.
+    static void Sample()
+    {
+        if (!enabled()) { prev.Clear(); return; }
+        var now = DateTime.Now;
+        var next = new Dictionary<int, long[]>();
+        var cpu = new Dictionary<string, double>(); var disk = new Dictionary<string, long>(); var mem = new Dictionary<string, long>(); var exes = new Dictionary<string, string>();
+        foreach (var p in Process.GetProcesses())
+            using (p)
+            {
+                try
+                {
+                    if (p.Id <= 4) continue; // Idle and System
+                    var exe = p.ProcessName + ".exe"; var key = exe.ToLowerInvariant();
+                    exes[key] = exe;
+                    long m; mem.TryGetValue(key, out m); mem[key] = m + p.WorkingSet64;
+                    var h = OpenProcess(QueryLimited, false, (uint)p.Id);
+                    if (h == IntPtr.Zero) continue;
+                    try
+                    {
+                        long created, exited, kernel, user;
+                        if (!GetProcessTimes(h, out created, out exited, out kernel, out user)) continue;
+                        IoCounters io;
+                        long bytes = GetProcessIoCounters(h, out io) ? (long)(io.ReadBytes + io.WriteBytes) : 0;
+                        var cur = new[] { created, kernel + user, bytes };
+                        next[p.Id] = cur;
+                        long[] old;
+                        if (prev.TryGetValue(p.Id, out old) && old[0] == created)
+                        {
+                            double c; cpu.TryGetValue(key, out c); cpu[key] = c + Math.Max(0, cur[1] - old[1]) / 1e7;
+                            long b; disk.TryGetValue(key, out b); disk[key] = b + Math.Max(0, cur[2] - old[2]);
+                        }
+                    }
+                    finally { CloseHandle(h); }
+                }
+                catch { } // gone, or protected
+            }
+        bool first = prev.Count == 0;
+        prev = next;
+        if (first) return; // nothing to compare with yet
+        lock (gate)
+        {
+            var d = Day(now);
+            foreach (var key in mem.Keys)
+            {
+                double c; long b, m;
+                cpu.TryGetValue(key, out c); disk.TryGetValue(key, out b); m = mem[key];
+                AppUsage a;
+                if (!d.Apps.TryGetValue(key, out a))
+                {
+                    if (c < 0.5 && b < (1 << 20)) continue; // too small to be worth a row
+                    a = App(d, exes[key], null);
+                }
+                a.Cpu += c; a.Disk += b;
+                a.MemSum += m / 1048576.0; a.MemN++; a.MemPeak = Math.Max(a.MemPeak, m);
+            }
+            dirty = true;
+        }
+    }
+
+    static void Prune()
+    {
+        if (!Directory.Exists(Dir)) return;
+        var cutoff = DateTime.Today.AddDays(-KeepDays);
+        foreach (var f in Directory.GetFiles(Dir, "????-??-??.json"))
+        {
+            DateTime d;
+            if (DateTime.TryParseExact(Path.GetFileNameWithoutExtension(f), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d) && d < cutoff)
+                try { File.Delete(f); } catch { }
+        }
+    }
+
+    // The days with a record, newest first.
+    public static List<DateTime> Days()
+    {
+        var list = new List<DateTime>();
+        try
+        {
+            if (Directory.Exists(Dir))
+                foreach (var f in Directory.GetFiles(Dir, "????-??-??.json"))
+                {
+                    DateTime d;
+                    if (DateTime.TryParseExact(Path.GetFileNameWithoutExtension(f), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d)) list.Add(d);
+                }
+        }
+        catch { }
+        lock (gate) if (today != null) { var t = DateTime.ParseExact(today.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture); if (!list.Contains(t)) list.Add(t); }
+        list.Sort((a, b) => b.CompareTo(a));
+        return list;
+    }
+
+    // One record per day from..to (inclusive); a day with nothing recorded is empty.
+    public static List<DayUsage> Range(DateTime from, DateTime to)
+    {
+        var json = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 4 << 20 };
+        var list = new List<DayUsage>();
+        for (var d = from.Date; d <= to.Date; d = d.AddDays(1))
+        {
+            var key = Key(d);
+            DayUsage u = null;
+            lock (gate) if (today != null && today.Date == key) u = json.Deserialize<DayUsage>(json.Serialize(today)); // a copy, as it keeps changing
+            list.Add(u ?? Read(key) ?? new DayUsage { Date = key });
+        }
+        return list;
+    }
+
+    // Deletes every saved day, and starts today afresh.
+    public static void Clear()
+    {
+        lock (gate)
+        {
+            today = null; dirty = false;
+            if (Directory.Exists(Dir))
+                foreach (var f in Directory.GetFiles(Dir, "????-??-??.json")) try { File.Delete(f); } catch { }
+        }
+    }
+
+    public static string Duration(double secs)
+    {
+        if (secs < 60) return secs < 1 ? "0m" : "<1m";
+        int m = (int)Math.Round(secs / 60);
+        return m < 60 ? m + "m" : (m / 60) + "h " + (m % 60) + "m";
+    }
+
+    public static string Bytes(double b)
+    {
+        if (b < 1e6) return Math.Round(b / 1e3) + " KB";
+        if (b < 1e9) return (b / 1e6).ToString(b < 1e7 ? "0.0" : "0") + " MB";
+        return (b / 1e9).ToString(b < 1e10 ? "0.0" : "0") + " GB";
+    }
+}
+
 // ======================================================================= Updates
 // Asks GitHub for the latest release's version number. Nothing is downloaded or run automatically: a newer version
 // opens the release page in the browser, where the user downloads it themselves.
@@ -7180,6 +8304,7 @@ class WidgetForm : Form
         new CommonMenu
         {
             OpenTheme = () => bar.OpenSettings("Widget"),
+            LookChanged = () => Theme.Use(),
             Scale = () => c.WidgetScale, SetScale = v => { c.WidgetScale = v; changed(); },
             Widths = new[] { 240, 280, 340 }, CardWidth = () => c.WidgetWidth, SetCardWidth = v => { c.WidgetWidth = v; changed(); },
             FontName = () => c.WidgetFont, SetFontName = v => { c.WidgetFont = v; changed(); },
@@ -8774,12 +9899,31 @@ class WidgetThemeTile : Control
 }
 
 // ======================================================================= Settings UI
+// The colours of Kinetik's own windows, menus and hover cards: the theme and accent shared by every Kinetik app
+// (KinetikSuite.Look), picked on the Theme page.
 static class Theme
 {
-    public static Color Bg = Color.FromArgb(28, 28, 32), Nav = Color.FromArgb(22, 22, 26), Card = Color.FromArgb(38, 38, 44);
-    public static Color CardHover = Color.FromArgb(46, 46, 53), Border = Color.FromArgb(56, 56, 64);
+    public static Color Bg, Nav, Card, CardHover, Border, Field, Text, Sub, Accent, OnAccent, WarnText;
+    public static bool Light;
 
-    // Background colour choices for the settings window: name → page background. Nav, cards and borders are derived from it.
+    static Theme() { Use(); }
+
+    public static void Use()
+    {
+        var l = KinetikSuite.Look.Reload();
+        Bg = l.Bg; Nav = l.Nav; Card = l.Card; CardHover = l.Hover; Border = l.Border; Field = l.Field;
+        Text = l.Text; Sub = l.Sub; Accent = l.Accent; OnAccent = l.OnAccent; WarnText = l.Warn; Light = l.Light;
+    }
+
+    // Before 3.3 the settings window had its own background colour (Settings.AppBackground). The first time, carry it over to the suite theme.
+    public static void Migrate(int background)
+    {
+        if (KinetikSuite.Look.Saved || background <= 0 || background >= Backgrounds.Length) return;
+        var name = Backgrounds[background].Key;
+        KinetikSuite.Look.Save(name == "Pure black" ? "OLED black" : name == "Midnight blue" ? "Midnight" : name == "Forest" ? "Forest" : "Graphite", null);
+    }
+
+    // The old background choices, only read by Migrate.
     public static readonly KeyValuePair<string, Color>[] Backgrounds =
     {
         new KeyValuePair<string, Color>("Charcoal (default)", Color.FromArgb(28, 28, 32)),
@@ -8792,16 +9936,6 @@ static class Theme
         new KeyValuePair<string, Color>("Espresso", Color.FromArgb(38, 28, 22)),
     };
 
-    public static void Use(int background)
-    {
-        var b = Backgrounds[Math.Max(0, Math.Min(Backgrounds.Length - 1, background))].Value;
-        Func<int, Color> lift = k => Color.FromArgb(Math.Min(255, b.R + k), Math.Min(255, b.G + k), Math.Min(255, b.B + k));
-        Bg = b;
-        Nav = Color.FromArgb(Math.Max(0, b.R - 6), Math.Max(0, b.G - 6), Math.Max(0, b.B - 6));
-        Card = lift(10); CardHover = lift(18); Border = lift(28);
-    }
-    public static readonly Color Text = Color.FromArgb(236, 236, 240), Sub = Color.FromArgb(150, 150, 162), Accent = Color.FromArgb(76, 194, 255);
-    public static readonly Color WarnText = Color.FromArgb(255, 110, 110);
     static readonly Dictionary<string, Font> fonts = new Dictionary<string, Font>();
     static string family;
 
@@ -8836,6 +9970,23 @@ static class Theme
         float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, a = 4.5f;
         using (var p = new Pen(col, 1.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
         { g.DrawLine(p, cx - a, cy - a, cx + a, cy + a); g.DrawLine(p, cx - a, cy + a, cx + a, cy - a); }
+    }
+
+    // Controls whose corners show what's behind them take their parent's background colour.
+    public static void FollowParent(Control c)
+    {
+        c.ParentChanged += (s, e) => { if (c.Parent != null) c.BackColor = c.Parent.BackColor; };
+    }
+
+    // A rectangle with its top corners, bottom corners, both or neither rounded.
+    public static GraphicsPath RoundSome(RectangleF r, float rad, bool top, bool bottom)
+    {
+        var p = new GraphicsPath(); float d = rad * 2;
+        if (top) { p.AddArc(r.X, r.Y, d, d, 180, 90); p.AddArc(r.Right - d, r.Y, d, d, 270, 90); }
+        else p.AddLine(r.X, r.Y, r.Right, r.Y);
+        if (bottom) { p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); p.AddArc(r.X, r.Bottom - d, d, d, 90, 90); }
+        else p.AddLine(r.Right, r.Bottom, r.X, r.Bottom);
+        p.CloseFigure(); return p;
     }
 
     public static void FillRound(Graphics g, RectangleF r, float rad, Color col)
@@ -8891,7 +10042,7 @@ class Toggle : Control
             else using (var p = new Pen(Color.FromArgb(alpha, Theme.Sub), 1.5f)) g.DrawPath(p, path);
         }
         float d = r.Height - (on ? 8 : 10), x = on ? r.Right - d - 4 : r.X + 5;
-        using (var b = new SolidBrush(on ? Theme.Bg : Color.FromArgb(alpha, Theme.Sub))) g.FillEllipse(b, x, r.Y + (r.Height - d) / 2, d, d);
+        using (var b = new SolidBrush(on ? Theme.OnAccent : Color.FromArgb(alpha, Theme.Sub))) g.FillEllipse(b, x, r.Y + (r.Height - d) / 2, d, d);
     }
 }
 
@@ -9032,18 +10183,23 @@ class Slider : Control
 }
 
 // A settings row: icon, title, optional description, and a control on the right.
+// A setting: icon, title, optional description, and a control on the right. Rows added one after another join into
+// one card, split by hairlines, with only the card's outer corners rounded.
 class Row : Panel
 {
     readonly IconFn icon; readonly Color iconColor; readonly string title, desc;
     readonly Control right;
+    bool first = true, last = true;
     static readonly StringFormat Clip = new StringFormat(StringFormatFlags.NoWrap) { Trimming = StringTrimming.EllipsisCharacter };
+    public bool First { get { return first; } set { first = value; Invalidate(); } }
+    public bool Last { get { return last; } set { last = value; Margin = new Padding(0, 0, 0, value ? 6 : 0); Invalidate(); } }
     public Row(IconFn icon, Color iconColor, string title, string desc, Control right, int width)
     {
         this.icon = icon; this.iconColor = iconColor; this.title = title; this.desc = desc; this.right = right;
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
-        Size = new Size(width, string.IsNullOrEmpty(desc) ? 48 : 58);
-        Margin = new Padding(0, 0, 0, 4);
-        BackColor = Theme.Bg;
+        Size = new Size(width, string.IsNullOrEmpty(desc) ? 50 : 60);
+        Margin = new Padding(0, 0, 0, 6);
+        BackColor = Theme.Card;
         if (right != null)
         {
             // Keeps a control whose size changes (an auto-sizing panel settling on adding, or a button whose text
@@ -9058,7 +10214,9 @@ class Row : Panel
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
-        Theme.FillRound(g, new RectangleF(0, 0, Width - 1, Height - 1), 8, Theme.Card);
+        g.Clear(Theme.Bg);
+        using (var path = Theme.RoundSome(new RectangleF(0, 0, Width, Height), 8, first, last)) using (var b = new SolidBrush(Theme.Card)) g.FillPath(b, path);
+        if (!first) using (var p = new Pen(Theme.Border, 1)) g.DrawLine(p, 16, 0, Width - 16, 0);
         float x = 16;
         if (icon != null) { icon(g, new RectangleF(x, (Height - 18) / 2f, 18, 18), iconColor); x += 34; }
         var f = Theme.UI(10f); var sf = Theme.UI(8.5f);
@@ -9067,7 +10225,559 @@ class Row : Panel
             // Text stops short of the control on the right, ending in "…" if it doesn't fit.
             float w = Math.Max(10, (right != null ? right.Left - 12 : Width - 16) - x);
             if (string.IsNullOrEmpty(desc)) g.DrawString(title, f, tb, new RectangleF(x, (Height - f.GetHeight(g)) / 2, w, f.GetHeight(g) + 2), Clip);
-            else { g.DrawString(title, f, tb, new RectangleF(x, 9, w, 22), Clip); g.DrawString(desc, sf, sb, new RectangleF(x, 31, w, 18), Clip); }
+            else { g.DrawString(title, f, tb, new RectangleF(x, 10, w, 22), Clip); g.DrawString(desc, sf, sb, new RectangleF(x, 32, w, 18), Clip); }
+        }
+    }
+}
+
+// A drop-down list drawn in the theme's colours (Windows' own ComboBox can't be fully restyled). Opens a themed menu.
+class Picker : Control
+{
+    string[] items;
+    int sel;
+    bool hot;
+    public event EventHandler SelectedIndexChanged;
+    public Picker(string[] items, int selected, int width)
+    {
+        this.items = items; sel = Math.Max(0, Math.Min(items.Length - 1, selected));
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.Selectable, true);
+        Size = new Size(width, 30); Cursor = Cursors.Hand; TabStop = true; BackColor = Theme.Card; Font = Theme.UI(9.5f); Theme.FollowParent(this);
+    }
+    public int SelectedIndex
+    {
+        get { return sel; }
+        set { value = Math.Max(0, Math.Min(items.Length - 1, value)); if (value == sel) return; sel = value; Invalidate(); if (SelectedIndexChanged != null) SelectedIndexChanged(this, EventArgs.Empty); }
+    }
+    public string[] Items { get { return items; } }
+    protected override void OnMouseEnter(EventArgs e) { hot = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { hot = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+    protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+    protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+    protected override bool IsInputKey(Keys k) { return k == Keys.Up || k == Keys.Down || base.IsInputKey(k); }
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode == Keys.Up) SelectedIndex = sel - 1;
+        else if (e.KeyCode == Keys.Down && !e.Alt) SelectedIndex = sel + 1;
+        else if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter || (e.KeyCode == Keys.Down && e.Alt)) Open();
+        base.OnKeyDown(e);
+    }
+    protected override void OnMouseDown(MouseEventArgs e) { Focus(); if (e.Button == MouseButtons.Left) Open(); base.OnMouseDown(e); }
+    void Open()
+    {
+        if (!Enabled || items.Length == 0) return;
+        var menu = new ContextMenuStrip { Renderer = KinetikSuite.Look.Current.MenuRenderer(), ShowImageMargin = false, ShowCheckMargin = true, Font = Font };
+        for (int i = 0; i < items.Length; i++)
+        {
+            int k = i;
+            var it = new ToolStripMenuItem(items[i]) { Checked = i == sel, Padding = new Padding(0, 2, 0, 2) };
+            it.Click += (s, e) => SelectedIndex = k;
+            menu.Items.Add(it);
+        }
+        menu.MinimumSize = new Size(Width, 0);
+        menu.Closed += (s, e) => BeginInvoke((Action)menu.Dispose);
+        menu.Show(this, new Point(0, Height + 2));
+    }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(BackColor);
+        var r = new RectangleF(0.5f, 0.5f, Width - 2, Height - 2);
+        Theme.FillRound(g, r, 6, hot && Enabled ? Theme.CardHover : Theme.Field);
+        Theme.StrokeRound(g, r, 6, Focused ? Theme.Accent : Theme.Border, 1);
+        var text = items.Length == 0 ? "" : items[sel];
+        TextRenderer.DrawText(g, text, Font, new Rectangle(10, 0, Width - 34, Height), Enabled ? Theme.Text : Theme.Sub,
+            TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
+        Theme.Chevron(g, new RectangleF(Width - 28, 0, 20, Height), false, Theme.Sub);
+    }
+}
+
+// A rounded button in the theme's colours. An accent button is filled with the accent colour.
+class KButton : Control
+{
+    readonly bool accent;
+    bool hot, down;
+    public KButton(string text, bool accent)
+    {
+        this.accent = accent;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw | ControlStyles.Selectable | ControlStyles.StandardClick, true);
+        Font = Theme.UI(9.5f); Cursor = Cursors.Hand; TabStop = true; BackColor = Theme.Card; Theme.FollowParent(this);
+        Text = text;
+    }
+    protected override void OnTextChanged(EventArgs e)
+    {
+        Size = new Size(Math.Max(76, TextRenderer.MeasureText(Text, Font).Width + 24), 30);
+        Invalidate(); base.OnTextChanged(e);
+    }
+    protected override void OnMouseEnter(EventArgs e) { hot = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { hot = down = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnMouseDown(MouseEventArgs e) { down = true; Invalidate(); base.OnMouseDown(e); }
+    protected override void OnMouseUp(MouseEventArgs e) { down = false; Invalidate(); base.OnMouseUp(e); }
+    protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+    protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+    protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+    protected override void OnKeyDown(KeyEventArgs e) { if (e.KeyCode == Keys.Space || e.KeyCode == Keys.Enter) OnClick(EventArgs.Empty); base.OnKeyDown(e); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(BackColor);
+        var r = new RectangleF(0.5f, 0.5f, Width - 2, Height - 2);
+        Color fill = accent ? Theme.Accent : Theme.Field, text = accent ? Theme.OnAccent : Theme.Text;
+        if (accent && Enabled && (hot || down)) fill = KinetikSuite.Look.Mix(fill, Theme.Light ? Color.Black : Color.White, down ? 0.05f : 0.14f);
+        else if (!accent && Enabled && (hot || down)) fill = down ? Theme.Border : Theme.CardHover;
+        if (!Enabled) { fill = Theme.Field; text = Theme.Sub; }
+        Theme.FillRound(g, r, 6, fill);
+        if (!accent || !Enabled) Theme.StrokeRound(g, r, 6, Focused ? Theme.Accent : Theme.Border, 1);
+        else if (Focused) Theme.StrokeRound(g, r, 6, Theme.Text, 1);
+        TextRenderer.DrawText(g, Text, Font, new Rectangle(0, 0, Width, Height), text, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+    }
+}
+
+// A text box inside a rounded field that lights up in the accent colour while it has focus.
+class FieldBox : Panel
+{
+    public readonly TextBox Box;
+    public FieldBox(TextBox box, int width)
+    {
+        Box = box;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        Size = new Size(width, 30); BackColor = Theme.Card; Margin = box.Margin; Theme.FollowParent(this);
+        box.BorderStyle = BorderStyle.None; box.BackColor = Theme.Field; box.ForeColor = Theme.Text;
+        box.SetBounds(9, (Height - box.PreferredHeight) / 2 + 1, width - 18, box.PreferredHeight);
+        box.Anchor = AnchorStyles.Left | AnchorStyles.Right;
+        box.GotFocus += (s, e) => Invalidate();
+        box.LostFocus += (s, e) => Invalidate();
+        Controls.Add(box);
+        Cursor = Cursors.IBeam;
+    }
+    protected override void OnClick(EventArgs e) { Box.Focus(); base.OnClick(e); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(BackColor);
+        var r = new RectangleF(0.5f, 0.5f, Width - 2, Height - 2);
+        Theme.FillRound(g, r, 6, Theme.Field);
+        Theme.StrokeRound(g, r, 6, Box.Focused ? Theme.Accent : Theme.Border, 1);
+    }
+}
+
+// A theme on the Theme page: a small picture of a window in its colours, with its name under it.
+class LookTile : Control
+{
+    public readonly string Name_;
+    readonly KinetikSuite.Look look;
+    bool hot;
+    public bool Selected;
+    public LookTile(string theme, string accent)
+    {
+        Name_ = theme; look = KinetikSuite.Look.Make(theme, accent);
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        Size = new Size(108, 98); Cursor = Cursors.Hand; BackColor = Theme.Bg; Margin = new Padding(0, 0, 9, 8);
+    }
+    protected override void OnMouseEnter(EventArgs e) { hot = true; Invalidate(); base.OnMouseEnter(e); }
+    protected override void OnMouseLeave(EventArgs e) { hot = false; Invalidate(); base.OnMouseLeave(e); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(BackColor);
+        var outer = new RectangleF(1.5f, 1.5f, Width - 4, 70);
+        // "Match Windows" shows its dark and light halves side by side.
+        if (Name_ == KinetikSuite.Look.Auto)
+        {
+            var st = g.Save();
+            g.SetClip(new RectangleF(0, 0, Width / 2f, Height)); Mini(g, outer, KinetikSuite.Look.Make("Graphite", null));
+            g.Restore(st); st = g.Save();
+            g.SetClip(new RectangleF(Width / 2f, 0, Width / 2f, Height)); Mini(g, outer, KinetikSuite.Look.Make("Light", null));
+            g.Restore(st);
+        }
+        else Mini(g, outer, look);
+        Theme.StrokeRound(g, outer, 8, Selected ? Theme.Accent : hot ? Theme.Sub : Theme.Border, Selected ? 2 : 1);
+        TextRenderer.DrawText(g, Name_, Theme.UI(9f, Selected ? FontStyle.Bold : FontStyle.Regular), new Rectangle(0, 76, Width, 20), Selected ? Theme.Text : Theme.Sub,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+    }
+    static void Mini(Graphics g, RectangleF r, KinetikSuite.Look l)
+    {
+        Theme.FillRound(g, r, 8, l.Bg);
+        float x = r.X + 8, y = r.Y + 10;
+        // A sidebar with a selected item, and a card with two rows on the right.
+        for (int i = 0; i < 4; i++) Theme.FillRound(g, new RectangleF(x, y + i * 12, 22, 5), 2.5f, i == 1 ? l.Accent : Color.FromArgb(120, l.Sub));
+        using (var p = new Pen(l.Border, 1)) g.DrawLine(p, r.X + 36, r.Y + 6, r.X + 36, r.Bottom - 6);
+        var card = new RectangleF(r.X + 44, r.Y + 10, r.Width - 52, r.Height - 20);
+        Theme.FillRound(g, card, 5, l.Card);
+        Theme.FillRound(g, new RectangleF(card.X + 7, card.Y + 9, card.Width * 0.45f, 5), 2.5f, l.Text);
+        Theme.FillRound(g, new RectangleF(card.X + 7, card.Y + 20, card.Width * 0.3f, 4), 2, l.Sub);
+        Theme.FillRound(g, new RectangleF(card.Right - 24, card.Y + 9, 16, 9), 4.5f, l.Accent);
+        using (var p = new Pen(l.Border, 1)) g.DrawLine(p, card.X + 6, card.Y + card.Height / 2 + 4, card.Right - 6, card.Y + card.Height / 2 + 4);
+        Theme.FillRound(g, new RectangleF(card.X + 7, card.Bottom - 15, card.Width * 0.55f, 5), 2.5f, l.Text);
+    }
+}
+
+// The accent colours on the Theme page, as a row of dots.
+class AccentPicker : Control
+{
+    readonly bool light;
+    int hot = -1;
+    public string Selected;
+    public event EventHandler Changed;
+    readonly ToolTip tip = new ToolTip();
+    const int D = 26, Gap = 12;
+    public AccentPicker(string selected, bool light)
+    {
+        Selected = selected; this.light = light;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint, true);
+        Size = new Size(KinetikSuite.Look.Accents.Length * (D + Gap), D + 8); Cursor = Cursors.Hand; BackColor = Theme.Card; Theme.FollowParent(this);
+    }
+    int At(Point p) { int i = (p.X - 4) / (D + Gap); return i >= 0 && i < KinetikSuite.Look.Accents.Length && (p.X - 4) % (D + Gap) < D ? i : -1; }
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        int i = At(e.Location);
+        if (i != hot) { hot = i; Invalidate(); tip.SetToolTip(this, i >= 0 ? KinetikSuite.Look.Accents[i] : null); }
+    }
+    protected override void OnMouseLeave(EventArgs e) { hot = -1; Invalidate(); }
+    protected override void OnMouseClick(MouseEventArgs e)
+    {
+        int i = At(e.Location);
+        if (i < 0) return;
+        Selected = KinetikSuite.Look.Accents[i]; Invalidate();
+        if (Changed != null) Changed(this, EventArgs.Empty);
+    }
+    protected override void Dispose(bool disposing) { if (disposing) tip.Dispose(); base.Dispose(disposing); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(BackColor);
+        for (int i = 0; i < KinetikSuite.Look.Accents.Length; i++)
+        {
+            var name = KinetikSuite.Look.Accents[i];
+            var r = new RectangleF(4 + i * (D + Gap), 4, D, D);
+            using (var b = new SolidBrush(KinetikSuite.Look.AccentColour(name, light))) g.FillEllipse(b, r.X + 3, r.Y + 3, D - 6, D - 6);
+            if (name == KinetikSuite.Look.WindowsAccent) // a little four-pane window on the Windows accent
+                using (var p = new Pen(Theme.Card, 1.4f)) { g.DrawLine(p, r.X + D / 2f, r.Y + 8, r.X + D / 2f, r.Bottom - 8); g.DrawLine(p, r.X + 8, r.Y + D / 2f, r.Right - 8, r.Y + D / 2f); }
+            if (name == Selected || i == hot)
+                using (var p = new Pen(name == Selected ? Theme.Text : Theme.Sub, 2)) g.DrawEllipse(p, r.X, r.Y, D, D);
+        }
+    }
+}
+
+// A row on the Timeline or Crashes page.
+class FeedItem
+{
+    public DateTime When;
+    public bool Approx, DateOnly, Problem, Open;
+    public IconFn Icon; public Color IconColor;
+    public string Title = "", Tag = "", Sub = "";
+    public string[] Details; // heading, text, heading, text…: shown when the row is clicked open
+}
+
+// The Timeline and Crashes pages' list: one self-drawn control with the days down the left, joined by a line, and
+// rows that open to show more when they have it. Shows 120 rows at a time, with "Show older" for the rest.
+class Feed : Control
+{
+    class Line { public int Kind, Y, H; public DateTime Day; public FeedItem Item; } // Kind: 0 month, 1 day, 2 row, 3 show older
+    List<FeedItem> items = new List<FeedItem>();
+    readonly List<Line> lines = new List<Line>();
+    Line hot;
+    int shown = Page;
+    const int Page = 120, TimeX = 26, IconX = 100, TextX = 126;
+    const TextFormatFlags One = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+    const TextFormatFlags Wrap = TextFormatFlags.NoPadding | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix;
+    const TextFormatFlags Measure = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix; // measuring with EndEllipsis and no width gives just the "…"
+    public string Empty = "Nothing to show";
+
+    public Feed(int width)
+    {
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        Width = width; BackColor = Theme.Bg; Margin = new Padding(0, 4, 0, 12);
+        Relayout();
+    }
+
+    public void SetItems(IEnumerable<FeedItem> list) { items = list.ToList(); shown = Page; Relayout(); }
+
+    int DetailWidth { get { return Width - TextX - 24; } }
+
+    int RowHeight(FeedItem it)
+    {
+        int h = it.Sub != "" ? 46 : 30;
+        if (it.Open && it.Details != null)
+        {
+            h += 4;
+            for (int i = 0; i + 1 < it.Details.Length; i += 2)
+                h += 20 + TextRenderer.MeasureText(it.Details[i + 1], Theme.UI(9.5f), new Size(DetailWidth, 0), Wrap).Height + 8;
+            h += 6;
+        }
+        return h;
+    }
+
+    void Relayout()
+    {
+        lines.Clear();
+        int y = 0, n = Math.Min(shown, items.Count);
+        DateTime month = DateTime.MinValue, day = DateTime.MinValue;
+        for (int i = 0; i < n; i++)
+        {
+            var it = items[i]; var d = it.When.Date;
+            if (d.Year != month.Year || d.Month != month.Month) { month = d; if (y > 0) y += 8; lines.Add(new Line { Kind = 0, Y = y, H = 26, Day = d }); y += 26; day = DateTime.MinValue; }
+            if (d != day) { day = d; if (lines.Count > 1 && lines[lines.Count - 1].Kind != 0) y += 6; lines.Add(new Line { Kind = 1, Y = y, H = 30, Day = d }); y += 30; }
+            int h = RowHeight(it);
+            lines.Add(new Line { Kind = 2, Y = y, H = h, Item = it }); y += h;
+        }
+        if (items.Count > n) { y += 6; lines.Add(new Line { Kind = 3, Y = y, H = 34 }); y += 34; }
+        if (items.Count == 0) y = 56;
+        Height = y + 8;
+        Invalidate();
+    }
+
+    static string DayTitle(DateTime d)
+    {
+        var today = DateTime.Today;
+        if (d == today) return "Today";
+        if (d == today.AddDays(-1)) return "Yesterday";
+        return d.ToString("dddd d");
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(Theme.Bg);
+        if (items.Count == 0) { TextRenderer.DrawText(g, Empty, Theme.UI(10f), new Rectangle(4, 12, Width - 8, 30), Theme.Sub, One); return; }
+        var days = lines.Where(l => l.Kind == 1).ToList();
+        // The line joining the days runs through every dot, so it's drawn first.
+        if (days.Count > 1) using (var p = new Pen(Theme.Border, 2f)) g.DrawLine(p, 7, days[0].Y + 15, 7, days[days.Count - 1].Y + 15);
+        foreach (var l in lines)
+        {
+            if (l.Y > e.ClipRectangle.Bottom || l.Y + l.H < e.ClipRectangle.Top) continue;
+            if (l.Kind == 0)
+                TextRenderer.DrawText(g, l.Day.ToString("MMMM yyyy").ToUpperInvariant(), Theme.UI(8f, FontStyle.Bold), new Rectangle(TimeX, l.Y + 8, Width - TimeX, 16), Theme.Sub, One);
+            else if (l.Kind == 1)
+            {
+                bool problem = items.Any(it => it.Problem && it.When.Date == l.Day);
+                var dot = problem ? Theme.WarnText : Theme.Accent;
+                using (var b = new SolidBrush(Theme.Bg)) g.FillEllipse(b, 1, l.Y + 9, 12, 12);
+                using (var b = new SolidBrush(dot)) g.FillEllipse(b, 2, l.Y + 10, 10, 10);
+                var title = DayTitle(l.Day);
+                var f = Theme.UI(10.5f, FontStyle.Bold);
+                TextRenderer.DrawText(g, title, f, new Point(TimeX, l.Y + 6), Theme.Text, One);
+                if (l.Day >= DateTime.Today.AddDays(-1))
+                {
+                    int w = TextRenderer.MeasureText(g, title, f, Size.Empty, Measure).Width;
+                    TextRenderer.DrawText(g, l.Day.ToString("dddd, d MMMM"), Theme.UI(8.5f), new Point(TimeX + w + 10, l.Y + 9), Theme.Sub, One);
+                }
+            }
+            else if (l.Kind == 2) DrawRow(g, l);
+            else
+            {
+                var r = new Rectangle(TimeX, l.Y, Width - TimeX - 4, l.H - 4);
+                Theme.FillRound(g, r, 6, l == hot ? Theme.CardHover : Theme.Card);
+                TextRenderer.DrawText(g, "Show older (" + (items.Count - shown) + " more)", Theme.UI(9.5f), r, Theme.Accent, One | TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            }
+        }
+    }
+
+    void DrawRow(Graphics g, Line l)
+    {
+        var it = l.Item;
+        bool opens = it.Details != null;
+        if (it.Open || (opens && l == hot)) Theme.FillRound(g, new RectangleF(TimeX - 8, l.Y, Width - TimeX + 6, l.H - 2), 6, it.Open ? Theme.Card : Color.FromArgb(120, Theme.Card));
+        var f = Theme.UI(9.5f); var sf = Theme.UI(8.5f);
+        if (!it.DateOnly) TextRenderer.DrawText(g, (it.Approx ? "~" : "") + it.When.ToString("t"), sf, new Rectangle(TimeX, l.Y + 8, IconX - TimeX - 4, 16), Theme.Sub, One);
+        if (it.Icon != null) it.Icon(g, new RectangleF(IconX, l.Y + 7, 16, 16), it.IconColor);
+        int right = Width - (opens ? 34 : 8);
+        int tw = Math.Min(right - TextX, TextRenderer.MeasureText(g, it.Title, f, Size.Empty, Measure).Width + 1);
+        TextRenderer.DrawText(g, it.Title, f, new Rectangle(TextX, l.Y + 6, tw, 20), Theme.Text, One);
+        if (it.Tag != "" && TextX + tw + 10 < right - 20)
+            TextRenderer.DrawText(g, it.Tag, sf, new Rectangle(TextX + tw + 10, l.Y + 8, right - TextX - tw - 10, 18), Theme.Sub, One);
+        if (it.Sub != "") TextRenderer.DrawText(g, it.Sub, sf, new Rectangle(TextX, l.Y + 26, right - TextX, 16), Theme.Sub, One);
+        if (opens) Theme.Chevron(g, new RectangleF(Width - 30, l.Y + 5, 20, 20), it.Open, l == hot ? Theme.Text : Theme.Sub);
+        if (!it.Open || !opens) return;
+        int y = l.Y + (it.Sub != "" ? 46 : 30) + 4;
+        for (int i = 0; i + 1 < it.Details.Length; i += 2)
+        {
+            TextRenderer.DrawText(g, it.Details[i], Theme.UI(8.5f, FontStyle.Bold), new Point(TextX, y), Theme.Sub, One);
+            y += 20;
+            var size = TextRenderer.MeasureText(it.Details[i + 1], f, new Size(DetailWidth, 0), Wrap);
+            TextRenderer.DrawText(g, it.Details[i + 1], f, new Rectangle(TextX, y, DetailWidth, size.Height), Theme.Text, Wrap);
+            y += size.Height + 8;
+        }
+    }
+
+    Line At(Point p) { return lines.FirstOrDefault(l => (l.Kind == 3 || (l.Kind == 2 && l.Item.Details != null)) && p.Y >= l.Y && p.Y < l.Y + l.H); }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        var h = At(e.Location);
+        if (h != hot) { hot = h; Cursor = h != null ? Cursors.Hand : Cursors.Default; Invalidate(); }
+    }
+
+    protected override void OnMouseLeave(EventArgs e) { if (hot != null) { hot = null; Invalidate(); } }
+
+    protected override void OnMouseClick(MouseEventArgs e)
+    {
+        var h = At(e.Location);
+        if (h == null || e.Button != MouseButtons.Left) return;
+        if (h.Kind == 3) shown += Page; else h.Item.Open = !h.Item.Open;
+        hot = null;
+        Relayout();
+    }
+}
+
+// A card of label / value pairs in two columns, like "Windows   11 25H2", with an optional note under the value.
+class FactsCard : Control
+{
+    readonly List<string[]> facts;
+    const int RowH = 42;
+    public FactsCard(List<string[]> facts, int width)
+    {
+        this.facts = facts;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        Size = new Size(width, 12 + (facts.Count + 1) / 2 * RowH + 8);
+        Margin = new Padding(0, 0, 0, 4);
+        BackColor = Theme.Bg;
+    }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(Theme.Bg);
+        Theme.FillRound(g, new RectangleF(0, 0, Width - 1, Height - 1), 8, Theme.Card);
+        int colW = (Width - 48) / 2;
+        const TextFormatFlags one = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+        for (int i = 0; i < facts.Count; i++)
+        {
+            int x = 16 + (i % 2) * (colW + 16), y = 12 + i / 2 * RowH;
+            var f = facts[i];
+            TextRenderer.DrawText(g, f[0], Theme.UI(9f), new Rectangle(x, y + 3, colW / 2, 18), Theme.Sub, one);
+            TextRenderer.DrawText(g, f[1], Theme.UI(9.5f, FontStyle.Bold), new Rectangle(x + colW / 3, y + 2, colW - colW / 3, 18), Theme.Text, one | TextFormatFlags.Right);
+            if (f.Length > 2 && !string.IsNullOrEmpty(f[2]))
+                TextRenderer.DrawText(g, f[2], Theme.UI(8f), new Rectangle(x, y + 21, colW, 16), Theme.Sub, one | TextFormatFlags.Right);
+        }
+    }
+}
+
+// Screen time's bar chart: minutes in use per hour of a day, or per day of a range. Hover a bar for its value.
+class BarChart : Control
+{
+    readonly double[] values;  // minutes
+    readonly string[] labels;  // under the bars; "" for none
+    readonly string[] tips;    // what a bar is, e.g. "3 PM" or "Monday 12 Oct"
+    int hot = -1;
+    const int Pad = 16, Axis = 22, TopPad = 26;
+    public BarChart(double[] values, string[] labels, string[] tips, int width)
+    {
+        this.values = values; this.labels = labels; this.tips = tips;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        Size = new Size(width, 190); BackColor = Theme.Bg; Margin = new Padding(0, 0, 0, 6);
+    }
+    float Slot { get { return (Width - Pad * 2 - 34) / (float)values.Length; } }
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        int i = (int)((e.X - Pad - 34) / Slot);
+        if (i < 0 || i >= values.Length) i = -1;
+        if (i != hot) { hot = i; Invalidate(); }
+    }
+    protected override void OnMouseLeave(EventArgs e) { hot = -1; Invalidate(); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(Theme.Bg);
+        Theme.FillRound(g, new RectangleF(0, 0, Width - 1, Height - 1), 8, Theme.Card);
+        double max = Math.Max(1, values.Max());
+        // A round top for the scale: 15, 30 or 60 minutes for hours; whole hours for days.
+        double step = max <= 15 ? 5 : max <= 30 ? 10 : max <= 60 ? 20 : max <= 180 ? 60 : max <= 480 ? 120 : 240;
+        double top = Math.Ceiling(max / step) * step;
+        float x0 = Pad + 34, y0 = Height - Axis, h = y0 - TopPad;
+        var small = Theme.UI(7.5f);
+        const TextFormatFlags one = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+        using (var pen = new Pen(Theme.Border, 1) { DashStyle = DashStyle.Dot })
+            for (double v = 0; v <= top + 0.01; v += step)
+            {
+                float y = y0 - (float)(v / top) * h;
+                if (v > 0) g.DrawLine(pen, x0, y, Width - Pad, y);
+                TextRenderer.DrawText(g, v >= 60 ? (v / 60) + "h" : v + "m", small, new Rectangle(Pad - 4, (int)y - 7, 34, 14), Theme.Sub, one | TextFormatFlags.Right);
+            }
+        float slot = Slot, bw = Math.Max(3, Math.Min(22, slot * 0.62f));
+        for (int i = 0; i < values.Length; i++)
+        {
+            float x = x0 + i * slot + (slot - bw) / 2, bh = (float)(values[i] / top) * h;
+            if (bh > 0.5f) Theme.FillRound(g, new RectangleF(x, y0 - bh, bw, bh), Math.Min(3, bw / 2), i == hot ? KinetikSuite.Look.Mix(Theme.Accent, Theme.Text, 0.25f) : Theme.Accent);
+            else Theme.FillRound(g, new RectangleF(x, y0 - 2, bw, 2), 1, Theme.Border);
+            if (labels[i] != "") TextRenderer.DrawText(g, labels[i], small, new Rectangle((int)(x0 + i * slot - 20 + slot / 2), (int)y0 + 5, 40, 14), Theme.Sub, one | TextFormatFlags.HorizontalCenter);
+        }
+        if (hot >= 0)
+        {
+            var text = tips[hot] + "  ·  " + ScreenTime.Duration(values[hot] * 60);
+            var f = Theme.UI(8.5f, FontStyle.Bold);
+            var size = TextRenderer.MeasureText(g, text, f, Size.Empty, one);
+            float cx = x0 + hot * slot + slot / 2, bx = Math.Max(4, Math.Min(Width - size.Width - 20, cx - size.Width / 2f - 8));
+            var r = new RectangleF(bx, 4, size.Width + 16, 20);
+            Theme.FillRound(g, r, 5, Theme.CardHover);
+            TextRenderer.DrawText(g, text, f, new Point((int)r.X + 8, (int)r.Y + 3), Theme.Text, one);
+        }
+    }
+}
+
+// Screen time's app list: icon, name, a bar for the chosen measure, its value, and the other measures underneath.
+class UsageList : Control
+{
+    public class Item { public string Name = "", Value = "", Detail = "", Path = ""; public double Frac; }
+    readonly List<Item> items;
+    static readonly Dictionary<string, Bitmap> icons = new Dictionary<string, Bitmap>(StringComparer.OrdinalIgnoreCase);
+    const int RowH = 54;
+    public UsageList(List<Item> items, int width)
+    {
+        this.items = items;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
+        Size = new Size(width, Math.Max(1, items.Count) * RowH); BackColor = Theme.Bg; Margin = new Padding(0, 0, 0, 6);
+    }
+
+    static Bitmap IconFor(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return null;
+        Bitmap b;
+        lock (icons)
+        {
+            if (icons.TryGetValue(path, out b)) return b;
+            try
+            {
+                if (File.Exists(path))
+                    using (var ic = Icon.ExtractAssociatedIcon(path))
+                    using (var big = ic.ToBitmap())
+                    {
+                        b = new Bitmap(22, 22);
+                        using (var g = Graphics.FromImage(b)) { g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.DrawImage(big, 0, 0, 22, 22); }
+                    }
+            }
+            catch { b = null; }
+            if (icons.Count < 400) icons[path] = b;
+            return b;
+        }
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(Theme.Bg);
+        const TextFormatFlags one = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+        if (items.Count == 0)
+        {
+            Theme.FillRound(g, new RectangleF(0, 0, Width - 1, Height - 1), 8, Theme.Card);
+            TextRenderer.DrawText(g, "Nothing recorded yet.", Theme.UI(9.5f), new Rectangle(16, 0, Width - 32, Height), Theme.Sub, one | TextFormatFlags.VerticalCenter);
+            return;
+        }
+        using (var path = Icons.Round(new RectangleF(0, 0, Width - 1, Height - 1), 8)) using (var b = new SolidBrush(Theme.Card)) g.FillPath(b, path);
+        for (int i = 0; i < items.Count; i++)
+        {
+            var it = items[i]; int y = i * RowH;
+            if (y > e.ClipRectangle.Bottom || y + RowH < e.ClipRectangle.Top) continue;
+            if (i > 0) using (var p = new Pen(Theme.Border, 1)) g.DrawLine(p, 16, y, Width - 16, y);
+            var icon = IconFor(it.Path);
+            if (icon != null) g.DrawImage(icon, 16, y + 16, 22, 22);
+            else Theme.FillRound(g, new RectangleF(16, y + 16, 22, 22), 6, Theme.CardHover);
+            int valueW = 74, x = 52, barW = 120;
+            TextRenderer.DrawText(g, it.Name, Theme.UI(9.75f), new Rectangle(x, y + 9, Width - x - valueW - barW - 32, 20), Theme.Text, one);
+            TextRenderer.DrawText(g, it.Detail, Theme.UI(8f), new Rectangle(x, y + 30, Width - x - valueW - 24, 16), Theme.Sub, one);
+            var bar = new RectangleF(Width - valueW - barW - 16, y + 15, barW, 6);
+            Theme.FillRound(g, bar, 3, Theme.CardHover);
+            if (it.Frac > 0) Theme.FillRound(g, new RectangleF(bar.X, bar.Y, Math.Max(6, bar.Width * (float)Math.Min(1, it.Frac)), bar.Height), 3, Theme.Accent);
+            TextRenderer.DrawText(g, it.Value, Theme.UI(9.5f, FontStyle.Bold), new Rectangle(Width - valueW - 12, y + 9, valueW, 20), Theme.Text, one | TextFormatFlags.Right);
         }
     }
 }
@@ -9356,7 +11066,7 @@ class ReorderList : Control
         float y = pos[id];
         var r = new RectangleF(0, y, Width - 1, RowH);
         if (lifted) Theme.FillRound(g, new RectangleF(3, y + 4, Width - 4, RowH), 8, Color.FromArgb(120, 0, 0, 0));
-        Theme.FillRound(g, r, 8, lifted ? Theme.CardHover : hot ? Color.FromArgb(42, 42, 49) : Theme.Card);
+        Theme.FillRound(g, r, 8, lifted ? Theme.CardHover : hot ? KinetikSuite.Look.Mix(Theme.Card, Theme.CardHover, 0.5f) : Theme.Card);
         if (lifted || (Focused && i == selected)) Theme.StrokeRound(g, r, 8, Theme.Accent, 1.5f);
 
         Icons.Grip(g, new RectangleF(8, y + (RowH - 16) / 2f, 16, 16), Theme.Sub);
@@ -9556,12 +11266,16 @@ class SettingsForm : Form
     readonly StatsBar bar;
     readonly Settings c;
     readonly Panel content = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-    readonly Panel nav = new Panel { Dock = DockStyle.Left, Width = 200, BackColor = Theme.Nav };
+    readonly Panel nav = new Panel { Dock = DockStyle.Left, Width = 216, BackColor = Theme.Nav };
+    readonly Panel header, right;
+    readonly Label brand, version;
+    readonly FlowLayoutPanel navList;
     readonly PictureBox preview = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.CenterImage, BackColor = Color.FromArgb(32, 32, 36) };
     readonly System.Windows.Forms.Timer previewTimer = new System.Windows.Forms.Timer { Interval = 1000 };
     readonly System.Windows.Forms.Timer saveTimer = new System.Windows.Forms.Timer { Interval = 400 };
     readonly List<Label> navItems = new List<Label>();
-    const int RowW = 540;
+    readonly Panel previewPanel;
+    const int RowW = 580;
     string page = "Stats";
     ReorderList arrangeList;
     string pendingSelect;
@@ -9571,10 +11285,11 @@ class SettingsForm : Form
     public SettingsForm(StatsBar bar)
     {
         this.bar = bar; c = bar.Cfg;
+        Theme.Use(); // another Kinetik app may have changed the suite's theme since
         Text = "Kinetik";
         Icon = TrayIconArt.Frame(c.TrayStyle, SystemInformation.IconSize.Width, 0);
-        ClientSize = new Size(800, 640);
-        MinimumSize = new Size(760, 480);
+        ClientSize = new Size(880, 700);
+        MinimumSize = new Size(800, 520);
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = Theme.Bg; ForeColor = Theme.Text;
         Font = Theme.UI(9.5f);
@@ -9582,21 +11297,48 @@ class SettingsForm : Form
         using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("icon.ico"))
             if (st != null) Icon = new Icon(st);
 
-        // Preview strip on top (looks like a slice of taskbar)
-        var top = new Panel { Dock = DockStyle.Top, Height = 84, BackColor = Theme.Bg, Padding = new Padding(16, 14, 16, 10) };
+        // The page's title and what it's for, then (on the bar's own pages) a preview that looks like a slice of taskbar.
+        header = new Panel { Dock = DockStyle.Top, Height = 80, BackColor = Theme.Bg };
+        header.Paint += (s, e) =>
+        {
+            var g = e.Graphics; g.Clear(Theme.Bg);
+            const TextFormatFlags one = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
+            TextRenderer.DrawText(g, page, Theme.UI(17f, FontStyle.Bold), new Rectangle(28, 20, header.Width - 56, 32), Theme.Text, one);
+            string sub; subtitles.TryGetValue(page, out sub);
+            TextRenderer.DrawText(g, sub ?? "", Theme.UI(9.5f), new Rectangle(29, 54, header.Width - 56, 20), Theme.Sub, one);
+        };
+        header.Resize += (s, e) => header.Invalidate();
+        previewPanel = new Panel { Dock = DockStyle.Top, Height = 74, BackColor = Theme.Bg, Padding = new Padding(28, 2, 28, 14) };
         var frame = new Panel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(32, 32, 36) };
+        frame.Resize += (s, e) => { var old = frame.Region; using (var path = Icons.Round(new RectangleF(0, 0, frame.Width, frame.Height), 8)) frame.Region = new Region(path); if (old != null) old.Dispose(); };
         frame.Controls.Add(preview);
-        top.Controls.Add(frame);
+        previewPanel.Controls.Add(frame);
 
-        // Navigation
-        var brand = new Label { Text = "Kinetik", Font = Theme.UI(13f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Height = 64, Dock = DockStyle.Top, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
-        var version = new Label { Text = "v" + VersionText, Font = Theme.UI(8.5f), ForeColor = Theme.Sub, AutoSize = false, Height = 36, Dock = DockStyle.Bottom, Padding = new Padding(20, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
-        var navList = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, Padding = new Padding(10, 0, 10, 0), BackColor = Theme.Nav };
-        foreach (var p in new[] { "Stats", "Arrange", "Appearance", "Colours", "Widget", "Overlay", "Dashboard", "General", "About" }) navList.Controls.Add(NavItem(p));
+        // Navigation, in groups, with a hairline down its right edge
+        brand = new Label { AutoSize = false, Height = 70, Dock = DockStyle.Top, BackColor = Theme.Nav };
+        var logo = LoadLogo(48);
+        brand.Paint += (s, e) =>
+        {
+            var g = e.Graphics; g.Clear(Theme.Nav);
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            if (logo != null) g.DrawImage(logo, new Rectangle(22, 24, 24, 24));
+            TextRenderer.DrawText(g, "Kinetik", Theme.UI(12.5f, FontStyle.Bold), new Point(54, 25), Theme.Text, TextFormatFlags.NoPadding);
+        };
+        brand.Disposed += (s, e) => { if (logo != null) logo.Dispose(); };
+        version = new Label { Text = "v" + VersionText, Font = Theme.UI(8.5f), ForeColor = Theme.Sub, BackColor = Theme.Nav, AutoSize = false, Height = 40, Dock = DockStyle.Bottom, Padding = new Padding(22, 0, 0, 0), TextAlign = ContentAlignment.MiddleLeft };
+        navList = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(10, 0, 10, 8), BackColor = Theme.Nav };
+        foreach (var grp in NavGroups)
+        {
+            navList.Controls.Add(new Label { Text = grp.Key, Font = Theme.UI(7.75f, FontStyle.Bold), ForeColor = Theme.Sub, BackColor = Theme.Nav, AutoSize = false, Size = new Size(196, 30), TextAlign = ContentAlignment.BottomLeft, Padding = new Padding(10, 0, 0, 5), Margin = Padding.Empty });
+            foreach (var p in grp.Value) navList.Controls.Add(NavItem(p));
+        }
         nav.Controls.Add(navList); nav.Controls.Add(brand); nav.Controls.Add(version);
+        KinetikSuite.Look.Current.ScrollBars(navList);
+        nav.Paint += (s, e) => { using (var pen = new Pen(Theme.Border, 1)) e.Graphics.DrawLine(pen, nav.Width - 1, 0, nav.Width - 1, nav.Height); };
+        nav.Padding = new Padding(0, 0, 1, 0);
 
-        var right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
-        right.Controls.Add(content); right.Controls.Add(top);
+        right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
+        right.Controls.Add(content); right.Controls.Add(previewPanel); right.Controls.Add(header);
         Controls.Add(right); Controls.Add(nav);
 
         previewTimer.Tick += (s, e) => { UpdatePreview(); CheckGpuList(); };
@@ -9614,30 +11356,59 @@ class SettingsForm : Form
     protected override void OnHandleCreated(EventArgs e)
     {
         base.OnHandleCreated(e);
-        int one = 1; DwmSetWindowAttribute(Handle, 20, ref one, 4); // dark title bar
-        int round = 2; DwmSetWindowAttribute(Handle, 33, ref round, 4); // rounded corners
+        KinetikSuite.Look.Current.Window(Handle); // title bar in the page's colour, light or dark
     }
+
+    static KeyValuePair<string, string[]> G(string name, params string[] pages) { return new KeyValuePair<string, string[]>(name, pages); }
+    static readonly KeyValuePair<string, string[]>[] NavGroups =
+    {
+        G("TASKBAR", "Stats", "Arrange", "Appearance", "Colours"),
+        G("ON SCREEN", "Widget", "Overlay", "Dashboard"),
+        G("THIS PC", "Screen time", "Timeline", "Crashes"),
+        G("APP", "Theme", "General", "About"),
+    };
+
+    static readonly Dictionary<string, string> subtitles = new Dictionary<string, string>
+    {
+        { "Stats", "Choose what the bar on your taskbar shows." },
+        { "Arrange", "Drag stats into order, add dividers, and pick each one's icon and colour." },
+        { "Appearance", "Font, layout and spacing, and the background behind the bar." },
+        { "Colours", "Colours for the bar's icons, values and warnings." },
+        { "Widget", "A panel of live stats and graphs on your desktop." },
+        { "Overlay", "A slim strip of stats over your games, with an FPS counter." },
+        { "Dashboard", "Every reading with graphs, in a window or a browser." },
+        { "Screen time", "How long you used each app, day by day, and what each one asked of your PC." },
+        { "Timeline", "What was installed, updated, removed or switched on, day by day." },
+        { "Crashes", "Crashes, freezes, driver resets, blue screens and sudden shutdowns, explained." },
+        { "Theme", "How Kinetik and the other Kinetik apps look." },
+        { "General", "Updates, warnings, notifications, profiles and startup." },
+        { "About", "Version, updates and licence." },
+    };
+
+    // The pages that change the taskbar bar show a preview of it.
+    static bool HasPreview(string page) { return page == "Stats" || page == "Arrange" || page == "Appearance" || page == "Colours"; }
 
     static readonly Dictionary<string, IconFn> navIcons = new Dictionary<string, IconFn>
     {
-        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "Widget", Icons.Monitor }, { "Overlay", Icons.Gamepad }, { "Dashboard", Icons.Pulse }, { "General", Icons.Gear }, { "About", Icons.Info }
+        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "Widget", Icons.Monitor }, { "Overlay", Icons.Gamepad }, { "Dashboard", Icons.Pulse }, { "Screen time", Icons.Hourglass }, { "Timeline", Icons.Clock }, { "Crashes", Icons.Alert }, { "Theme", Icons.Contrast }, { "General", Icons.Gear }, { "About", Icons.Info }
     };
 
     Label NavItem(string name)
     {
-        var l = new Label { Text = name, Tag = name, AutoSize = false, Size = new Size(180, 40), Margin = new Padding(0, 0, 0, 4), Cursor = Cursors.Hand, Font = Theme.UI(10f) };
+        var l = new Label { Text = name, Tag = name, AutoSize = false, Size = new Size(196, 34), Margin = new Padding(0, 0, 0, 2), Cursor = Cursors.Hand, Font = Theme.UI(9.75f), BackColor = Theme.Nav };
+        bool hot = false;
+        l.MouseEnter += (s, e) => { hot = true; l.Invalidate(); };
+        l.MouseLeave += (s, e) => { hot = false; l.Invalidate(); };
         l.Paint += (s, e) =>
         {
-            var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias; g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
             bool sel = (string)l.Tag == page;
             g.Clear(Theme.Nav);
-            if (sel)
-            {
-                Theme.FillRound(g, new RectangleF(0, 0, l.Width - 1, l.Height - 1), 6, Theme.Card);
-                Theme.FillRound(g, new RectangleF(0, 12, 3, l.Height - 24), 1.5f, Theme.Accent);
-            }
-            navIcons[name](g, new RectangleF(14, 11, 18, 18), sel ? Theme.Accent : Theme.Sub);
-            using (var b = new SolidBrush(sel ? Theme.Text : Theme.Sub)) g.DrawString(name, l.Font, b, 44, (l.Height - l.Font.GetHeight(g)) / 2);
+            if (sel || hot) Theme.FillRound(g, new RectangleF(0, 0, l.Width - 1, l.Height - 1), 6, sel ? Theme.CardHover : Theme.Card);
+            if (sel) Theme.FillRound(g, new RectangleF(0, 9, 3, l.Height - 18), 1.5f, Theme.Accent);
+            navIcons[name](g, new RectangleF(13, 9, 16, 16), sel ? Theme.Accent : hot ? Theme.Text : Theme.Sub);
+            TextRenderer.DrawText(g, name, l.Font, new Rectangle(40, 0, l.Width - 44, l.Height), sel || hot ? Theme.Text : Theme.Sub,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
         };
         l.Click += (s, e) => ShowPage(name);
         navItems.Add(l);
@@ -9654,6 +11425,7 @@ class SettingsForm : Form
 
     void UpdatePreview()
     {
+        if (!previewPanel.Visible) return;
         var old = preview.Image;
         preview.Image = bar.RenderBitmap(Math.Max(40, bar.TaskbarHeight), false);
         if (old != null) old.Dispose();
@@ -9670,7 +11442,7 @@ class SettingsForm : Form
 
     void Header(string text)
     {
-        list.Controls.Add(new Label { Text = text, Font = Theme.UI(10f, FontStyle.Bold), ForeColor = Theme.Sub, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.BottomLeft, Margin = new Padding(2, 6, 0, 6) });
+        list.Controls.Add(new Label { Text = text.ToUpperInvariant(), Font = Theme.UI(8f, FontStyle.Bold), ForeColor = Theme.Sub, AutoSize = false, Size = new Size(RowW, 32), TextAlign = ContentAlignment.BottomLeft, Margin = new Padding(4, 12, 0, 8) });
     }
 
     void Hint(string text, int height = 40)
@@ -9680,7 +11452,11 @@ class SettingsForm : Form
 
     void Add(IconFn icon, Color iconColor, string title, string desc, Control right)
     {
-        list.Controls.Add(new Row(icon, iconColor, title, desc, right, RowW));
+        var row = new Row(icon, iconColor, title, desc, right, RowW);
+        // Rows one after another join into one card.
+        var prev = list.Controls.Count > 0 ? list.Controls[list.Controls.Count - 1] as Row : null;
+        if (prev != null) { prev.Last = false; row.First = false; }
+        list.Controls.Add(row);
     }
 
     void Switch(IconFn icon, Color iconColor, string title, string field, string desc = null)
@@ -9711,24 +11487,16 @@ class SettingsForm : Form
         Add(icon, (Color)f.GetValue(c), title, null, sw);
     }
 
-    Button Btn(string text, EventHandler click, bool accent = false)
+    KButton Btn(string text, EventHandler click, bool accent = false)
     {
-        var b = new Button
-        {
-            Text = text, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand,
-            BackColor = accent ? Theme.Accent : Theme.CardHover, ForeColor = accent ? Theme.Bg : Theme.Text, Padding = new Padding(10, 3, 10, 3), Font = Theme.UI(9.5f)
-        };
-        b.FlatAppearance.BorderColor = accent ? Theme.Accent : Theme.Border;
-        b.FlatAppearance.MouseOverBackColor = accent ? Color.FromArgb(110, 210, 255) : Theme.Border;
+        var b = new KButton(text, accent);
         if (click != null) b.Click += click;
         return b;
     }
 
-    ComboBox Combo(string[] items, int selected, Action<int> changed, int width = 170)
+    Picker Combo(string[] items, int selected, Action<int> changed, int width = 170)
     {
-        var cb = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, FlatStyle = FlatStyle.Flat, BackColor = Theme.CardHover, ForeColor = Theme.Text, Width = width, Font = Theme.UI(9.5f) };
-        cb.Items.AddRange(items);
-        cb.SelectedIndex = Math.Max(0, Math.Min(items.Length - 1, selected));
+        var cb = new Picker(items, selected, width);
         cb.SelectedIndexChanged += (s, e) => changed(cb.SelectedIndex);
         return cb;
     }
@@ -9737,12 +11505,15 @@ class SettingsForm : Form
     {
         if (!navIcons.ContainsKey(name)) name = "Stats";
         page = name;
+        previewPanel.Visible = HasPreview(name);
+        header.Invalidate();
         foreach (var l in navItems) l.Invalidate();
         content.SuspendLayout();
         foreach (Control ctl in content.Controls.Cast<Control>().ToList()) ctl.Dispose();
         arrangeList = null; gpuCount = -1;
-        list = new NoJumpFlow { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(16, 0, 16, 16), BackColor = Theme.Bg };
+        list = new NoJumpFlow { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(24, 0, 16, 24), BackColor = Theme.Bg };
         content.Controls.Add(list);
+        KinetikSuite.Look.Current.ScrollBars(list);
 
         if (name == "Stats") BuildStats();
         else if (name == "Arrange") BuildArrange();
@@ -9751,10 +11522,15 @@ class SettingsForm : Form
         else if (name == "Widget") BuildWidget();
         else if (name == "Overlay") BuildOverlay();
         else if (name == "Dashboard") BuildDashboard();
+        else if (name == "Screen time") BuildScreenTime();
+        else if (name == "Timeline") BuildTimeline();
+        else if (name == "Crashes") BuildCrashes();
+        else if (name == "Theme") BuildTheme();
         else if (name == "General") BuildGeneral();
         else BuildAbout();
 
         content.ResumeLayout();
+        if (ActiveControl is Picker) ActiveControl = null; // no focus ring on the first drop-down until it's used
         UpdatePreview();
     }
 
@@ -9790,7 +11566,7 @@ class SettingsForm : Form
         Action commit = () => { var v = host.Text.Trim(); if (v != "" && v != c.PingHost) { c.PingHost = v; Apply(); } };
         host.Leave += (s, e) => commit();
         host.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { commit(); e.SuppressKeyPress = true; } };
-        Add(Icons.Globe, c.UpColor, "Ping address", "A website or IP address, e.g. 1.1.1.1 or google.com", host);
+        Add(Icons.Globe, c.UpColor, "Ping address", "A website or IP address, e.g. 1.1.1.1 or google.com", new FieldBox(host, 170));
 
         Header("Processor");
         Stat("Cpu");
@@ -10045,6 +11821,346 @@ class SettingsForm : Form
         catch { return null; }
     }
 
+    // ---- Timeline and Crashes: read in the background when the page first opens, and kept while Settings is open.
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "SendMessageW")] static extern IntPtr SendText(IntPtr h, int msg, IntPtr w, string l);
+    PcHistoryView history;
+    List<CrashInfo> crashes;
+    bool loadingHistory, loadingCrashes;
+    static readonly Color Amber = Color.FromArgb(255, 190, 70);
+
+    // Runs read on a background thread, then done on this one, and shows the page again if it's still open.
+    void LoadInBackground(Action read, Action done)
+    {
+        new Thread(() =>
+        {
+            try { read(); } catch (Exception e) { Program.Log(e); }
+            try { BeginInvoke((Action)(() => { done(); if (!IsDisposed && (page == "Timeline" || page == "Crashes")) RefreshPage(); })); } catch { } // closed meanwhile
+        }) { IsBackground = true, Name = "Kinetik history" }.Start();
+    }
+
+    static PcHistoryView NoHistory() { return new PcHistoryView { Events = new List<PcChange>(), Snap = new Dictionary<string, string>(), Since = DateTime.MaxValue }; }
+
+    void LoadHistory(bool checkNow)
+    {
+        if (loadingHistory) return;
+        loadingHistory = true;
+        bool track = c.TrackChanges;
+        PcHistoryView v = null;
+        LoadInBackground(() =>
+        {
+            if (track && (checkNow || (DateTime.Now - PcHistory.LastCheck).TotalMinutes > 10)) PcHistory.Check();
+            v = PcHistory.Read();
+        }, () => { loadingHistory = false; history = v ?? NoHistory(); });
+    }
+
+    // The Crashes page also needs the history, for what changed before each problem, so both arrive together.
+    void LoadCrashes()
+    {
+        if (loadingCrashes) return;
+        loadingCrashes = true;
+        bool needHistory = history == null && !loadingHistory, track = c.TrackChanges;
+        if (needHistory) loadingHistory = true;
+        List<CrashInfo> v = null; PcHistoryView h = null;
+        LoadInBackground(() =>
+        {
+            v = CrashLog.Read();
+            if (needHistory) { if (track && (DateTime.Now - PcHistory.LastCheck).TotalMinutes > 10) PcHistory.Check(); h = PcHistory.Read(); }
+        }, () =>
+        {
+            loadingCrashes = false; crashes = v ?? new List<CrashInfo>();
+            if (needHistory) { loadingHistory = false; history = h ?? NoHistory(); }
+        });
+    }
+
+    // A filter list, a search box and an optional button, in one line above a feed.
+    Panel Toolbar(string[] filters, Action<int> filter, string cue, Action<string> search, Control extra)
+    {
+        var p = new Panel { Size = new Size(RowW, 32), Margin = new Padding(0, 0, 0, 4), BackColor = Theme.Bg };
+        var cb = Combo(filters, 0, filter, 210);
+        cb.Location = new Point(0, 1);
+        var box = new TextBox { Font = Theme.UI(9.5f) };
+        box.HandleCreated += (s, e) => SendText(box.Handle, 0x1501, (IntPtr)1, cue); // EM_SETCUEBANNER, shown even while focused
+        box.TextChanged += (s, e) => search(box.Text.Trim());
+        p.Controls.Add(cb); p.Controls.Add(new FieldBox(box, 210) { Location = new Point(220, 1) });
+        if (extra != null)
+        {
+            p.Controls.Add(extra);
+            extra.Location = new Point(RowW - extra.Width, 1);
+        }
+        return p;
+    }
+
+    static string When(DateTime t)
+    {
+        return t.ToString(t.Year == DateTime.Today.Year ? "d MMM" : "d MMM yyyy");
+    }
+
+    static List<string[]> PcFacts(PcHistoryView h)
+    {
+        var s = h.Snap;
+        Func<string, string> get = k => { string v; return s.TryGetValue(k, out v) && v != "" ? v : "–"; };
+        Func<string, string> since = k => { var e = h.Events.FirstOrDefault(x => x.Key == k && x.A != "remove"); return e == null ? "" : "since " + When(e.Time()); };
+        // The graphics card's own driver, not Windows' basic one or a second, built-in GPU's.
+        var gpu = s.Keys.Where(k => k.StartsWith("drv|Graphics|") && k.IndexOf("Microsoft", StringComparison.OrdinalIgnoreCase) < 0)
+            .OrderBy(k => k.IndexOf("NVIDIA", StringComparison.OrdinalIgnoreCase) >= 0 || k.IndexOf("Radeon", StringComparison.OrdinalIgnoreCase) >= 0 || k.IndexOf(" Arc", StringComparison.OrdinalIgnoreCase) >= 0 ? 0 : 1).FirstOrDefault();
+        var game = get("sys|game");
+        return new List<string[]>
+        {
+            new[] { "Windows", get("sys|win").Replace("Windows ", ""), since("sys|win") },
+            new[] { "Graphics driver", gpu != null ? s[gpu] : "–", gpu != null ? since(gpu) : "" },
+            new[] { "BIOS", get("sys|bios"), since("sys|bios") },
+            new[] { "Memory", get("sys|ram"), since("sys|ram") },
+            new[] { "Power plan", get("sys|power"), since("sys|power") },
+            new[] { "Game Mode", game == "on" ? "On" : game == "off" ? "Off" : "–", since("sys|game") },
+            new[] { "Apps installed", s.Keys.Count(k => k.StartsWith("app|")).ToString() },
+            new[] { "Start with Windows", s.Keys.Count(k => k.StartsWith("run|")).ToString() },
+        };
+    }
+
+    static FeedItem ChangeRow(PcChange e)
+    {
+        IconFn icon; Color col = Theme.Accent;
+        var key = e.Key ?? "";
+        if (e.A == "remove") { icon = Theme.Cross; col = Theme.Sub; }
+        else if (e.K == "Startup") icon = Icons.Power;
+        else if (e.K == "Setting") { icon = Icons.Gear; col = Theme.Sub; }
+        else if (e.K == "Hardware") icon = key.StartsWith("disk|") ? (IconFn)Icons.Disk : key == "sys|bios" ? (IconFn)Icons.Chip : Icons.Ram;
+        else if (e.K == "Windows" && e.A == "add") icon = Icons.Monitor;
+        else if (e.A == "add") icon = Icons.Down;
+        else icon = Icons.Refresh;
+        return new FeedItem
+        {
+            When = e.Time(), Approx = e.Approx, DateOnly = e.DateOnly, Icon = icon, IconColor = col, Title = e.X ?? "",
+            Tag = !string.IsNullOrEmpty(e.W) ? "Was " + e.W : e.V ?? "", Sub = e.S ?? "",
+        };
+    }
+
+    void BuildTimeline()
+    {
+        if (history == null) { LoadHistory(false); Hint("Reading this PC's history…"); return; }
+        var h = history;
+        Header("This PC now");
+        list.Controls.Add(new FactsCard(PcFacts(h), RowW));
+
+        Header("Changes");
+        var counts = PcHistory.Kinds.Select(k => h.Events.Count(e => e.K == k)).ToArray();
+        var filters = new[] { "Everything (" + h.Events.Count + ")" }.Concat(PcHistory.KindNames.Select((n, i) => n + " (" + counts[i] + ")")).ToArray();
+        var feed = new Feed(RowW) { Empty = h.Events.Count == 0 ? "No changes yet. Kinetik will list them here as it notices them." : "No changes match." };
+        int kind = 0; string query = "";
+        Action show = () => feed.SetItems(h.Events
+            .Where(e => (kind == 0 || e.K == PcHistory.Kinds[kind - 1]) && (query == "" || (e.X + " " + e.V + " " + e.W + " " + e.S).IndexOf(query, StringComparison.CurrentCultureIgnoreCase) >= 0))
+            .Select(ChangeRow));
+        list.Controls.Add(Toolbar(filters, i => { kind = i; show(); }, "Search changes", q => { query = q; show(); },
+            Btn("Check now", (s, e) => { history = null; LoadHistory(true); RefreshPage(); })));
+        show();
+        list.Controls.Add(feed);
+        Hint(h.Since == DateTime.MaxValue
+            ? "Kinetik takes its first snapshot of this PC a minute after it starts. Until then, this shows what Windows recorded itself."
+            : "Kinetik has been noticing changes since " + h.Since.ToString("d MMMM yyyy") + ". Earlier entries are what Windows recorded itself, and ~ means roughly when.", 44);
+
+        Header("Tracking");
+        Switch(Icons.Clock, Theme.Accent, "Notice changes", "TrackChanges", "Compares apps, drivers and settings every 3 hours. Kept on this PC only.");
+    }
+
+    static string Before(DateTime t, DateTime problem)
+    {
+        var d = problem - t;
+        if (d.TotalHours < 1) return "less than an hour before";
+        if (d.TotalHours < 24) { int n = (int)d.TotalHours; return n + (n == 1 ? " hour before" : " hours before"); }
+        int days = (int)d.TotalDays;
+        return days + (days == 1 ? " day before" : " days before");
+    }
+
+    FeedItem CrashRow(CrashInfo x)
+    {
+        IconFn icon = x.K == "Hang" ? (IconFn)Icons.Hourglass : x.K == "Graphics" ? (IconFn)Icons.Gpu : x.K == "Blue" ? (IconFn)Icons.Monitor : x.K == "Power" ? (IconFn)Icons.Power : x.K == "Hardware" ? (IconFn)Icons.Chip : Icons.Alert;
+        bool serious = x.K == "App" || x.K == "Blue" || x.K == "Power" || (x.K == "Hardware" && x.Title.Contains("serious"));
+        var details = new List<string> { "What happened", x.What, "What to try", x.Try };
+        if (history != null)
+        {
+            var before = history.Events.Where(e => e.T <= x.When.Ticks && e.T >= x.When.AddDays(-3).Ticks).Take(5)
+                .Select(e => "•  " + e.X + (e.DateOnly ? "" : ", " + Before(e.Time(), x.When))).ToList();
+            if (before.Count > 0) { details.Add("Changed in the 3 days before"); details.Add(string.Join("\n", before)); }
+        }
+        return new FeedItem { When = x.When, Icon = icon, IconColor = serious ? Theme.WarnText : Amber, Title = x.Title, Tag = x.Tag, Details = details.ToArray(), Problem = serious };
+    }
+
+    void BuildCrashes()
+    {
+        if (crashes == null) { LoadCrashes(); Hint("Reading Windows' logs…"); return; }
+        var all = crashes;
+        Header("Last " + CrashLog.Days + " days");
+        var counts = CrashLog.Kinds.Select(k => all.Count(x => x.K == k)).ToArray();
+        var facts = CrashLog.KindNames.Select((n, i) => new[] { n, counts[i].ToString() }).ToList();
+        var top = all.Where(x => x.K == "App" || x.K == "Hang").GroupBy(x => x.App).OrderByDescending(g => g.Count()).FirstOrDefault();
+        facts.Add(new[] { "Most often", top == null ? "–" : top.Key, top == null ? "" : top.Count() + (top.Count() == 1 ? " time" : " times") });
+        int ago = all.Count == 0 ? -1 : (DateTime.Today - all[0].When.Date).Days;
+        facts.Add(new[] { "Latest", ago < 0 ? "None" : ago == 0 ? "Today" : ago == 1 ? "Yesterday" : ago + " days ago" });
+        list.Controls.Add(new FactsCard(facts, RowW));
+
+        Header("Problems");
+        var filters = new[] { "Everything (" + all.Count + ")" }.Concat(CrashLog.KindNames.Select((n, i) => n + " (" + counts[i] + ")")).ToArray();
+        var feed = new Feed(RowW) { Empty = all.Count == 0 ? "No problems in the last " + CrashLog.Days + " days." : "No problems match." };
+        int kind = 0; string query = "";
+        Action show = () => feed.SetItems(all
+            .Where(x => (kind == 0 || x.K == CrashLog.Kinds[kind - 1]) && (query == "" || (x.Title + " " + x.Tag).IndexOf(query, StringComparison.CurrentCultureIgnoreCase) >= 0))
+            .Select(CrashRow));
+        list.Controls.Add(Toolbar(filters, i => { kind = i; show(); }, "Search problems", q => { query = q; show(); },
+            Btn("Refresh", (s, e) => { crashes = null; RefreshPage(); })));
+        show();
+        list.Controls.Add(feed);
+        Hint("Click a problem for what it means and what to try. Read from Windows' event logs; nothing leaves this PC.", 28);
+        Add(Icons.Pulse, Theme.Accent, "Reliability Monitor", "Windows' own record of problems, with technical details", Btn("Open", (s, e) =>
+        {
+            try { Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "perfmon.exe"), "/rel")); } catch (Exception ex) { Program.Log(ex); }
+        }));
+    }
+
+    // ---- Screen time
+    int stRange; // Today, Yesterday, Last 7 days, Last 30 days, then earlier days
+    int stSort;  // screen time, processor, memory, disk
+
+    static string Hour(int h) { return DateTime.Today.AddHours(h).ToString("h tt"); }
+
+    void BuildScreenTime()
+    {
+        var earlier = ScreenTime.Days().Where(d => d < DateTime.Today.AddDays(-1)).Take(60).ToList();
+        var choices = new List<string> { "Today", "Yesterday", "Last 7 days", "Last 30 days" };
+        choices.AddRange(earlier.Select(d => d.ToString("dddd d MMMM")));
+        stRange = Math.Max(0, Math.Min(stRange, choices.Count - 1));
+        DateTime from, to = DateTime.Today;
+        if (stRange == 0) from = to;
+        else if (stRange == 1) from = to = to.AddDays(-1);
+        else if (stRange == 2) from = to.AddDays(-6);
+        else if (stRange == 3) from = to.AddDays(-29);
+        else from = to = earlier[stRange - 4];
+        bool oneDay = from == to;
+        var days = ScreenTime.Range(from, to);
+
+        // Every day's apps added together.
+        var apps = new Dictionary<string, AppUsage>();
+        foreach (var d in days)
+            foreach (var kv in d.Apps)
+            {
+                AppUsage a;
+                if (!apps.TryGetValue(kv.Key, out a)) apps[kv.Key] = a = new AppUsage { Name = kv.Value.Name, Path = kv.Value.Path };
+                a.Secs += kv.Value.Secs; a.Cpu += kv.Value.Cpu; a.Disk += kv.Value.Disk;
+                a.MemSum += kv.Value.MemSum; a.MemN += kv.Value.MemN; a.MemPeak = Math.Max(a.MemPeak, kv.Value.MemPeak);
+                if (a.Path == "") a.Path = kv.Value.Path;
+            }
+        var hours = new double[24];
+        foreach (var d in days) for (int h = 0; h < 24; h++) hours[h] += d.Hours[h];
+        double total = hours.Sum();
+
+        var tools = new Panel { Size = new Size(RowW, 32), Margin = new Padding(0, 4, 0, 2), BackColor = Theme.Bg };
+        var when = Combo(choices.ToArray(), stRange, i => { stRange = i; BeginInvoke((Action)RefreshPage); }, 210);
+        var sort = Combo(new[] { "Sort by screen time", "Sort by processor", "Sort by memory", "Sort by disk" }, stSort, i => { stSort = i; BeginInvoke((Action)RefreshPage); }, 200);
+        when.Location = new Point(0, 1); sort.Location = new Point(220, 1);
+        tools.Controls.Add(when); tools.Controls.Add(sort);
+        list.Controls.Add(tools);
+
+        Header("Summary");
+        Func<Func<AppUsage, double>, AppUsage> top = f => apps.Values.Where(a => f(a) > 0).OrderByDescending(f).FirstOrDefault();
+        var most = top(a => a.Secs); var cpu = top(a => a.Cpu); var disk = top(a => a.Disk);
+        int busiest = Array.IndexOf(hours, hours.Max());
+        var facts = new List<string[]>();
+        facts.Add(new[] { "Screen time", ScreenTime.Duration(total), oneDay ? "" : "about " + ScreenTime.Duration(total / days.Count) + " a day" });
+        if (oneDay)
+        {
+            var d = days[0];
+            facts.Add(new[] { "First and last use", d.First == 0 ? "–" : new DateTime(d.First).ToString("t") + " – " + new DateTime(d.Last).ToString("t") });
+        }
+        else
+        {
+            var best = days.OrderByDescending(d => d.Hours.Sum()).First();
+            facts.Add(new[] { "Busiest day", best.Hours.Sum() == 0 ? "–" : DateTime.ParseExact(best.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture).ToString("dddd d MMM"), best.Hours.Sum() == 0 ? "" : ScreenTime.Duration(best.Hours.Sum()) });
+        }
+        facts.Add(new[] { "Most used", most == null ? "–" : most.Name, most == null ? "" : ScreenTime.Duration(most.Secs) });
+        facts.Add(new[] { "Busiest hour", total == 0 ? "–" : Hour(busiest) + " – " + Hour((busiest + 1) % 24), total == 0 ? "" : ScreenTime.Duration(hours[busiest]) + (oneDay ? "" : " in all") });
+        facts.Add(new[] { "Unlocks", days.Sum(d => d.Unlocks).ToString() });
+        facts.Add(new[] { "Apps used", apps.Values.Count(a => a.Secs > 0).ToString() });
+        facts.Add(new[] { "Most processor", cpu == null ? "–" : cpu.Name, cpu == null ? "" : ScreenTime.Duration(cpu.Cpu) + " of processor time" });
+        facts.Add(new[] { "Most disk", disk == null ? "–" : disk.Name, disk == null ? "" : ScreenTime.Bytes(disk.Disk) + " read and written" });
+        list.Controls.Add(new FactsCard(facts, RowW));
+
+        if (oneDay)
+        {
+            Header("Hour by hour");
+            list.Controls.Add(new BarChart(hours.Select(v => v / 60).ToArray(), Enumerable.Range(0, 24).Select(h => h % 6 == 0 ? Hour(h) : "").ToArray(),
+                Enumerable.Range(0, 24).Select(h => Hour(h) + " – " + Hour((h + 1) % 24)).ToArray(), RowW));
+        }
+        else
+        {
+            Header("Day by day");
+            var dates = days.Select(d => DateTime.ParseExact(d.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture)).ToList();
+            list.Controls.Add(new BarChart(days.Select(d => d.Hours.Sum() / 60.0).ToArray(),
+                dates.Select((d, i) => days.Count <= 7 ? d.ToString("ddd") : i % 5 == 0 ? d.ToString("d MMM") : "").ToArray(),
+                dates.Select(d => d.ToString("dddd d MMM")).ToArray(), RowW));
+        }
+
+        Header("Apps");
+        Func<AppUsage, double> measure = stSort == 1 ? (Func<AppUsage, double>)(a => a.Cpu) : stSort == 2 ? (Func<AppUsage, double>)(a => a.MemN == 0 ? 0 : a.MemSum / a.MemN) : stSort == 3 ? (Func<AppUsage, double>)(a => a.Disk) : a => a.Secs;
+        Func<AppUsage, string> value = a => stSort == 1 ? ScreenTime.Duration(a.Cpu) : stSort == 2 ? ScreenTime.Bytes(measure(a) * 1048576) : stSort == 3 ? ScreenTime.Bytes(a.Disk) : ScreenTime.Duration(a.Secs);
+        var ranked = apps.Values.Where(a => measure(a) > 0).OrderByDescending(measure).Take(30).ToList();
+        double max = ranked.Count == 0 ? 1 : measure(ranked[0]);
+        var items = ranked.Select(a =>
+        {
+            var parts = new List<string>();
+            if (stSort != 0 && a.Secs > 0) parts.Add("In front " + ScreenTime.Duration(a.Secs));
+            if (stSort != 1 && a.Cpu >= 1) parts.Add("Processor " + ScreenTime.Duration(a.Cpu));
+            if (stSort != 2 && a.MemN > 0) parts.Add("Memory " + ScreenTime.Bytes(a.MemSum / a.MemN * 1048576));
+            if (stSort != 3 && a.Disk > 0) parts.Add("Disk " + ScreenTime.Bytes(a.Disk));
+            return new UsageList.Item { Name = a.Name, Path = a.Path, Value = value(a), Frac = measure(a) / max, Detail = string.Join("  ·  ", parts) };
+        }).ToList();
+        list.Controls.Add(new UsageList(items, RowW));
+        Hint(stSort == 0 ? "Time counts while the app is in front and the PC is in use: after 5 minutes without input it stops, unless a video or game fills the screen."
+            : "Processor is how long the app kept the processor busy, every core added together. Memory is its average while running. These count apps in the background too.", 44);
+
+        Header("Tracking");
+        Switch(Icons.Hourglass, Theme.Accent, "Keep screen time", "TrackScreenTime", "Notes the app in front every 5 seconds, and what each app uses every minute");
+        Add(Icons.Info, Theme.Accent, "What's kept", "App names only, never window titles or what's on screen. On this PC, for 400 days.", null);
+        Add(Icons.Layers, Theme.Accent, "Clear history", "Deletes every saved day", Btn("Clear…", (s, e) =>
+        {
+            if (MessageBox.Show(this, "Delete all saved screen time? This can't be undone.", "Kinetik", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
+            ScreenTime.Clear(); RefreshPage();
+        }));
+    }
+
+    void BuildTheme()
+    {
+        string theme = KinetikSuite.Look.SavedTheme, accent = KinetikSuite.Look.SavedAccent;
+        Header("Theme");
+        var tiles = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MaximumSize = new Size(RowW + 12, 0), WrapContents = true, BackColor = Theme.Bg, Margin = new Padding(0, 0, 0, 2) };
+        foreach (var name in KinetikSuite.Look.Themes)
+        {
+            var t = new LookTile(name, accent) { Selected = name == theme };
+            var n = name;
+            t.Click += (s, e) => SetLook(n, null);
+            tiles.Controls.Add(t);
+        }
+        list.Controls.Add(tiles);
+        Header("Accent colour");
+        var dots = new AccentPicker(accent, Theme.Light);
+        dots.Changed += (s, e) => SetLook(null, dots.Selected);
+        Add(Icons.Palette, Theme.Accent, accent == KinetikSuite.Look.WindowsAccent ? "Your Windows accent colour" : accent, "Switches, buttons and the page you're on", dots);
+        Hint("Every Kinetik app uses this theme for its windows and menus: Kinetik, the Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather. Widgets keep their own themes.", 46);
+    }
+
+    // Saves the suite's theme and repaints this window in it.
+    void SetLook(string theme, string accent)
+    {
+        KinetikSuite.Look.Save(theme, accent);
+        Theme.Use();
+        BackColor = Theme.Bg; ForeColor = Theme.Text;
+        foreach (var ctl in new Control[] { nav, navList, brand, version }) ctl.BackColor = Theme.Nav;
+        foreach (var ctl in new Control[] { right, header, previewPanel, content }) ctl.BackColor = Theme.Bg;
+        version.ForeColor = Theme.Sub;
+        foreach (Control ctl in navList.Controls) { ctl.BackColor = Theme.Nav; ctl.ForeColor = Theme.Sub; ctl.Invalidate(); }
+        if (IsHandleCreated) KinetikSuite.Look.Current.Window(Handle);
+        nav.Invalidate(); brand.Invalidate(); header.Invalidate();
+        RefreshPage();
+    }
+
     void BuildAbout()
     {
         var logo = new PictureBox { Size = new Size(64, 64), SizeMode = PictureBoxSizeMode.Zoom, Margin = new Padding(2, 24, 0, 8), BackColor = Theme.Bg };
@@ -10054,7 +12170,7 @@ class SettingsForm : Form
         list.Controls.Add(new Label { Text = "Kinetik", Font = Theme.UI(16f, FontStyle.Bold), ForeColor = Theme.Text, AutoSize = false, Size = new Size(RowW, 36), TextAlign = ContentAlignment.MiddleLeft, Margin = new Padding(0, 0, 0, 0) });
         Hint("A lightweight stats overlay for the Windows taskbar.", 28);
         Add(Icons.Info, Theme.Accent, "Version", null, new Label { Text = VersionText, AutoSize = false, Size = new Size(120, 24), TextAlign = ContentAlignment.MiddleRight, ForeColor = Theme.Text, BackColor = Theme.Card, Font = Theme.UI(10f) });
-        Button upd = null;
+        KButton upd = null;
         Updates.Release newer = null;
         upd = Btn("Check for updates", (s, e) =>
         {
@@ -10154,7 +12270,7 @@ class SettingsForm : Form
         Action commit = () => { var v = title.Text.Trim(); if (v != c.WidgetTitle) { c.WidgetTitle = v; Apply(); } };
         title.Leave += (s, e) => commit();
         title.KeyDown += (s, e) => { if (e.KeyCode == Keys.Enter) { commit(); e.SuppressKeyPress = true; } };
-        Add(Icons.Text, Theme.Accent, "Title", "Shown at the top. Leave empty for none.", title);
+        Add(Icons.Text, Theme.Accent, "Title", "Shown at the top. Leave empty for none.", new FieldBox(title, 170));
         Switch(Icons.List, Theme.Accent, "Group headings", "WidgetHeadings", "Processor, Graphics, Memory… above each group");
         SliderRow(Icons.Divider, Theme.Accent, "Divider thickness", "WidgetDividerSize", 1, 8, " px", "Lines between stats (add dividers on the Arrange page)");
         Switch(Icons.Chip, Theme.Accent, "Hardware names", "WidgetHwNames", "CPU and GPU model next to the headings");
@@ -10358,8 +12474,8 @@ class SettingsForm : Form
         bar.Render(true); // starts the server, and makes the link's secret if there isn't one yet
         if (WebDash.Status != "") Add(Icons.Info, Theme.WarnText, "Not running", WebDash.Status, null);
         Header("Link");
-        var box = new TextBox { Text = WebDash.Link(c), ReadOnly = true, Width = RowW - 4, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Font = Theme.UI(10f), Margin = new Padding(2, 2, 0, 6) };
-        list.Controls.Add(box);
+        var box = new TextBox { Text = WebDash.Link(c), ReadOnly = true, Font = Theme.UI(10f), Margin = new Padding(0, 2, 0, 6) };
+        list.Controls.Add(new FieldBox(box, RowW));
         var tools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 2, 0, 4) };
         var open = Btn("Open in browser", (s, e) => WebDash.Open(c), true); open.Margin = new Padding(0, 0, 8, 0);
         var copy = Btn("Copy link", (s, e) => { try { Clipboard.SetText(WebDash.Link(c)); } catch { } }); copy.Margin = new Padding(0, 0, 8, 0);
@@ -10379,7 +12495,6 @@ class SettingsForm : Form
     {
         try { if (!load()) return; }
         catch (Exception ex) { MessageBox.Show(this, "Couldn't load those settings.\n\n" + ex.Message, "Kinetik", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
-        Theme.Use(c.AppBackground);
         bar.Render(true);
         var b = bar; var p = page;
         BeginInvoke((Action)(() => { Close(); b.OpenSettings(p); }));
@@ -10387,16 +12502,6 @@ class SettingsForm : Form
 
     void BuildGeneral()
     {
-        Header("Settings window");
-        Add(Icons.Palette, Theme.Accent, "Background colour", "The colour of this settings window",
-            Combo(Theme.Backgrounds.Select(x => x.Key).ToArray(), Math.Max(0, Math.Min(Theme.Backgrounds.Length - 1, c.AppBackground)), i =>
-            {
-                if (i == c.AppBackground) return;
-                c.AppBackground = i; c.Save(); Theme.Use(i);
-                // Controls take their colours when they're built, so reopen the window on this page.
-                BeginInvoke((Action)(() => { var b = bar; Close(); b.OpenSettings("General"); }));
-            }, 170));
-
         Header("Behaviour");
         var intervals = new[] { 500, 1000, 2000, 3000, 5000 };
         Add(Icons.Gauge, Theme.Accent, "Update interval", "Slower updates use less CPU",
@@ -10444,7 +12549,7 @@ class SettingsForm : Form
         var pick = Combo(names.Count > 0 ? names.ToArray() : new[] { "(no profiles yet)" }, 0, i => { }, 170);
         pick.Enabled = names.Count > 0;
         var profTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
-        pick.Margin = new Padding(0, 3, 8, 0);
+        pick.Margin = new Padding(0, 0, 8, 0);
         profTools.Controls.Add(pick);
         profTools.Controls.Add(Btn("Load", (s, e) => { if (names.Count > 0) LoadSettings(() => Profiles.Load(c, names[pick.SelectedIndex])); }));
         var del = Btn("Delete", (s, e) =>
@@ -10457,8 +12562,8 @@ class SettingsForm : Form
         Add(Icons.Layers, Theme.Accent, "Profiles", "Switch between saved setups, e.g. Gaming and Work. Also in the right-click menu.", profTools);
         var newName = new TextBox { Width = 150, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle, Font = Theme.UI(9.5f) };
         var saveTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
-        newName.Margin = new Padding(0, 4, 8, 0);
-        saveTools.Controls.Add(newName);
+        newName.Margin = new Padding(0, 0, 8, 0);
+        saveTools.Controls.Add(new FieldBox(newName, 150));
         saveTools.Controls.Add(Btn("Save", (s, e) =>
         {
             var n = Profiles.Clean(newName.Text);
@@ -10543,6 +12648,7 @@ class CommonMenu
 
     public string Title, Version;
     public Action OpenTheme;                                        // opens the theme picker (or the page with it)
+    public Action LookChanged;                                      // optional: after the App theme changes
     public Func<int> Scale; public Action<int> SetScale;
     public int[] Widths; public Func<int> CardWidth; public Action<int> SetCardWidth; // optional: Narrow, Normal, Wide
     public Func<string> FontName; public Action<string> SetFontName;   // optional; "" = the default font
@@ -10572,7 +12678,8 @@ class CommonMenu
     // Appearance and placement: Theme, Size, Font, Background opacity, Placement.
     public void AddLook(ToolStripItemCollection items)
     {
-        if (OpenTheme != null) items.Add(Item("Theme…", false, OpenTheme));
+        if (OpenTheme != null) items.Add(Item("Widget theme…", false, OpenTheme));
+        items.Add(KinetikSuite.Look.MenuItem(LookChanged)); // the theme of every Kinetik app's windows and menus
 
         var size = new ToolStripMenuItem("Size");
         foreach (var s in Scales) { int v = s; size.DropDownItems.Add(Item(v + "%", Scale() == v, () => SetScale(v))); }

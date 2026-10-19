@@ -435,6 +435,411 @@ namespace KinetikSuite
         }
     }
 
+    // How every Kinetik app's own windows, menus and dialogs look: a theme and an accent colour picked once (in
+    // Kinetik or the Hub) for the whole suite. Widget themes are separate; this is only the app around them.
+    public sealed class Look
+    {
+        public string Name;
+        public bool Light;
+        // Page, sidebar, card, card under the mouse, text box, hairline, text, secondary text, accent, text on the accent, warning, good.
+        public System.Drawing.Color Bg, Nav, Card, Hover, Field, Border, Text, Sub, Accent, OnAccent, Warn, Good;
+
+        public const string Key = @"Software\Kinetik Suite";
+        public const string Auto = "Match Windows", WindowsAccent = "Windows accent";
+        public static readonly string[] Themes = { Auto, "Graphite", "OLED black", "Midnight", "Nord", "Mocha", "Forest", "Light", "Paper" };
+        public static readonly string[] Accents = { "Sky", "Violet", "Mint", "Amber", "Rose", "Coral", WindowsAccent };
+
+        static System.Drawing.Color C(int r, int g, int b) { return System.Drawing.Color.FromArgb(r, g, b); }
+
+        // name → page, sidebar, card, hover, field, border, text, secondary text
+        static readonly Dictionary<string, System.Drawing.Color[]> palettes = new Dictionary<string, System.Drawing.Color[]>
+        {
+            { "Graphite", new[] { C(17, 17, 19), C(17, 17, 19), C(26, 26, 29), C(34, 34, 38), C(31, 31, 35), C(44, 44, 50), C(236, 236, 240), C(142, 142, 152) } },
+            { "OLED black", new[] { C(0, 0, 0), C(0, 0, 0), C(14, 14, 16), C(24, 24, 27), C(20, 20, 23), C(36, 36, 40), C(242, 242, 245), C(136, 136, 146) } },
+            { "Midnight", new[] { C(13, 18, 32), C(13, 18, 32), C(21, 28, 46), C(28, 37, 59), C(25, 33, 53), C(39, 50, 76), C(230, 235, 245), C(135, 146, 171) } },
+            { "Nord", new[] { C(46, 52, 64), C(46, 52, 64), C(54, 61, 75), C(61, 69, 85), C(58, 65, 80), C(70, 79, 97), C(236, 239, 244), C(163, 171, 186) } },
+            { "Mocha", new[] { C(30, 30, 46), C(30, 30, 46), C(39, 39, 57), C(49, 50, 69), C(45, 46, 64), C(60, 61, 82), C(205, 214, 244), C(147, 153, 178) } },
+            { "Forest", new[] { C(16, 24, 20), C(16, 24, 20), C(24, 34, 29), C(31, 44, 37), C(28, 39, 33), C(42, 58, 49), C(228, 240, 231), C(138, 163, 147) } },
+            { "Light", new[] { C(246, 246, 248), C(246, 246, 248), C(255, 255, 255), C(240, 240, 244), C(255, 255, 255), C(222, 222, 229), C(27, 27, 31), C(104, 104, 116) } },
+            { "Paper", new[] { C(247, 244, 238), C(247, 244, 238), C(253, 251, 247), C(242, 237, 228), C(255, 255, 255), C(226, 219, 206), C(46, 38, 30), C(120, 106, 90) } },
+        };
+
+        // name → colour on dark themes, colour on light themes
+        static readonly Dictionary<string, System.Drawing.Color[]> accents = new Dictionary<string, System.Drawing.Color[]>
+        {
+            { "Sky", new[] { C(76, 194, 255), C(0, 110, 200) } },
+            { "Violet", new[] { C(167, 139, 250), C(110, 70, 230) } },
+            { "Mint", new[] { C(52, 211, 153), C(10, 140, 95) } },
+            { "Amber", new[] { C(251, 191, 36), C(176, 112, 0) } },
+            { "Rose", new[] { C(244, 114, 182), C(196, 40, 120) } },
+            { "Coral", new[] { C(255, 128, 102), C(210, 70, 45) } },
+        };
+
+        static Look current;
+        static int readAt;
+        // Re-read every couple of seconds at most, so a theme picked in another Kinetik app shows up here too.
+        public static Look Current
+        {
+            get
+            {
+                if (current == null || unchecked(Environment.TickCount - readAt) > 2000) Reload();
+                return current;
+            }
+        }
+
+        public static Look Reload() { current = Read(); readAt = Environment.TickCount; return current; }
+
+        public static string SavedTheme { get { return Value("Theme", Auto); } }
+        public static string SavedAccent { get { return Value("Accent", "Sky"); } }
+        public static bool Saved { get { return Value("Theme", null) != null; } }
+
+        static string Value(string name, string fallback)
+        {
+            try { using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(Key)) return k == null ? fallback : k.GetValue(name, fallback) as string ?? fallback; }
+            catch { return fallback; }
+        }
+
+        public static void Save(string theme, string accent)
+        {
+            try
+            {
+                using (var k = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(Key))
+                {
+                    if (theme != null) k.SetValue("Theme", theme);
+                    if (accent != null) k.SetValue("Accent", accent);
+                }
+            }
+            catch { }
+            Reload();
+        }
+
+        static Look Read() { return Make(SavedTheme, SavedAccent); }
+
+        public static bool WindowsIsLight()
+        {
+            try
+            {
+                using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"))
+                    return k != null && Convert.ToInt32(k.GetValue("AppsUseLightTheme", 0)) == 1;
+            }
+            catch { return false; }
+        }
+
+        public static Look Make(string theme, string accent)
+        {
+            var name = theme == Auto ? (WindowsIsLight() ? "Light" : "Graphite") : theme;
+            System.Drawing.Color[] p;
+            if (!palettes.TryGetValue(name ?? "", out p)) { name = "Graphite"; p = palettes[name]; }
+            var l = new Look { Name = theme == Auto ? Auto : name, Light = name == "Light" || name == "Paper" };
+            l.Bg = p[0]; l.Nav = p[1]; l.Card = p[2]; l.Hover = p[3]; l.Field = p[4]; l.Border = p[5]; l.Text = p[6]; l.Sub = p[7];
+            l.Accent = AccentColour(accent, l.Light);
+            l.OnAccent = Luma(l.Accent) > 0.55 ? C(17, 17, 19) : C(255, 255, 255);
+            l.Warn = l.Light ? C(200, 40, 40) : C(255, 110, 110);
+            l.Good = l.Light ? C(20, 140, 70) : C(110, 210, 140);
+            return l;
+        }
+
+        public static System.Drawing.Color AccentColour(string accent, bool light)
+        {
+            System.Drawing.Color[] a;
+            if (accent == WindowsAccent)
+            {
+                try
+                {
+                    using (var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\DWM"))
+                    {
+                        var v = k == null ? null : k.GetValue("AccentColor");
+                        if (v != null)
+                        {
+                            int abgr = Convert.ToInt32(v);
+                            var c = C(abgr & 0xFF, (abgr >> 8) & 0xFF, (abgr >> 16) & 0xFF);
+                            // Lift a dark accent on dark themes and deepen a pale one on light themes, so it stays readable.
+                            double y = Luma(c);
+                            if (!light && y < 0.45) c = Mix(c, C(255, 255, 255), (float)Math.Min(0.6, 0.6 - y));
+                            if (light && y > 0.5) c = Mix(c, C(0, 0, 0), (float)Math.Min(0.5, y - 0.35));
+                            return c;
+                        }
+                    }
+                }
+                catch { }
+                accent = "Sky";
+            }
+            if (!accents.TryGetValue(accent ?? "", out a)) a = accents["Sky"];
+            return light ? a[1] : a[0];
+        }
+
+        public static double Luma(System.Drawing.Color c) { return (0.2126 * c.R + 0.7152 * c.G + 0.0722 * c.B) / 255.0; }
+
+        public static System.Drawing.Color Mix(System.Drawing.Color a, System.Drawing.Color b, float t)
+        {
+            t = Math.Max(0, Math.Min(1, t));
+            return System.Drawing.Color.FromArgb((int)(a.R + (b.R - a.R) * t), (int)(a.G + (b.G - a.G) * t), (int)(a.B + (b.B - a.B) * t));
+        }
+
+        [System.Runtime.InteropServices.DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int v, int size);
+        static int Ref(System.Drawing.Color c) { return c.R | (c.G << 8) | (c.B << 16); }
+
+        // Dark or light title bar in the page's colour, with a hairline border and rounded corners. Older Windows ignores what it doesn't know.
+        public void Window(IntPtr handle)
+        {
+            try
+            {
+                int dark = Light ? 0 : 1; DwmSetWindowAttribute(handle, 20, ref dark, 4);
+                int round = 2; DwmSetWindowAttribute(handle, 33, ref round, 4);
+                int caption = Ref(Bg); DwmSetWindowAttribute(handle, 35, ref caption, 4);
+                int text = Ref(Text); DwmSetWindowAttribute(handle, 36, ref text, 4);
+                int border = Ref(Border); DwmSetWindowAttribute(handle, 34, ref border, 4);
+            }
+            catch { }
+        }
+
+        [System.Runtime.InteropServices.DllImport("uxtheme.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] static extern int SetWindowTheme(IntPtr h, string app, string id);
+
+        // Dark scroll bars on a scrolling panel or list in a dark theme. Call once its handle exists.
+        public void ScrollBars(System.Windows.Forms.Control control)
+        {
+            System.Windows.Forms.MethodInvoker apply = () => { try { SetWindowTheme(control.Handle, Light ? "Explorer" : "DarkMode_Explorer", null); } catch { } };
+            if (control.IsHandleCreated) apply(); else control.HandleCreated += (s, e) => apply();
+        }
+
+        // "App theme" for any app's right-click menu: every theme and accent, ticked as chosen. Picking one changes every Kinetik app.
+        public static System.Windows.Forms.ToolStripMenuItem MenuItem(Action changed)
+        {
+            var menu = new System.Windows.Forms.ToolStripMenuItem("App theme");
+            menu.DropDownOpening += (s, e) => { menu.DropDownItems.Clear(); FillMenu(menu.DropDownItems, changed); };
+            menu.DropDownItems.Add("…"); // replaced as it opens
+            return menu;
+        }
+
+        // Repaints an open window after the theme changes: every control coloured like the old theme takes the new one's colour.
+        public static void Recolour(System.Windows.Forms.Control root, Look old)
+        {
+            var now = Current;
+            var from = new[] { old.Bg, old.Nav, old.Card, old.Hover, old.Field, old.Border, old.Text, old.Sub, old.Accent, old.OnAccent };
+            var to = new[] { now.Bg, now.Nav, now.Card, now.Hover, now.Field, now.Border, now.Text, now.Sub, now.Accent, now.OnAccent };
+            Func<System.Drawing.Color, System.Drawing.Color> map = c => { for (int i = 0; i < from.Length; i++) if (from[i].ToArgb() == c.ToArgb()) return to[i]; return c; };
+            Action<System.Windows.Forms.Control> walk = null;
+            walk = c =>
+            {
+                if (c.BackColor.A == 255) c.BackColor = map(c.BackColor);
+                c.ForeColor = map(c.ForeColor);
+                foreach (System.Windows.Forms.Control k in c.Controls) walk(k);
+                c.Invalidate();
+            };
+            walk(root);
+            var form = root as System.Windows.Forms.Form;
+            if (form != null && form.IsHandleCreated) now.Window(form.Handle);
+        }
+
+        // The themes, then the accents, as menu items ticked as chosen.
+        public static void FillMenu(System.Windows.Forms.ToolStripItemCollection items, Action changed)
+        {
+            {
+                string theme = SavedTheme, accent = SavedAccent;
+                foreach (var t in Themes)
+                {
+                    var name = t;
+                    var it = new System.Windows.Forms.ToolStripMenuItem(name) { Checked = name == theme };
+                    it.Click += (o, a) => { Save(name, null); if (changed != null) changed(); };
+                    items.Add(it);
+                }
+                items.Add(new System.Windows.Forms.ToolStripSeparator());
+                foreach (var c in Accents)
+                {
+                    var name = c;
+                    var it = new System.Windows.Forms.ToolStripMenuItem(name == WindowsAccent ? "Accent: Windows accent colour" : "Accent: " + name) { Checked = name == accent };
+                    it.Click += (o, a) => { Save(null, name); if (changed != null) changed(); };
+                    items.Add(it);
+                }
+            }
+        }
+
+        // Right-click menus in the same colours.
+        public System.Windows.Forms.ToolStripRenderer MenuRenderer() { return new LookMenu(); }
+    }
+
+    sealed class LookMenu : System.Windows.Forms.ToolStripProfessionalRenderer
+    {
+        static Look look { get { return Look.Current; } }
+        public LookMenu() : base(new LookColours()) { RoundedEdges = false; }
+        protected override void OnRenderItemText(System.Windows.Forms.ToolStripItemTextRenderEventArgs e)
+        {
+            e.TextColor = e.Item.Enabled ? look.Text : look.Sub;
+            base.OnRenderItemText(e);
+        }
+        protected override void OnRenderArrow(System.Windows.Forms.ToolStripArrowRenderEventArgs e) { e.ArrowColor = look.Sub; base.OnRenderArrow(e); }
+        protected override void OnRenderItemCheck(System.Windows.Forms.ToolStripItemImageRenderEventArgs e)
+        {
+            var g = e.Graphics; var r = e.ImageRectangle;
+            g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            using (var p = new System.Drawing.Pen(look.Accent, 2f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+                g.DrawLines(p, new[] { new System.Drawing.PointF(r.X + r.Width * 0.2f, r.Y + r.Height * 0.52f), new System.Drawing.PointF(r.X + r.Width * 0.42f, r.Y + r.Height * 0.72f), new System.Drawing.PointF(r.X + r.Width * 0.8f, r.Y + r.Height * 0.3f) });
+        }
+    }
+
+    sealed class LookColours : System.Windows.Forms.ProfessionalColorTable
+    {
+        static Look l { get { return Look.Current; } }
+        public LookColours() { UseSystemColors = false; }
+        public override System.Drawing.Color ToolStripDropDownBackground { get { return l.Card; } }
+        public override System.Drawing.Color ImageMarginGradientBegin { get { return l.Card; } }
+        public override System.Drawing.Color ImageMarginGradientMiddle { get { return l.Card; } }
+        public override System.Drawing.Color ImageMarginGradientEnd { get { return l.Card; } }
+        public override System.Drawing.Color MenuBorder { get { return l.Border; } }
+        public override System.Drawing.Color MenuItemBorder { get { return l.Hover; } }
+        public override System.Drawing.Color MenuItemSelected { get { return l.Hover; } }
+        public override System.Drawing.Color MenuItemSelectedGradientBegin { get { return l.Hover; } }
+        public override System.Drawing.Color MenuItemSelectedGradientEnd { get { return l.Hover; } }
+        public override System.Drawing.Color MenuItemPressedGradientBegin { get { return l.Hover; } }
+        public override System.Drawing.Color MenuItemPressedGradientEnd { get { return l.Hover; } }
+        public override System.Drawing.Color SeparatorDark { get { return l.Border; } }
+        public override System.Drawing.Color SeparatorLight { get { return l.Card; } }
+        public override System.Drawing.Color CheckBackground { get { return l.Card; } }
+        public override System.Drawing.Color CheckSelectedBackground { get { return l.Hover; } }
+        public override System.Drawing.Color CheckPressedBackground { get { return l.Hover; } }
+    }
+
+    // Controls in the Kinetik apps' theme, for settings windows and dialogs, in place of Windows' own checkbox,
+    // button and drop-down, which stay light whatever the theme.
+    static class Paths
+    {
+        public static System.Drawing.Drawing2D.GraphicsPath Round(System.Drawing.RectangleF r, float rad)
+        {
+            var p = new System.Drawing.Drawing2D.GraphicsPath(); float d = Math.Max(0.5f, Math.Min(rad * 2, Math.Min(r.Width, r.Height)));
+            p.AddArc(r.X, r.Y, d, d, 180, 90); p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90); p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure(); return p;
+        }
+        public static void Fill(System.Drawing.Graphics g, System.Drawing.RectangleF r, float rad, System.Drawing.Color c)
+        { using (var p = Round(r, rad)) using (var b = new System.Drawing.SolidBrush(c)) g.FillPath(b, p); }
+        public static void Stroke(System.Drawing.Graphics g, System.Drawing.RectangleF r, float rad, System.Drawing.Color c)
+        { using (var p = Round(r, rad)) using (var pen = new System.Drawing.Pen(c, 1)) g.DrawPath(pen, p); }
+        public static void Chevron(System.Drawing.Graphics g, System.Drawing.RectangleF r, System.Drawing.Color c)
+        {
+            float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2, w = r.Height * 0.16f;
+            using (var p = new System.Drawing.Pen(c, 1.6f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
+                g.DrawLines(p, new[] { new System.Drawing.PointF(cx - w, cy - w / 2), new System.Drawing.PointF(cx, cy + w / 2), new System.Drawing.PointF(cx + w, cy - w / 2) });
+        }
+        // Corners show the parent's colour.
+        public static void Follow(System.Windows.Forms.Control c)
+        {
+            c.ParentChanged += (s, e) => { if (c.Parent != null) c.BackColor = c.Parent.BackColor; };
+        }
+    }
+
+    // An on/off switch.
+    public class Switch : System.Windows.Forms.Control
+    {
+        bool on;
+        public event EventHandler Changed;
+        public bool On { get { return on; } set { if (on == value) return; on = value; Invalidate(); } }
+        public Switch(bool on, float scale)
+        {
+            this.on = on;
+            SetStyle(System.Windows.Forms.ControlStyles.AllPaintingInWmPaint | System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer | System.Windows.Forms.ControlStyles.UserPaint | System.Windows.Forms.ControlStyles.Selectable, true);
+            Size = new System.Drawing.Size((int)(42 * scale), (int)(22 * scale)); Cursor = System.Windows.Forms.Cursors.Hand; TabStop = true;
+            Paths.Follow(this);
+        }
+        protected override void OnClick(EventArgs e) { On = !On; if (Changed != null) Changed(this, e); base.OnClick(e); }
+        protected override void OnKeyDown(System.Windows.Forms.KeyEventArgs e) { if (e.KeyCode == System.Windows.Forms.Keys.Space) OnClick(EventArgs.Empty); base.OnKeyDown(e); }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+        protected override void OnPaint(System.Windows.Forms.PaintEventArgs e)
+        {
+            var g = e.Graphics; var l = Look.Current; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(BackColor);
+            var r = new System.Drawing.RectangleF(1, 1, Width - 3, Height - 3);
+            if (on) Paths.Fill(g, r, r.Height / 2, l.Accent);
+            else using (var p = Paths.Round(r, r.Height / 2)) using (var pen = new System.Drawing.Pen(Focused ? l.Accent : l.Sub, 1.5f)) g.DrawPath(pen, p);
+            float d = r.Height - (on ? 8 : 10), x = on ? r.Right - d - 4 : r.X + 5;
+            using (var b = new System.Drawing.SolidBrush(on ? l.OnAccent : l.Sub)) g.FillEllipse(b, x, r.Y + (r.Height - d) / 2, d, d);
+        }
+    }
+
+    // A rounded button. An accent button is filled with the accent colour.
+    public class FlatButton : System.Windows.Forms.Control
+    {
+        readonly bool accent;
+        readonly float scale;
+        bool hot, down;
+        public FlatButton(string text, bool accent, float scale)
+        {
+            this.accent = accent; this.scale = scale;
+            SetStyle(System.Windows.Forms.ControlStyles.AllPaintingInWmPaint | System.Windows.Forms.ControlStyles.OptimizedDoubleBuffer | System.Windows.Forms.ControlStyles.UserPaint | System.Windows.Forms.ControlStyles.Selectable | System.Windows.Forms.ControlStyles.StandardClick, true);
+            Cursor = System.Windows.Forms.Cursors.Hand; TabStop = true;
+            Paths.Follow(this);
+            Text = text;
+        }
+        protected override void OnTextChanged(EventArgs e) { Fit(); base.OnTextChanged(e); }
+        protected override void OnFontChanged(EventArgs e) { Fit(); base.OnFontChanged(e); }
+        void Fit() { Size = new System.Drawing.Size(Math.Max((int)(76 * scale), System.Windows.Forms.TextRenderer.MeasureText(Text, Font).Width + (int)(26 * scale)), (int)(30 * scale)); Invalidate(); }
+        protected override void OnMouseEnter(EventArgs e) { hot = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hot = down = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseDown(System.Windows.Forms.MouseEventArgs e) { down = true; Invalidate(); base.OnMouseDown(e); }
+        protected override void OnMouseUp(System.Windows.Forms.MouseEventArgs e) { down = false; Invalidate(); base.OnMouseUp(e); }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+        protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+        protected override void OnKeyDown(System.Windows.Forms.KeyEventArgs e) { if (e.KeyCode == System.Windows.Forms.Keys.Space || e.KeyCode == System.Windows.Forms.Keys.Enter) OnClick(EventArgs.Empty); base.OnKeyDown(e); }
+        protected override void OnPaint(System.Windows.Forms.PaintEventArgs e)
+        {
+            var g = e.Graphics; var l = Look.Current; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+            g.Clear(BackColor);
+            var r = new System.Drawing.RectangleF(0.5f, 0.5f, Width - 2, Height - 2);
+            System.Drawing.Color fill = accent ? l.Accent : l.Field, text = accent ? l.OnAccent : l.Text;
+            if (accent && Enabled && (hot || down)) fill = Look.Mix(fill, l.Light ? System.Drawing.Color.Black : System.Drawing.Color.White, down ? 0.05f : 0.14f);
+            else if (!accent && Enabled && (hot || down)) fill = down ? l.Border : l.Hover;
+            if (!Enabled) { fill = l.Field; text = l.Sub; }
+            Paths.Fill(g, r, 6 * scale, fill);
+            if (!accent || !Enabled) Paths.Stroke(g, r, 6 * scale, Focused ? l.Accent : l.Border);
+            System.Windows.Forms.TextRenderer.DrawText(g, Text, Font, ClientRectangle, text,
+                System.Windows.Forms.TextFormatFlags.HorizontalCenter | System.Windows.Forms.TextFormatFlags.VerticalCenter | System.Windows.Forms.TextFormatFlags.SingleLine | System.Windows.Forms.TextFormatFlags.NoPrefix);
+        }
+    }
+
+    // A drop-down list whose closed box and open list are both drawn in the theme (Windows draws a light arrow box otherwise).
+    public class Dropdown : System.Windows.Forms.ComboBox
+    {
+        bool hot;
+        public Dropdown()
+        {
+            DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            DrawMode = System.Windows.Forms.DrawMode.OwnerDrawFixed;
+            FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            var l = Look.Current; BackColor = l.Field; ForeColor = l.Text;
+        }
+        protected override void OnDrawItem(System.Windows.Forms.DrawItemEventArgs e)
+        {
+            if (e.Index < 0) return;
+            var l = Look.Current;
+            bool edit = (e.State & System.Windows.Forms.DrawItemState.ComboBoxEdit) != 0, sel = (e.State & System.Windows.Forms.DrawItemState.Selected) != 0 && !edit;
+            using (var b = new System.Drawing.SolidBrush(sel ? l.Hover : l.Field)) e.Graphics.FillRectangle(b, e.Bounds);
+            System.Windows.Forms.TextRenderer.DrawText(e.Graphics, GetItemText(Items[e.Index]), Font, new System.Drawing.Rectangle(e.Bounds.X + 6, e.Bounds.Y, e.Bounds.Width - 6, e.Bounds.Height), sel ? l.Text : l.Text,
+                System.Windows.Forms.TextFormatFlags.VerticalCenter | System.Windows.Forms.TextFormatFlags.Left | System.Windows.Forms.TextFormatFlags.EndEllipsis | System.Windows.Forms.TextFormatFlags.NoPrefix);
+        }
+        protected override void OnMouseEnter(EventArgs e) { hot = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hot = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
+        protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+        protected override void WndProc(ref System.Windows.Forms.Message m)
+        {
+            base.WndProc(ref m);
+            if (m.Msg != 0x000F) return; // WM_PAINT: draw the closed box over what Windows drew
+            var l = Look.Current;
+            using (var g = System.Drawing.Graphics.FromHwnd(Handle))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using (var b = new System.Drawing.SolidBrush(Parent != null ? Parent.BackColor : l.Card)) g.FillRectangle(b, ClientRectangle);
+                var r = new System.Drawing.RectangleF(0.5f, 0.5f, Width - 2, Height - 2);
+                Paths.Fill(g, r, 6, hot && Enabled ? l.Hover : l.Field);
+                Paths.Stroke(g, r, 6, Focused ? l.Accent : l.Border);
+                System.Windows.Forms.TextRenderer.DrawText(g, SelectedIndex >= 0 ? GetItemText(SelectedItem) : "", Font, new System.Drawing.Rectangle(8, 0, Width - 36, Height), Enabled ? l.Text : l.Sub,
+                    System.Windows.Forms.TextFormatFlags.VerticalCenter | System.Windows.Forms.TextFormatFlags.Left | System.Windows.Forms.TextFormatFlags.EndEllipsis | System.Windows.Forms.TextFormatFlags.SingleLine | System.Windows.Forms.TextFormatFlags.NoPrefix);
+                Paths.Chevron(g, new System.Drawing.RectangleF(Width - 28, 0, 20, Height), l.Sub);
+            }
+        }
+    }
+
     public static class MemoryPolicy
     {
         // Preserve existing behaviour until Windows measurements justify a change.

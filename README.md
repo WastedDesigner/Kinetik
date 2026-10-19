@@ -26,6 +26,9 @@ Every stat can be switched on or off, reordered, restyled and grouped with divid
 - [Game overlay](#game-overlay)
 - [Dashboard](#dashboard)
 - [Now playing](#now-playing)
+- [Screen time](#screen-time)
+- [Timeline and Crashes](#timeline-and-crashes)
+- [Themes](#themes)
 - [Notifications](#notifications)
 - [Download and use](#download-and-use)
 - [Settings guide](#settings-guide)
@@ -170,6 +173,30 @@ Shows what's playing in Spotify, browsers and media players, with its cover art,
 - Hover for a card with the cover, artist, album, progress and playback buttons
 - Long titles scroll instead of being cut short
 
+## Screen time
+
+How long you used each app, day by day, and what each one asked of your PC. Open it from **Settings → Screen time**.
+
+- **Today, yesterday, the last 7 or 30 days, or any earlier day:** total screen time, first and last use, the most used app, the busiest hour (or day), unlocks and how many apps you used
+- **Hour by hour** for a day, or **day by day** for a range, as a bar chart. Hover a bar for its time.
+- **Apps:** each app with its icon and how long it was in front, plus the processor time, average memory and disk reads and writes it used, in front or in the background. Sort by any of them.
+- **How it counts:** Kinetik notes the app in front every 5 seconds. After 5 minutes without keyboard or mouse input it stops counting, unless a video or game fills the screen, and it doesn't count while the PC is locked. Processor, memory and disk use are added up for every app once a minute.
+- **What's kept:** app names and their exe paths only, never window titles or what's on screen. One small file a day in `%LocalAppData%\Kinetik\ScreenTime`, deleted after 400 days. Switch it off or clear it on the same page.
+
+## Timeline and Crashes
+
+Two pages in Settings that help answer "what changed?" and "why did that crash?". Everything stays on your PC.
+
+- **Timeline:** what was installed, updated, removed or switched on, day by day: apps, Windows updates, graphics, audio and network drivers, apps that start with Windows, BIOS, memory, drives, the power plan, Game Mode, hardware-accelerated GPU scheduling and Memory integrity. A **This PC now** card sums up the current Windows version, graphics driver, BIOS, memory and power plan, with when each last changed. Filter by kind or search.
+  - Windows updates and Windows Installer apps come from Windows' own logs, with their exact time. Everything else is noticed by comparing a small snapshot of the PC (in `%LocalAppData%\Kinetik\Timeline.json`) when Kinetik starts and every 3 hours, so its time is approximate (shown with a `~`). Turn it off with **Notice changes** on the same page.
+- **Crashes:** app crashes, apps that stopped responding, graphics driver resets, blue screens, sudden shutdowns and hardware (WHEA) errors from the last 60 days, read from Windows' event logs. Click one for what it means in plain words, what to try, and what changed on the PC in the 3 days before. A crash inside a graphics driver or an overlay (Steam, Discord, RivaTuner, OBS) says so. Neither page needs admin rights.
+
+## Themes
+
+**Settings → Theme** sets how Kinetik's own windows, menus and hover cards look: **Match Windows**, Graphite, OLED black, Midnight, Nord, Mocha, Forest, Light or Paper, with a Sky, Violet, Mint, Amber, Rose or Coral accent, or your Windows accent colour. The title bar follows the theme too.
+
+The theme is shared by every Kinetik app (the Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather), so picking it once changes them all. Each app's right-click menu also has **App theme**. Widget themes are separate and stay as they are.
+
 ## Notifications
 
 Kinetik can tell you when something needs attention, using Windows' own notifications (so Focus assist and Do not disturb apply). Pick them in **Settings → General → Notifications**:
@@ -202,7 +229,11 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 | **Overlay** | Turn the game overlay on, show it automatically in games, move it to the game's monitor, close it with the game, the Ctrl+Shift+F10 hotkey, lock (click-through), position, session summaries, benchmark recording (Ctrl+Shift+F11), text labels or icons, size, background opacity, and its own **Contents** list. |
 | **Dashboard** | Turn the dashboard window and web dashboard on, share the web dashboard on your network, **New link**, theme, graph length, and the **Layout** editor for cards and their stats. |
 | **Widget** | Turn the desktop widget on, and set its placement, lock, click-through and snapping, style, theme, colours, size, width, roundness, shadow, animated icons, title, headings and graph history. Its **Contents** list works like the Arrange page. |
-| **General** | Settings window background colour, update interval, shift left, left-click action, hide in fullscreen, show on all taskbars, tray icon (spinning, with a choice of backgrounds), taskbar button, desktop shortcut, warning limits, notifications, profiles and backup, run at startup, restart as administrator, and restore default settings. |
+| **Screen time** | Screen time for a day or a range, hour-by-hour or day-by-day chart, apps by screen time, processor, memory or disk, **Keep screen time** and **Clear history**. |
+| **Timeline** | What changed on this PC, day by day, a **This PC now** summary, filters, search, **Check now**, and **Notice changes**. |
+| **Crashes** | Crashes, freezes, driver resets, blue screens, sudden shutdowns and hardware errors from the last 60 days, each explained, plus a link to Windows' Reliability Monitor. |
+| **Theme** | The theme and accent colour of every Kinetik app's windows and menus. |
+| **General** | Update interval, shift left, left-click action, hide in fullscreen, show on all taskbars, tray icon (spinning, with a choice of backgrounds), taskbar button, desktop shortcut, warning limits, notifications, profiles and backup, run at startup, restart as administrator, and restore default settings. |
 | **About** | Version number, **Check for updates** (installs a newer version for you), **Include test versions**, and copyright. |
 
 ### Screenshots
@@ -226,7 +257,7 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 - **Sliders:** click one first, then use the mouse wheel or ← / → keys for fine adjustments
 - **Text labels instead of icons:** open the icon picker and choose **Text** for a compact, icon-free look
 - **Grouping:** add dividers, then pick a divider style on the Appearance page. **Blank space** gives gaps without lines.
-- **Command line:** `Kinetik.exe --settings Arrange` opens Settings on a specific page (Stats, Arrange, Appearance, Colours, Widget, Overlay, General or About)
+- **Command line:** `Kinetik.exe --settings Arrange` opens Settings on a specific page (Stats, Arrange, Appearance, Colours, Widget, Overlay, Dashboard, Screen time, Timeline, Crashes, Theme, General or About; put "Screen time" in quotes)
 
 ## CPU temperature
 
