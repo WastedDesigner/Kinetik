@@ -49,7 +49,8 @@ using Microsoft.Win32;
 // ======================================================================= Settings
 class Settings
 {
-    public const string Key = @"Software\Kinetik", LegacyKey = @"Software\PCStatsBar";
+    public const string Key = @"Software\KinetikStats";
+    public static readonly string[] LegacyKeys = { @"Software\Kinetik", @"Software\PCStatsBar" }; // before 3.3, and before 2.0
     public const int CurrentVersion = 2;
     public int SettingsVersion = CurrentVersion;
 
@@ -599,7 +600,7 @@ class FpsMeter
     [DllImport("advapi32.dll")] static extern int CloseTrace(ulong handle);
     delegate void RecordCallback(IntPtr record);
 
-    const string SessionName = "Kinetik FPS";
+    const string SessionName = "KinetikStats FPS";
     static readonly Guid Dxgi = new Guid("ca11c036-0102-4a2d-a6ad-f03cfed5d3c9");
     static readonly Guid D3d9 = new Guid("783aca0a-790e-4d7f-8451-aa850511c6b9");
     static readonly Guid DxgKrnl = new Guid("802ec45a-1e99-4b83-9920-87c98277ba9d");
@@ -1247,7 +1248,7 @@ class Sampler
         {
             System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
             var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create("https://api.ipify.org");
-            req.UserAgent = "Kinetik";
+            req.UserAgent = "KinetikStats";
             req.Timeout = req.ReadWriteTimeout = 8000;
             using (var resp = req.GetResponse())
             using (var rd = new StreamReader(resp.GetResponseStream()))
@@ -1408,7 +1409,7 @@ class Sampler
             sensors = hw;
             lhmGpus = hw.GpuNames;
         }
-        catch (IOException) { sensorStatus = "unavailable – keep the lib folder next to Kinetik.exe"; sensorsFailed = true; }
+        catch (IOException) { sensorStatus = "unavailable – keep the lib folder next to KinetikStats.exe"; sensorsFailed = true; }
         catch (Exception e) { sensorStatus = "unavailable (" + e.Message + ")"; sensorsFailed = true; }
     }
 
@@ -2239,7 +2240,8 @@ static class Stats
 // ======================================================================= Program
 static class Program
 {
-    public const string AppName = "Kinetik", LegacyName = "PCStatsBar";
+    public const string AppName = "KinetikStats", ExeName = AppName + ".exe";
+    public static readonly string[] LegacyNames = { "Kinetik", "PCStatsBar" }; // startup entries and tasks of earlier versions
     public static readonly bool IsAdmin = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
 
     // LibreHardwareMonitor reads CPU temperature and power through the PawnIO kernel driver.
@@ -2264,6 +2266,7 @@ static class Program
         try { SetDefaultDllDirectories(0x800); } catch { } // LOAD_LIBRARY_SEARCH_SYSTEM32
         AppDomain.CurrentDomain.AssemblyResolve += ResolveLib;
         Updates.CleanUp();
+        if (RunUnderNewName(args)) return;
         bool created;
         MigrateLegacy();
         string signal = AppName + (args.Contains("--dashboard") ? ".Dashboard" : ".Show");
@@ -2298,7 +2301,7 @@ static class Program
                 string page = si + 1 < args.Length && !args[si + 1].StartsWith("--") ? args[si + 1] : null;
                 bar.Load += (s, e) => bar.BeginInvoke((Action)(() => bar.OpenSettings(page)));
             }
-            using (new KinetikSuite.Shutdown("Kinetik", () => { bar.Close(); Application.Exit(); }))
+            using (new KinetikSuite.Shutdown(AppName, () => { bar.Close(); Application.Exit(); }))
                 Application.Run(bar);
         }
     }
@@ -2308,12 +2311,56 @@ static class Program
     public static void Log(Exception e)
     {
         if (IsAdmin) return;
-        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "Kinetik.log"), DateTime.Now + " " + e + Environment.NewLine); } catch { }
+        try { File.AppendAllText(Path.Combine(Path.GetTempPath(), "KinetikStats.log"), DateTime.Now + " " + e + Environment.NewLine); } catch { }
     }
 
     // "Kinetik settings.kinetik" next to the exe: a backup that stays with the app folder, so it survives a Windows
     // reinstall as long as the folder is kept. Run from Program Files, that's C:\Program Files\Kinetik.
-    public static string FolderBackup { get { return Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "Kinetik settings.kinetik"); } }
+    public static string FolderBackup { get { return Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "Kinetik Stats settings.kinetik"); } }
+    static string LegacyFolderBackup { get { return Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "Kinetik settings.kinetik"); } }
+
+    // An update from Kinetik 3.2 or earlier arrives as Kinetik.exe. It copies itself to KinetikStats.exe beside it and
+    // starts that instead, so the app, its startup entry and its taskbar name all use the new name from then on.
+    static bool RunUnderNewName(string[] args)
+    {
+        var me = Application.ExecutablePath;
+        if (!Path.GetFileName(me).Equals("Kinetik.exe", StringComparison.OrdinalIgnoreCase)) return false;
+        try
+        {
+            var target = Path.Combine(Path.GetDirectoryName(me), ExeName);
+            Version mine, theirs;
+            if (!File.Exists(target) || !Version.TryParse(FileVersionInfo.GetVersionInfo(target).FileVersion, out theirs) ||
+                (Version.TryParse(FileVersionInfo.GetVersionInfo(me).FileVersion, out mine) && (mine > theirs || (mine == theirs && Sha256(me) != Sha256(target)))))
+                File.Copy(me, target, true);
+            Process.Start(new ProcessStartInfo(target, string.Join(" ", args.Select(a => "\"" + a.Replace("\"", "") + "\""))) { UseShellExecute = false });
+            return true;
+        }
+        catch (Exception e) { Log(e); return false; } // can't write here: keep running under the old name
+    }
+
+    // Moves a file or folder from its pre-3.3 place to its new one, unless the new one already exists.
+    static void Carry(string from, string to)
+    {
+        try
+        {
+            if (Directory.Exists(from) && !Directory.Exists(to)) { Directory.CreateDirectory(Path.GetDirectoryName(to)); Directory.Move(from, to); }
+            else if (File.Exists(from) && !File.Exists(to)) { Directory.CreateDirectory(Path.GetDirectoryName(to)); File.Move(from, to); }
+        }
+        catch (Exception e) { Log(e); }
+    }
+
+    // The data Kinetik 3.2 and earlier kept under the Kinetik name. Recovery and Diagnostics in %LocalAppData%\Kinetik
+    // belong to the whole Kinetik suite and stay.
+    static void CarryData()
+    {
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        Carry(Path.Combine(local, "Kinetik", "Timeline.json"), PcHistoryPath);
+        Carry(Path.Combine(local, "Kinetik", "ScreenTime"), ScreenTime.Dir);
+        Carry(Path.Combine(roaming, "Kinetik", "Profiles"), Profiles.Dir);
+        Carry(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Kinetik"), GameWatch.DataDir);
+        Carry(LegacyFolderBackup, FolderBackup);
+    }
+    static string PcHistoryPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KinetikStats", "Timeline.json"); } }
 
     // A fresh Windows has no saved settings ("Order" is always written by Settings.Save), so offer the folder backup.
     static void OfferFolderRestore()
@@ -2338,7 +2385,7 @@ static class Program
     }
 
     // Returns memory the app no longer needs to Windows (after startup, closing Settings, or unloading sensors).
-    public static void TrimMemory() { KinetikSuite.MemoryPolicy.Measure("Kinetik", TrimMemoryCore); }
+    public static void TrimMemory() { KinetikSuite.MemoryPolicy.Measure(AppName, TrimMemoryCore); }
 
     static void TrimMemoryCore()
     {
@@ -2436,7 +2483,7 @@ static class Program
     public static string SystemExe(string name) { return Path.Combine(Environment.SystemDirectory, name); }
 
     static string InstallDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), AppName); } }
-    public static string InstalledExe { get { return Path.Combine(InstallDir, AppName + ".exe"); } }
+    public static string InstalledExe { get { return Path.Combine(InstallDir, ExeName); } }
 
     static bool SamePath(string a, string b)
     {
@@ -2476,23 +2523,57 @@ static class Program
     {
         try
         {
-            using (var old = Registry.CurrentUser.OpenSubKey(Settings.LegacyKey))
-                if (old != null && Registry.CurrentUser.OpenSubKey(Settings.Key) == null)
-                    using (var k = Registry.CurrentUser.CreateSubKey(Settings.Key))
-                        foreach (var n in old.GetValueNames()) k.SetValue(n, old.GetValue(n), old.GetValueKind(n));
+            // Settings: copied from the newest old key there is, once.
+            if (Registry.CurrentUser.OpenSubKey(Settings.Key) == null)
+                foreach (var legacy in Settings.LegacyKeys)
+                    using (var old = Registry.CurrentUser.OpenSubKey(legacy))
+                        if (old != null)
+                        {
+                            using (var k = Registry.CurrentUser.CreateSubKey(Settings.Key))
+                                foreach (var n in old.GetValueNames()) k.SetValue(n, old.GetValue(n), old.GetValueKind(n));
+                            break;
+                        }
+            CarryData();
             using (var k = Registry.CurrentUser.CreateSubKey(Settings.Key))
             {
-                if (Convert.ToInt32(k.GetValue("LegacyStartupMoved", 0)) == 1) return;
-                bool wanted = false;
-                using (var run = Registry.CurrentUser.CreateSubKey(RunKey))
-                    if (run.GetValue(LegacyName) != null) { run.DeleteValue(LegacyName, false); wanted = true; }
-                bool oldTask = TaskCommand(LegacyName) != null;
-                if (oldTask && IsAdmin) { DeleteTask(LegacyName); wanted = true; oldTask = false; }
+                if (Convert.ToInt32(k.GetValue("StartupMovedToKinetikStats", 0)) == 1) return;
+                // Startup: the old Run entries and logon tasks go, and run at startup is set up again under the new name.
+                // Deleting an old elevated task needs admin, so until Kinetik Stats runs as administrator it's left to start the old copy.
+                bool wanted = false, oldTask = false;
+                foreach (var name in LegacyNames)
+                {
+                    using (var run = Registry.CurrentUser.CreateSubKey(RunKey))
+                        if (run.GetValue(name) != null) { run.DeleteValue(name, false); wanted = true; }
+                    if (TaskCommand(name) != null)
+                    {
+                        if (IsAdmin) { DeleteTask(name); wanted = true; }
+                        else oldTask = true;
+                    }
+                }
+                if (oldTask) return;
                 if (wanted) SetStartup(true);
-                if (!oldTask) k.SetValue("LegacyStartupMoved", 1);
+                RemoveLegacyInstall();
+                k.SetValue("StartupMovedToKinetikStats", 1);
             }
         }
         catch { }
+    }
+
+    // The copy Kinetik 3.2 and earlier kept in Program Files\Kinetik for its elevated startup task: only its own files go.
+    static void RemoveLegacyInstall()
+    {
+        if (!IsAdmin) return;
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Kinetik");
+        if (!Directory.Exists(dir) || SamePath(Path.GetDirectoryName(Application.ExecutablePath), dir)) return;
+        try
+        {
+            foreach (var exe in new[] { "Kinetik.exe", ExeName }) { var f = Path.Combine(dir, exe); if (File.Exists(f)) File.Delete(f); }
+            var lib = Path.Combine(dir, "lib");
+            foreach (var name in LibHashes.Keys) { var f = Path.Combine(lib, name + ".dll"); if (File.Exists(f)) File.Delete(f); }
+            if (Directory.Exists(lib) && !Directory.EnumerateFileSystemEntries(lib).Any()) Directory.Delete(lib);
+            if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
+        }
+        catch (Exception e) { Log(e); }
     }
 
     // Runs at every start with admin rights: moves an elevated startup task that points at an unprotected exe
@@ -2750,6 +2831,8 @@ class StatsBar : Form
         Cfg.Load();
         Theme.Migrate(Cfg.AppBackground);
         Theme.Use();
+        if (File.Exists(Shortcuts.LegacyDesktopPath))
+            try { File.Delete(Shortcuts.LegacyDesktopPath); Shortcuts.CreateDesktop(Cfg.TrayStyle); } catch (Exception e) { Program.Log(e); }
         PcHistory.Start(() => Cfg.TrackChanges);
         ScreenTime.Start(() => Cfg.TrackScreenTime);
 
@@ -4102,7 +4185,7 @@ class GameWatch
     readonly StatsBar bar;
     Settings c { get { return bar.Cfg; } }
     // Documents\Kinetik: Sessions.csv, and recorded benchmarks in Benchmarks.
-    public static string DataDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Kinetik"); } }
+    public static string DataDir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Kinetik Stats"); } }
     public static string BenchDir { get { return Path.Combine(DataDir, "Benchmarks"); } }
 
     public GameWatch(StatsBar bar) { this.bar = bar; }
@@ -5909,7 +5992,7 @@ static class PcHistory
     [DllImport("powrprof.dll")] static extern uint PowerReadFriendlyName(IntPtr root, IntPtr scheme, IntPtr sub, IntPtr setting, byte[] buffer, ref uint size);
     [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr p);
 
-    static string FilePath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik", "Timeline.json"); } }
+    static string FilePath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KinetikStats", "Timeline.json"); } }
 
     // Looks a minute after starting, then every 3 hours, while Settings → Timeline → Notice changes is on.
     public static void Start(Func<bool> enabled)
@@ -6640,7 +6723,7 @@ static class ScreenTime
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc proc, IntPtr l);
     const uint QueryLimited = 0x1000; // PROCESS_QUERY_LIMITED_INFORMATION
 
-    public static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik", "ScreenTime"); } }
+    public static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KinetikStats", "ScreenTime"); } }
 
     // Watches while Settings → Screen time → Keep screen time is on.
     public static void Start(Func<bool> on)
@@ -6945,9 +7028,9 @@ static class ScreenTime
 // opens the release page in the browser, where the user downloads it themselves.
 static class Updates
 {
-    const string Repo = "https://api.github.com/repos/WastedDesigner/Kinetik/releases";
-    const string Page = "https://github.com/WastedDesigner/Kinetik/releases/latest";
-    const string Downloads = "https://github.com/WastedDesigner/Kinetik/releases/download/";
+    const string Repo = "https://api.github.com/repos/WastedDesigner/KinetikStats/releases";
+    const string Page = "https://github.com/WastedDesigner/KinetikStats/releases/latest";
+    const string Downloads = "https://github.com/WastedDesigner/KinetikStats/releases/download/";
 
     public class Release
     {
@@ -6999,7 +7082,7 @@ static class Updates
     {
         System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
         var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
-        req.UserAgent = "Kinetik/" + Current;
+        req.UserAgent = "KinetikStats/" + Current;
         req.Accept = accept;
         req.Timeout = req.ReadWriteTimeout = 15000;
         using (var resp = req.GetResponse())
@@ -7016,7 +7099,7 @@ static class Updates
     {
         System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
         var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
-        req.UserAgent = "Kinetik/" + Current;
+        req.UserAgent = "KinetikStats/" + Current;
         req.Timeout = req.ReadWriteTimeout = 30000;
         using (var resp = (System.Net.HttpWebResponse)req.GetResponse())
         {
@@ -7050,14 +7133,14 @@ static class Updates
                     if (!Parse(d["tag_name"] as string, out v, out suf)) continue;
                     var r = new Release { Version = v, Suffix = suf, Tag = (string)d["tag_name"], Url = d["html_url"] as string ?? Page };
                     var notes = d.ContainsKey("body") ? d["body"] as string ?? "" : "";
-                    var m = Regex.Match(notes, @"SHA-256 of `Kinetik\.exe`:?\*?\*?\s*`([0-9A-Fa-f]{64})`");
+                    var m = Regex.Match(notes, @"SHA-256 of `KinetikStats\.exe`:?\*?\*?\s*`([0-9A-Fa-f]{64})`");
                     if (m.Success) r.ExeSha = m.Groups[1].Value.ToUpperInvariant();
                     var assets = d.ContainsKey("assets") ? d["assets"] as object[] : null;
                     if (assets != null)
                         foreach (Dictionary<string, object> a in assets)
                         {
                             var url = a["browser_download_url"] as string;
-                            if ((a["name"] as string) == "Kinetik.zip" && url != null && url.StartsWith(Downloads + r.Tag + "/")) r.ZipUrl = url;
+                            if ((a["name"] as string) == "KinetikStats.zip" && url != null && url.StartsWith(Downloads + r.Tag + "/")) r.ZipUrl = url;
                         }
                     if (best == null || Compare(r.Version, r.Suffix, best.Version, best.Suffix) > 0) best = r;
                 }
@@ -7070,7 +7153,7 @@ static class Updates
 
     static readonly Regex LibEntry = new Regex(@"^lib/([A-Za-z0-9.\-_]+\.dll)$");
 
-    // Downloads the release's zip into memory, checks Kinetik.exe against the SHA-256 in its release notes, and
+    // Downloads the release's zip into memory, checks KinetikStats.exe against the SHA-256 in its release notes, and
     // stages and flushes the complete replacement set before moving installed files.
     // Previous files are retained in Old Versions, and incomplete installations roll back. done(error) runs on the UI thread; on success Kinetik restarts.
     public static void Install(Release r, Action<string> done, Control owner)
@@ -7080,8 +7163,8 @@ static class Updates
             string err = null;
             try
             {
-                if (r.ZipUrl == null) throw new IOException("This release has no Kinetik.zip to install from.");
-                if (r.ExeSha == null) throw new IOException("This release doesn't list a checksum for Kinetik.exe, so it can't be checked.");
+                if (r.ZipUrl == null) throw new IOException("This release has no KinetikStats.zip to install from.");
+                if (r.ExeSha == null) throw new IOException("This release doesn't list a checksum for KinetikStats.exe, so it can't be checked.");
                 var zip = GetBytes(r.ZipUrl, 64 << 20);
                 var files = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
                 long expanded = 0;
@@ -7090,7 +7173,7 @@ static class Updates
                     {
                         var name = en.FullName.Replace('\\', '/');
                         if (name.EndsWith("/")) continue;
-                        if (name != "Kinetik.exe" && name != "LICENSE" && !LibEntry.IsMatch(name)) continue; // nothing else is written
+                        if (name != Program.ExeName && name != "LICENSE" && !LibEntry.IsMatch(name)) continue; // nothing else is written
                         expanded += en.Length;
                         if (expanded > (128 << 20) || files.ContainsKey(name)) throw new IOException("Invalid or oversized release archive");
                         if (en.Length > 32 << 20) throw new IOException(name + " is too large");
@@ -7103,10 +7186,10 @@ static class Updates
                         }
                     }
                 byte[] exe;
-                if (!files.TryGetValue("Kinetik.exe", out exe)) throw new IOException("The download doesn't contain Kinetik.exe.");
+                if (!files.TryGetValue(Program.ExeName, out exe)) throw new IOException("The download doesn't contain KinetikStats.exe.");
                 using (var sha = System.Security.Cryptography.SHA256.Create())
                     if (BitConverter.ToString(sha.ComputeHash(exe)).Replace("-", "") != r.ExeSha)
-                        throw new IOException("The downloaded Kinetik.exe doesn't match the checksum in the release notes. Nothing was changed.");
+                        throw new IOException("The downloaded KinetikStats.exe doesn't match the checksum in the release notes. Nothing was changed.");
 
                 string dir = Path.GetDirectoryName(Application.ExecutablePath);
                 var backup = Path.Combine(dir, "Old Versions", "update-" + DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
@@ -7119,7 +7202,7 @@ static class Updates
                 owner.BeginInvoke((Action)(() =>
                 {
                     if (err != null) { done(err); return; }
-                    try { Process.Start(new ProcessStartInfo(Application.ExecutablePath, "--restart") { UseShellExecute = false }); }
+                    try { Process.Start(new ProcessStartInfo(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), Program.ExeName), "--restart") { UseShellExecute = false }); }
                     catch (Exception ex) { done("The update was installed, but restart failed: " + ex.Message); return; }
                     Application.Exit();
                 }));
@@ -7140,7 +7223,7 @@ static class Updates
 
     public static void OpenUrl(string url)
     {
-        if (!url.StartsWith("https://github.com/WastedDesigner/Kinetik/")) url = Page;
+        if (!url.StartsWith("https://github.com/WastedDesigner/KinetikStats/")) url = Page;
         try { Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "\"" + url + "\"")); }
         catch { }
     }
@@ -7150,11 +7233,11 @@ static class Updates
 // Settings as text: one "Name=value" line per setting, the same values as in the registry.
 static class Profiles
 {
-    public static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Kinetik", "Profiles"); } }
+    public static string Dir { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "KinetikStats", "Profiles"); } }
 
     public static string Export(Settings c)
     {
-        var sb = new StringBuilder("# Kinetik settings " + Updates.Current + "\r\n");
+        var sb = new StringBuilder("# Kinetik Stats settings " + Updates.Current + "\r\n");
         foreach (var f in typeof(Settings).GetFields(BindingFlags.Public | BindingFlags.Instance))
         {
             if (f.Name == "WebKey") continue; // a profile may be shared; the dashboard link's secret stays on this PC
@@ -7366,12 +7449,13 @@ static class Shortcuts
 {
     [DllImport("shell32.dll")] static extern void SHChangeNotify(int ev, int flags, IntPtr a, IntPtr b);
 
-    public static string DesktopPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kinetik.lnk"); } }
+    public static string DesktopPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kinetik Stats.lnk"); } }
+    public static string LegacyDesktopPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kinetik.lnk"); } }
 
     // A multi-size .ico of the fan logo in the chosen colour, for the shortcut (the exe's own icon is fixed at build time).
     static string IconFile(int style)
     {
-        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kinetik");
+        var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KinetikStats");
         Directory.CreateDirectory(dir);
         if ((new DirectoryInfo(dir).Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Icon folder is redirected");
         var path = Path.Combine(dir, "icon-" + style + ".v2.ico");
@@ -12341,9 +12425,9 @@ class SettingsForm : Form
 
         Header("Sessions and benchmarks");
         Switch(Icons.List, Theme.Accent, "Session summary", "SessionSummary", "When a game closes: play time, average FPS, 1% low and peak temperatures, saved to a log. Needs admin.");
-        Add(Icons.List, Theme.Accent, "Session log", "Documents\\Kinetik\\Sessions.csv: one line per game session of a minute or more", Btn("Open folder", (s, e) => { Directory.CreateDirectory(GameWatch.DataDir); GameWatch.OpenFolder(GameWatch.DataDir); }));
+        Add(Icons.List, Theme.Accent, "Session log", "Documents\\Kinetik Stats\\Sessions.csv: one line per game session of a minute or more", Btn("Open folder", (s, e) => { Directory.CreateDirectory(GameWatch.DataDir); GameWatch.OpenFolder(GameWatch.DataDir); }));
         Switch(Icons.Bolt, Theme.Accent, "Hotkey: Ctrl+Shift+F11", "BenchHotkey", "Starts and stops recording a benchmark: every stat, each update, to a CSV file");
-        Add(Icons.Pulse, Theme.Accent, "Benchmarks", "Saved in Documents\\Kinetik\\Benchmarks", Btn("Open folder", (s, e) => { Directory.CreateDirectory(GameWatch.BenchDir); GameWatch.OpenFolder(GameWatch.BenchDir); }));
+        Add(Icons.Pulse, Theme.Accent, "Benchmarks", "Saved in Documents\\Kinetik Stats\\Benchmarks", Btn("Open folder", (s, e) => { Directory.CreateDirectory(GameWatch.BenchDir); GameWatch.OpenFolder(GameWatch.BenchDir); }));
 
         Header("Look");
         Add(Icons.Text, Theme.Accent, "Labels", null,
@@ -12582,7 +12666,7 @@ class SettingsForm : Form
         var backupTools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
         backupTools.Controls.Add(Btn("Back up…", (s, e) =>
         {
-            using (var dlg = new SaveFileDialog { Filter = "Kinetik Stats settings (*.kinetik)|*.kinetik", FileName = "Kinetik settings.kinetik" })
+            using (var dlg = new SaveFileDialog { Filter = "Kinetik Stats settings (*.kinetik)|*.kinetik", FileName = "Kinetik Stats settings.kinetik" })
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                     try { c.Save(); File.WriteAllText(dlg.FileName, Profiles.Export(c)); }
                     catch (Exception ex) { MessageBox.Show(this, "Couldn't save the backup.\n\n" + ex.Message, "Kinetik Stats", MessageBoxButtons.OK, MessageBoxIcon.Warning); }

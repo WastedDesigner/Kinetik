@@ -1,6 +1,6 @@
 param([Parameter(Mandatory=$true)][string]$App)
 $ErrorActionPreference = 'Stop'
-if ($App -in @('Kinetik', 'KinetikScreen')) { Write-Host "$App hardware integration requires a manual Windows check; no demo mode is available."; exit 0 }
+if ($App -in @('Kinetik', 'KinetikStats', 'KinetikScreen')) { Write-Host "$App hardware integration requires a manual Windows check; no demo mode is available."; exit 0 }
 $exe = Join-Path (Split-Path -Parent $PSScriptRoot) ($App + '.exe')
 $process = Start-Process -FilePath $exe -ArgumentList '--demo' -PassThru -WindowStyle Hidden
 try {
