@@ -1,6 +1,6 @@
 # Kinetik Stats: taskbar system monitor, FPS counter and game overlay for Windows
 
-![Kinetik Stats: the taskbar bar, game overlay and desktop widget](screenshots/social-preview.png)
+![Kinetik Stats: the taskbar bar, game overlay, desktop widget and Settings window](screenshots/social-preview.png)
 
 [![Latest release](https://img.shields.io/github/v/release/WastedDesigner/Kinetik?label=download)](../../releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/WastedDesigner/Kinetik/total)](../../releases)
