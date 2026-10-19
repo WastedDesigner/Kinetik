@@ -1,3 +1,15 @@
+# Kinetik Stats v4.0.0
+
+Kinetik is now the name of the suite of Kinetik apps, and this app is Kinetik Stats.
+
+- **New name:** Kinetik is now the name of the suite, and this app is **Kinetik Stats**: `KinetikStats.exe`, settings in `HKCU\Software\KinetikStats`, a `KinetikStats` startup task and `C:\Program Files\KinetikStats`. Updating carries everything over by itself; the old startup task is replaced the first time it runs as administrator.
+- **Redesigned Settings:** grouped sidebar, page titles, settings that join into cards, and themed drop-downs, buttons and text boxes.
+- **Themes** for the windows of every Kinetik app ([see above](#themes)), and new **OLED black**, **Mocha** and **Match app theme** widget themes.
+- **Screen time:** daily screen time per app with processor, memory and disk use ([see above](#screen-time)).
+- **Timeline** of what changed on the PC, and **Crashes** explained in plain words ([see above](#timeline-and-crashes)).
+- **Restart as administrator** always closes the old copy, and a new **Graphite glass** app icon (the tray icon is unchanged).
+
+
 # Kinetik v3.1.3
 
 A fix for the Settings window.

@@ -1281,7 +1281,7 @@ namespace KinetikSuite
                 var r = new System.Drawing.RectangleF(0.5f, 0.5f, Width - 2, Height - 2);
                 Paths.Fill(g, r, 6, hot && Enabled ? l.Hover : l.Field);
                 Paths.Stroke(g, r, 6, Focused && ShowFocusCues ? l.Accent : l.Border);
-                System.Windows.Forms.TextRenderer.DrawText(g, SelectedIndex >= 0 ? GetItemText(SelectedItem) : "", Font, new System.Drawing.Rectangle(8, 0, Width - 36, Height), Enabled ? l.Text : l.Sub,
+                System.Windows.Forms.TextRenderer.DrawText(g, SelectedIndex >= 0 ? GetItemText(SelectedItem) : "", Font, new System.Drawing.Rectangle(8, 0, Width - 42, Height), Enabled ? l.Text : l.Sub,
                     System.Windows.Forms.TextFormatFlags.VerticalCenter | System.Windows.Forms.TextFormatFlags.Left | System.Windows.Forms.TextFormatFlags.EndEllipsis | System.Windows.Forms.TextFormatFlags.SingleLine | System.Windows.Forms.TextFormatFlags.NoPrefix);
                 Paths.Chevron(g, new System.Drawing.RectangleF(Width - 28, 0, 20, Height), l.Sub);
             }

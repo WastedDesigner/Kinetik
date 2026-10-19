@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik Stats")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("3.2.0.0")]
-[assembly: AssemblyFileVersion("3.2.0.0")]
-[assembly: AssemblyInformationalVersion("3.2.0")]
+[assembly: AssemblyVersion("4.0.0.0")]
+[assembly: AssemblyFileVersion("4.0.0.0")]
+[assembly: AssemblyInformationalVersion("4.0.0")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -50,7 +50,7 @@ using Microsoft.Win32;
 class Settings
 {
     public const string Key = @"Software\KinetikStats";
-    public static readonly string[] LegacyKeys = { @"Software\Kinetik", @"Software\PCStatsBar" }; // before 3.3, and before 2.0
+    public static readonly string[] LegacyKeys = { @"Software\Kinetik", @"Software\PCStatsBar" }; // before 4.0, and before 2.0
     public const int CurrentVersion = 2;
     public int SettingsVersion = CurrentVersion;
 
@@ -2338,7 +2338,7 @@ static class Program
         catch (Exception e) { Log(e); return false; } // can't write here: keep running under the old name
     }
 
-    // Moves a file or folder from its pre-3.3 place to its new one, unless the new one already exists.
+    // Moves a file or folder from its pre-4.0 place to its new one, unless the new one already exists.
     static void Carry(string from, string to)
     {
         try
@@ -7037,9 +7037,9 @@ static class ScreenTime
 // opens the release page in the browser, where the user downloads it themselves.
 static class Updates
 {
-    const string Repo = "https://api.github.com/repos/WastedDesigner/KinetikStats/releases";
-    const string Page = "https://github.com/WastedDesigner/KinetikStats/releases/latest";
-    const string Downloads = "https://github.com/WastedDesigner/KinetikStats/releases/download/";
+    const string Repo = "https://api.github.com/repos/WastedDesigner/Kinetik/releases";
+    const string Page = "https://github.com/WastedDesigner/Kinetik/releases/latest";
+    const string Downloads = "https://github.com/WastedDesigner/Kinetik/releases/download/";
 
     public class Release
     {
@@ -7232,7 +7232,7 @@ static class Updates
 
     public static void OpenUrl(string url)
     {
-        if (!url.StartsWith("https://github.com/WastedDesigner/KinetikStats/")) url = Page;
+        if (!url.StartsWith("https://github.com/WastedDesigner/Kinetik/")) url = Page;
         try { Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "\"" + url + "\"")); }
         catch { }
     }
@@ -10015,7 +10015,7 @@ static class Theme
         Text = l.Text; Sub = l.Sub; Accent = l.Accent; OnAccent = l.OnAccent; WarnText = l.Warn; Light = l.Light;
     }
 
-    // Before 3.3 the settings window had its own background colour (Settings.AppBackground). The first time, carry it over to the suite theme.
+    // Before 4.0 the settings window had its own background colour (Settings.AppBackground). The first time, carry it over to the suite theme.
     public static void Migrate(int background)
     {
         if (KinetikSuite.Look.Saved || background <= 0 || background >= Backgrounds.Length) return;
@@ -10070,6 +10070,14 @@ static class Theme
         float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, a = 4.5f;
         using (var p = new Pen(col, 1.8f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
         { g.DrawLine(p, cx - a, cy - a, cx + a, cy + a); g.DrawLine(p, cx - a, cy + a, cx + a, cy - a); }
+    }
+
+    // A number box in the theme's colours: its text part and its arrows too.
+    public static void Number(NumericUpDown n)
+    {
+        n.BackColor = Field; n.ForeColor = Text; n.BorderStyle = BorderStyle.FixedSingle;
+        foreach (Control k in n.Controls) { k.BackColor = Field; k.ForeColor = Text; }
+        if (n.Controls.Count > 0) KinetikSuite.Look.Current.ScrollBars(n.Controls[0]); // dark arrow buttons in a dark theme
     }
 
     // Controls whose corners show what's behind them take their parent's background colour.
@@ -10386,7 +10394,7 @@ class Picker : Control
         Theme.FillRound(g, r, 6, hot && Enabled ? Theme.CardHover : Theme.Field);
         Theme.StrokeRound(g, r, 6, Focused ? Theme.Accent : Theme.Border, 1);
         var text = items.Length == 0 ? "" : items[sel];
-        TextRenderer.DrawText(g, text, Font, new Rectangle(10, 0, Width - 34, Height), Enabled ? Theme.Text : Theme.Sub,
+        TextRenderer.DrawText(g, text, Font, new Rectangle(10, 0, Width - 42, Height), Enabled ? Theme.Text : Theme.Sub,
             TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding);
         Theme.Chevron(g, new RectangleF(Width - 28, 0, 20, Height), false, Theme.Sub);
     }
@@ -11736,6 +11744,7 @@ class SettingsForm : Form
         Add(Icons.Monitor, c.MiscColor, "Where", "The left corner keeps it apart from your stats. It needs centred taskbar icons; otherwise it joins the stats.",
             Combo(new[] { "Left corner of the taskbar", "With the other stats" }, c.NowPlayingCorner ? 0 : 1, i => { c.NowPlayingCorner = i == 0; Apply(); }, 200));
         var shift = new NumericUpDown { Minimum = 0, Maximum = 3000, Increment = 10, Value = Math.Max(0, Math.Min(3000, c.NowPlayingOffset)), Width = 90, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle };
+        Theme.Number(shift);
         shift.ValueChanged += (s, e) => { c.NowPlayingOffset = (int)shift.Value; Apply(); };
         Add(Icons.Spacing, c.MiscColor, "Shift right", "Pixels from the corner, e.g. to clear the Widgets button", shift);
     }
@@ -11913,9 +11922,14 @@ class SettingsForm : Form
                     if (best < 0 || (w >= size ? (bestSize < size || w < bestSize) : w > bestSize && bestSize < size)) { best = i; bestSize = w; }
                 }
                 int len = BitConverter.ToInt32(b, 6 + 16 * best + 8), off = BitConverter.ToInt32(b, 6 + 16 * best + 12);
-                using (var ms = new MemoryStream(b, off, len))
-                using (var img = Image.FromStream(ms))
-                    return new Bitmap(img);
+                // A PNG entry loads as it is; a classic bitmap entry goes through Icon, which keeps its transparency.
+                if (len > 8 && b[off] == 0x89 && b[off + 1] == (byte)'P')
+                    using (var ms = new MemoryStream(b, off, len))
+                    using (var img = Image.FromStream(ms))
+                        return new Bitmap(img);
+                using (var ms = new MemoryStream(b))
+                using (var ic = new Icon(ms, bestSize, bestSize))
+                    return ic.ToBitmap();
             }
         }
         catch { return null; }
@@ -12567,6 +12581,7 @@ class SettingsForm : Form
         lan.Changed += (s, e) => { c.WebLan = lan.On; Apply(); BeginInvoke((Action)RefreshPage); };
         Add(Icons.Wifi, Theme.Accent, "Allow other devices on my network", "Phones, tablets and PCs on the same network can open it with the link below. Windows may ask to let Kinetik Stats through its firewall.", lan);
         var port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = Math.Max(1024, Math.Min(65535, c.WebPort)), Width = 90, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle };
+        Theme.Number(port);
         port.ValueChanged += (s, e) => { c.WebPort = (int)port.Value; Apply(); };
         Add(Icons.Spacing, Theme.Accent, "Port", "Change it if another app already uses this one", port);
         if (!c.WebDashboard) return;
@@ -12607,6 +12622,7 @@ class SettingsForm : Form
         Add(Icons.Gauge, Theme.Accent, "Update interval", "Slower updates use less CPU",
             Combo(intervals.Select(i => (i / 1000.0) + " s").ToArray(), Array.IndexOf(intervals, c.Interval), i => { c.Interval = intervals[i]; Apply(); }, 110));
         var off = new NumericUpDown { Minimum = 0, Maximum = 3000, Increment = 10, Value = Math.Max(0, Math.Min(3000, c.Offset)), Width = 90, BackColor = Theme.CardHover, ForeColor = Theme.Text, BorderStyle = BorderStyle.FixedSingle };
+        Theme.Number(off);
         off.ValueChanged += (s, e) => { c.Offset = (int)off.Value; Apply(); };
         Add(Icons.Spacing, Theme.Accent, "Shift left", "Pixels between the bar and the tray icons", off);
         Switch(Icons.Chip, Theme.Accent, "Left-click opens Task Manager", "ClickTaskMgr");

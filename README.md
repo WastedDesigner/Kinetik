@@ -2,9 +2,9 @@
 
 ![Kinetik Stats: the taskbar bar, game overlay and desktop widget](screenshots/social-preview.png)
 
-[![Latest release](https://img.shields.io/github/v/release/WastedDesigner/KinetikStats?label=download)](../../releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/WastedDesigner/KinetikStats/total)](../../releases)
-[![License: GPL v3](https://img.shields.io/github/license/WastedDesigner/KinetikStats)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/WastedDesigner/Kinetik?label=download)](../../releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/WastedDesigner/Kinetik/total)](../../releases)
+[![License: GPL v3](https://img.shields.io/github/license/WastedDesigner/Kinetik)](LICENSE)
 ![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4)
 
 **Kinetik Stats** is a free, open-source system monitor for the Windows 11 and Windows 10 taskbar, with a game overlay and an FPS counter. It shows live **CPU and GPU temperature, usage, clock speed and power draw**, **RAM**, **network upload and download speed**, **ping**, **disk activity**, and **Bluetooth headphone and controller battery levels**, right next to the system tray.
@@ -19,7 +19,7 @@ Every stat can be switched on or off, reordered, restyled and grouped with divid
 
 ![Kinetik Stats on the taskbar, one-line layout with dividers](screenshots/v3.2/bar-one-line.png)
 
-**Latest version: v3.1.3.** [Download it from Releases](../../releases/latest).
+**Latest version: v4.0.0.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 
@@ -107,7 +107,7 @@ The widget costs nothing while it's switched off. Stats are only measured when t
 
 Everything about the widget is set on the **Widget** page in Settings:
 
-![The Widget page in Settings](screenshots/v3.2/settings-widget.png)
+![The Widget page in Settings](screenshots/v4.0/settings-widget.png)
 
 ### Quality of life
 
@@ -156,7 +156,7 @@ Turn it on from the bar's right-click menu (**Game overlay**), in **Settings →
 
 Everything about the overlay is set on the **Overlay** page in Settings:
 
-![The Overlay page in Settings](screenshots/v3.2/settings-overlay.png)
+![The Overlay page in Settings](screenshots/v4.0/settings-overlay.png)
 
 ## Dashboard
 
@@ -197,7 +197,9 @@ Two pages in Settings that help answer "what changed?" and "why did that crash?"
 
 **Settings → Theme** sets how Kinetik Stats' own windows, menus and hover cards look: **Match Windows**, Graphite, OLED black, Midnight, Nord, Mocha, Forest, Light or Paper, with a Sky, Violet, Mint, Amber, Rose or Coral accent, or your Windows accent colour. The title bar follows the theme too.
 
-The theme is shared by every Kinetik app (the Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather), so picking it once changes them all. Each app's right-click menu also has **App theme**. Widgets keep their own themes, which now include **OLED black** and **Mocha**, plus **Match app theme**, which follows the app theme and accent colour.
+The theme is shared by every Kinetik app (the Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather), so picking it once changes them all. Each app's right-click menu also has **App theme**.
+
+![The Theme page in Settings](screenshots/v4.0/settings-theme.png) Widgets keep their own themes, which now include **OLED black** and **Mocha**, plus **Match app theme**, which follows the app theme and accent colour.
 
 ## Notifications
 
@@ -241,11 +243,11 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 ### Screenshots
 
 <table>
-<tr><td width="50%" valign="top"><img src="screenshots/v3.2/settings-stats.png" alt="Stats page"><br><sub><b>Stats</b></sub></td><td width="50%" valign="top"><img src="screenshots/v3.2/settings-arrange.png" alt="Arrange page"><br><sub><b>Arrange</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/v3.2/settings-appearance.png" alt="Appearance page"><br><sub><b>Appearance</b></sub></td><td width="50%" valign="top"><img src="screenshots/v3.2/settings-colours.png" alt="Colours page"><br><sub><b>Colours</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/v3.2/settings-widget.png" alt="Widget page"><br><sub><b>Widget</b></sub></td><td width="50%" valign="top"><img src="screenshots/v3.2/settings-overlay.png" alt="Overlay page"><br><sub><b>Overlay</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/v3.2/settings-dashboard.png" alt="Dashboard page"><br><sub><b>Dashboard</b></sub></td><td width="50%" valign="top"><img src="screenshots/v3.2/settings-general.png" alt="General page"><br><sub><b>General</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/v3.2/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td><td width="50%" valign="top"></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v4.0/settings-stats.png" alt="Stats page"><br><sub><b>Stats</b></sub></td><td width="50%" valign="top"><img src="screenshots/v4.0/settings-arrange.png" alt="Arrange page"><br><sub><b>Arrange</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v4.0/settings-appearance.png" alt="Appearance page"><br><sub><b>Appearance</b></sub></td><td width="50%" valign="top"><img src="screenshots/v4.0/settings-colours.png" alt="Colours page"><br><sub><b>Colours</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v4.0/settings-widget.png" alt="Widget page"><br><sub><b>Widget</b></sub></td><td width="50%" valign="top"><img src="screenshots/v4.0/settings-overlay.png" alt="Overlay page"><br><sub><b>Overlay</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v4.0/settings-dashboard.png" alt="Dashboard page"><br><sub><b>Dashboard</b></sub></td><td width="50%" valign="top"><img src="screenshots/v4.0/settings-general.png" alt="General page"><br><sub><b>General</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v4.0/settings-theme.png" alt="Theme page"><br><sub><b>Theme</b></sub></td><td width="50%" valign="top"><img src="screenshots/v4.0/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td></tr>
 </table>
 
 ## Tips and shortcuts
@@ -303,6 +305,15 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v4.0.0: Kinetik Stats
+
+- **New name:** Kinetik is now the name of the suite, and this app is **Kinetik Stats**: `KinetikStats.exe`, settings in `HKCU\Software\KinetikStats`, a `KinetikStats` startup task and `C:\Program Files\KinetikStats`. Updating carries everything over by itself; the old startup task is replaced the first time it runs as administrator.
+- **Redesigned Settings:** grouped sidebar, page titles, settings that join into cards, and themed drop-downs, buttons and text boxes.
+- **Themes** for the windows of every Kinetik app ([see above](#themes)), and new **OLED black**, **Mocha** and **Match app theme** widget themes.
+- **Screen time:** daily screen time per app with processor, memory and disk use ([see above](#screen-time)).
+- **Timeline** of what changed on the PC, and **Crashes** explained in plain words ([see above](#timeline-and-crashes)).
+- **Restart as administrator** always closes the old copy, and a new **Graphite glass** app icon (the tray icon is unchanged).
 
 ### v3.1.3
 
