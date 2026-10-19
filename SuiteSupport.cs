@@ -714,9 +714,9 @@ namespace KinetikSuite
         { using (var p = Round(r, rad)) using (var b = new System.Drawing.SolidBrush(c)) g.FillPath(b, p); }
         public static void Stroke(System.Drawing.Graphics g, System.Drawing.RectangleF r, float rad, System.Drawing.Color c)
         { using (var p = Round(r, rad)) using (var pen = new System.Drawing.Pen(c, 1)) g.DrawPath(pen, p); }
-        public static void Chevron(System.Drawing.Graphics g, System.Drawing.RectangleF r, System.Drawing.Color c)
+        public static void Chevron(System.Drawing.Graphics g, System.Drawing.RectangleF r, System.Drawing.Color c, bool up = false)
         {
-            float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2, w = r.Height * 0.16f;
+            float cx = r.X + r.Width / 2, cy = r.Y + r.Height / 2, w = (up ? -1 : 1) * Math.Min(r.Width, r.Height) * 0.16f;
             using (var p = new System.Drawing.Pen(c, 1.6f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round })
                 g.DrawLines(p, new[] { new System.Drawing.PointF(cx - w, cy - w / 2), new System.Drawing.PointF(cx, cy + w / 2), new System.Drawing.PointF(cx + w, cy - w / 2) });
         }
@@ -750,7 +750,7 @@ namespace KinetikSuite
             g.Clear(BackColor);
             var r = new System.Drawing.RectangleF(1, 1, Width - 3, Height - 3);
             if (on) Paths.Fill(g, r, r.Height / 2, l.Accent);
-            else using (var p = Paths.Round(r, r.Height / 2)) using (var pen = new System.Drawing.Pen(Focused ? l.Accent : l.Sub, 1.5f)) g.DrawPath(pen, p);
+            else using (var p = Paths.Round(r, r.Height / 2)) using (var pen = new System.Drawing.Pen(Focused && ShowFocusCues ? l.Accent : l.Sub, 1.5f)) g.DrawPath(pen, p);
             float d = r.Height - (on ? 8 : 10), x = on ? r.Right - d - 4 : r.X + 5;
             using (var b = new System.Drawing.SolidBrush(on ? l.OnAccent : l.Sub)) g.FillEllipse(b, x, r.Y + (r.Height - d) / 2, d, d);
         }
@@ -791,8 +791,10 @@ namespace KinetikSuite
             else if (!accent && Enabled && (hot || down)) fill = down ? l.Border : l.Hover;
             if (!Enabled) { fill = l.Field; text = l.Sub; }
             Paths.Fill(g, r, 6 * scale, fill);
-            if (!accent || !Enabled) Paths.Stroke(g, r, 6 * scale, Focused ? l.Accent : l.Border);
-            System.Windows.Forms.TextRenderer.DrawText(g, Text, Font, ClientRectangle, text,
+            if (!accent || !Enabled) Paths.Stroke(g, r, 6 * scale, Focused && ShowFocusCues ? l.Accent : l.Border);
+            // ↑ and ↓ are drawn as chevrons: the font's arrows can come out as coloured emoji.
+            if (Text == "↑" || Text == "↓") Paths.Chevron(g, new System.Drawing.RectangleF(0, 0, Width - 1, Height - 1), text, Text == "↑");
+            else System.Windows.Forms.TextRenderer.DrawText(g, Text, Font, ClientRectangle, text,
                 System.Windows.Forms.TextFormatFlags.HorizontalCenter | System.Windows.Forms.TextFormatFlags.VerticalCenter | System.Windows.Forms.TextFormatFlags.SingleLine | System.Windows.Forms.TextFormatFlags.NoPrefix);
         }
     }
@@ -848,6 +850,368 @@ namespace KinetikSuite
         }
     }
 
+    // A settings window in the style of Kinetik Stats' own: a sidebar of pages, the page's title and what it's for, and
+    // rows of switches, drop-downs and buttons that join into cards. Each app gives it its pages.
+    public class SettingsWindow : System.Windows.Forms.Form
+    {
+        public class Page { public string Name, Sub, Glyph; public Action<Builder> Build; }
+
+        // What a page's Build gets: the calls that add its parts, top to bottom.
+        public class Builder
+        {
+            internal SettingsWindow w;
+            internal System.Windows.Forms.FlowLayoutPanel list;
+            public float K { get { return w.k; } }
+            public int Width { get { return w.RowW; } }
+            int S(float v) { return (int)Math.Round(v * w.k); }
+
+            public void Section(string title)
+            {
+                list.Controls.Add(new System.Windows.Forms.Label { Text = title.ToUpperInvariant(), Font = w.UI(8f, System.Drawing.FontStyle.Bold), ForeColor = Look.Current.Sub, AutoSize = false, Size = new System.Drawing.Size(w.RowW, S(32)), TextAlign = System.Drawing.ContentAlignment.BottomLeft, Margin = new System.Windows.Forms.Padding(S(4), S(10), 0, S(8)) });
+            }
+
+            public void Hint(string text, int lines = 2)
+            {
+                list.Controls.Add(new System.Windows.Forms.Label { Text = text, Font = w.UI(9f), ForeColor = Look.Current.Sub, AutoSize = false, Size = new System.Drawing.Size(w.RowW, S(18 * lines + 6)), Margin = new System.Windows.Forms.Padding(S(4), S(2), 0, S(8)) });
+            }
+
+            // A row: title, an optional line under it, and a control on the right.
+            public void Row(string title, string desc, System.Windows.Forms.Control right)
+            {
+                var row = new CardRow(w.k) { Size = new System.Drawing.Size(w.RowW, S(desc == null ? 50 : 60)) };
+                var l = Look.Current;
+                int rw = right == null ? 0 : right.Width;
+                row.Controls.Add(new System.Windows.Forms.Label { Text = title, Font = w.UI(10f), ForeColor = l.Text, BackColor = l.Card, AutoSize = false, AutoEllipsis = true, Size = new System.Drawing.Size(w.RowW - rw - S(44), S(22)), Location = new System.Drawing.Point(S(16), desc == null ? (row.Height - S(22)) / 2 : S(9)) });
+                if (desc != null) row.Controls.Add(new System.Windows.Forms.Label { Text = desc, Font = w.UI(8.5f), ForeColor = l.Sub, BackColor = l.Card, AutoSize = false, AutoEllipsis = true, Size = new System.Drawing.Size(w.RowW - rw - S(44), S(18)), Location = new System.Drawing.Point(S(16), S(32)) });
+                if (right != null)
+                {
+                    right.Location = new System.Drawing.Point(w.RowW - right.Width - S(16), (row.Height - right.Height) / 2);
+                    row.Controls.Add(right);
+                }
+                list.Controls.Add(row);
+            }
+
+            public void Switch(string title, string desc, bool value, Action<bool> set)
+            {
+                var sw = new KinetikSuite.Switch(value, w.k);
+                sw.Changed += (s, e) => set(sw.On);
+                Row(title, desc, sw);
+            }
+
+            public void Choice(string title, string desc, string[] items, int selected, Action<int> set, int width = 200)
+            {
+                var cb = new Dropdown { Width = S(width), Font = w.UI(9.5f), ItemHeight = S(22) };
+                cb.Items.AddRange(items);
+                cb.SelectedIndex = Math.Max(0, Math.Min(items.Length - 1, selected));
+                cb.SelectedIndexChanged += (s, e) => set(cb.SelectedIndex);
+                Row(title, desc, cb);
+            }
+
+            public FlatButton Button(string text, Action click, bool accent = false)
+            {
+                var b = new FlatButton(text, accent, w.k) { Font = w.UI(9.5f) };
+                if (click != null) b.Click += (s, e) => click();
+                return b;
+            }
+
+            // A small square button, for arrows and the like.
+            public FlatButton Small(string text, Action click)
+            {
+                var btn = Button(text, click);
+                btn.Width = S(34);
+                return btn;
+            }
+
+            // A row with several buttons on the right.
+            public void Buttons(string title, string desc, params FlatButton[] buttons)
+            {
+                var flow = new System.Windows.Forms.FlowLayoutPanel { AutoSize = true, AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Look.Current.Card, Margin = System.Windows.Forms.Padding.Empty, Padding = System.Windows.Forms.Padding.Empty };
+                foreach (var b in buttons) { b.Margin = new System.Windows.Forms.Padding(S(6), 0, 0, 0); flow.Controls.Add(b); }
+                flow.Size = flow.PreferredSize;
+                Row(title, desc, flow);
+            }
+
+            public void Add(System.Windows.Forms.Control control) { list.Controls.Add(control); }
+
+            // Builds the page again, keeping where it was scrolled to: after a change that adds or removes rows.
+            public void Refresh() { w.BeginInvoke((Action)(() => w.ShowPage(w.page, true))); }
+        }
+
+        readonly List<Page> pages;
+        readonly System.Windows.Forms.Panel nav = new System.Windows.Forms.Panel(), header = new System.Windows.Forms.Panel(), content = new System.Windows.Forms.Panel();
+        readonly List<System.Windows.Forms.Control> navItems = new List<System.Windows.Forms.Control>();
+        readonly string app;
+        readonly System.Drawing.Image logo;
+        System.Windows.Forms.FlowLayoutPanel list;
+        Page page;
+        float k = 1;
+        internal int RowW { get { return content.ClientSize.Width - (int)(56 * k) - System.Windows.Forms.SystemInformation.VerticalScrollBarWidth; } }
+
+        readonly Dictionary<string, System.Drawing.Font> fonts = new Dictionary<string, System.Drawing.Font>();
+        internal System.Drawing.Font UI(float pt, System.Drawing.FontStyle st = System.Drawing.FontStyle.Regular)
+        {
+            var key = pt + "|" + st;
+            System.Drawing.Font f;
+            if (!fonts.TryGetValue(key, out f))
+            {
+                string family = "Segoe UI";
+                try { using (var t = new System.Drawing.Font("Segoe UI Variable Text", 9f)) if (t.Name == "Segoe UI Variable Text") family = t.Name; } catch { }
+                fonts[key] = f = new System.Drawing.Font(family, pt, st);
+            }
+            return f;
+        }
+
+        public SettingsWindow(string app, string version, List<Page> pages, string first)
+        {
+            this.app = app; this.pages = pages;
+            var l = Look.Reload();
+            Text = app + " settings";
+            try { Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Windows.Forms.Application.ExecutablePath); logo = Icon.ToBitmap(); } catch { }
+            k = DeviceDpi / 96f;
+            StartPosition = System.Windows.Forms.FormStartPosition.CenterScreen;
+            ClientSize = new System.Drawing.Size(S(800), S(620));
+            MinimumSize = new System.Drawing.Size(S(700), S(460));
+            BackColor = l.Bg; ForeColor = l.Text; Font = UI(9.5f);
+            KeyPreview = true;
+            KeyDown += (s, e) => { if (e.KeyCode == System.Windows.Forms.Keys.Escape) Close(); };
+
+            // sidebar: the app's icon and name, then its pages
+            nav.Dock = System.Windows.Forms.DockStyle.Left; nav.Width = S(208); nav.BackColor = l.Nav; nav.Padding = new System.Windows.Forms.Padding(0, S(76), 1, 0);
+            nav.Paint += (s, e) =>
+            {
+                var g = e.Graphics; var lk = Look.Current;
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                if (logo != null) g.DrawImage(logo, new System.Drawing.Rectangle(S(20), S(24), S(26), S(26)));
+                string top = app.StartsWith("Kinetik ") ? "Kinetik" : app, second = app.StartsWith("Kinetik ") ? app.Substring(8) : "";
+                System.Windows.Forms.TextRenderer.DrawText(g, top, UI(12.5f, System.Drawing.FontStyle.Bold), new System.Drawing.Point(S(54), S(18)), lk.Text, System.Windows.Forms.TextFormatFlags.NoPadding);
+                if (second != "") System.Windows.Forms.TextRenderer.DrawText(g, second, UI(9f), new System.Drawing.Point(S(55), S(40)), lk.Sub, System.Windows.Forms.TextFormatFlags.NoPadding);
+                System.Windows.Forms.TextRenderer.DrawText(g, "v" + version, UI(8.5f), new System.Drawing.Point(S(22), nav.Height - S(32)), lk.Sub, System.Windows.Forms.TextFormatFlags.NoPadding);
+                using (var pen = new System.Drawing.Pen(lk.Border, 1)) g.DrawLine(pen, nav.Width - 1, 0, nav.Width - 1, nav.Height);
+            };
+            var navList = new System.Windows.Forms.FlowLayoutPanel { Dock = System.Windows.Forms.DockStyle.Fill, FlowDirection = System.Windows.Forms.FlowDirection.TopDown, WrapContents = false, BackColor = l.Nav, Padding = new System.Windows.Forms.Padding(S(10), 0, S(10), 0) };
+            foreach (var p in pages) navList.Controls.Add(NavItem(p));
+            nav.Controls.Add(navList);
+
+            // the page's title and what it's for
+            header.Dock = System.Windows.Forms.DockStyle.Top; header.Height = S(82); header.BackColor = l.Bg;
+            header.Paint += (s, e) =>
+            {
+                var g = e.Graphics; var lk = Look.Current; g.Clear(lk.Bg);
+                if (page == null) return;
+                System.Windows.Forms.TextRenderer.DrawText(g, page.Name, UI(17f, System.Drawing.FontStyle.Bold), new System.Drawing.Point(S(28), S(20)), lk.Text, System.Windows.Forms.TextFormatFlags.NoPadding);
+                System.Windows.Forms.TextRenderer.DrawText(g, page.Sub ?? "", UI(9.5f), new System.Drawing.Rectangle(S(29), S(54), header.Width - S(56), S(20)), lk.Sub, System.Windows.Forms.TextFormatFlags.NoPadding | System.Windows.Forms.TextFormatFlags.EndEllipsis | System.Windows.Forms.TextFormatFlags.SingleLine);
+            };
+            content.Dock = System.Windows.Forms.DockStyle.Fill; content.BackColor = l.Bg;
+            var right = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Fill, BackColor = l.Bg };
+            right.Controls.Add(content); right.Controls.Add(header);
+            Controls.Add(right); Controls.Add(nav);
+            Resize += (s, e) => { if (page != null && IsHandleCreated) ShowPage(page, true); };
+            // Settings changed from the widget's own menu while this is open show up when it's back in front.
+            Activated += (s, e) => { if (page != null && !(ActiveControl is System.Windows.Forms.TextBox)) ShowPage(page, true); };
+            // The first page is built once the window has its size, so its rows fit.
+            Load += (s, e) => { PerformLayout(); ShowPage(pages.FirstOrDefault(p => p.Name == first) ?? pages[0], false); };
+        }
+
+        int S(float v) { return (int)Math.Round(v * k); }
+
+        protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); Look.Current.Window(Handle); }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) { foreach (var f in fonts.Values) f.Dispose(); fonts.Clear(); if (logo != null) logo.Dispose(); }
+            base.Dispose(disposing);
+        }
+
+        public void ShowPage(string name) { var p = pages.FirstOrDefault(x => x.Name == name); if (p != null) ShowPage(p, false); }
+
+        int lastBuilt;
+        internal void ShowPage(Page p, bool keepScroll)
+        {
+            // Activated and Resize can both ask within a moment; once is enough.
+            if (keepScroll && p == page && unchecked(Environment.TickCount - lastBuilt) < 300) return;
+            lastBuilt = Environment.TickCount;
+            int scroll = keepScroll && list != null && p == page ? -list.AutoScrollPosition.Y : 0;
+            page = p;
+            foreach (var n in navItems) n.Invalidate();
+            header.Invalidate();
+            content.SuspendLayout();
+            foreach (System.Windows.Forms.Control c in content.Controls.Cast<System.Windows.Forms.Control>().ToList()) c.Dispose();
+            list = new System.Windows.Forms.FlowLayoutPanel { Dock = System.Windows.Forms.DockStyle.Fill, FlowDirection = System.Windows.Forms.FlowDirection.TopDown, WrapContents = false, AutoScroll = true, BackColor = Look.Current.Bg, Padding = new System.Windows.Forms.Padding(S(24), 0, S(16), S(24)) };
+            content.Controls.Add(list);
+            Look.Current.ScrollBars(list);
+            try { p.Build(new Builder { w = this, list = list }); }
+            catch (Exception ex) { list.Controls.Add(new System.Windows.Forms.Label { Text = "This page couldn't be shown: " + ex.Message, ForeColor = Look.Current.Warn, AutoSize = true }); }
+            content.ResumeLayout();
+            if (scroll > 0) list.AutoScrollPosition = new System.Drawing.Point(0, scroll);
+            ActiveControl = null;
+        }
+
+        System.Windows.Forms.Control NavItem(Page p)
+        {
+            var c = new System.Windows.Forms.Label { AutoSize = false, Size = new System.Drawing.Size(S(188), S(36)), Margin = new System.Windows.Forms.Padding(0, 0, 0, S(2)), Cursor = System.Windows.Forms.Cursors.Hand, BackColor = Look.Current.Nav };
+            bool hot = false;
+            c.MouseEnter += (s, e) => { hot = true; c.Invalidate(); };
+            c.MouseLeave += (s, e) => { hot = false; c.Invalidate(); };
+            c.Paint += (s, e) =>
+            {
+                var g = e.Graphics; var l = Look.Current; g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.Clear(l.Nav);
+                bool sel = p == page;
+                if (sel || hot) Paths.Fill(g, new System.Drawing.RectangleF(0, 0, c.Width - 1, c.Height - 1), S(6), sel ? l.Hover : l.Card);
+                if (sel) Paths.Fill(g, new System.Drawing.RectangleF(0, S(10), S(3), c.Height - S(20)), S(1.5f), l.Accent);
+                Glyph(g, p.Glyph, new System.Drawing.RectangleF(S(13), (c.Height - S(16)) / 2f, S(16), S(16)), sel ? l.Accent : hot ? l.Text : l.Sub);
+                System.Windows.Forms.TextRenderer.DrawText(g, p.Name, UI(9.75f), new System.Drawing.Rectangle(S(40), 0, c.Width - S(44), c.Height), sel || hot ? l.Text : l.Sub,
+                    System.Windows.Forms.TextFormatFlags.VerticalCenter | System.Windows.Forms.TextFormatFlags.SingleLine | System.Windows.Forms.TextFormatFlags.NoPrefix | System.Windows.Forms.TextFormatFlags.NoPadding);
+            };
+            c.Click += (s, e) => ShowPage(p, false);
+            navItems.Add(c);
+            return c;
+        }
+
+        // Small line icons for the sidebar.
+        public static void Glyph(System.Drawing.Graphics g, string name, System.Drawing.RectangleF r, System.Drawing.Color c)
+        {
+            float x = r.X, y = r.Y, s = r.Width;
+            Func<float, float, System.Drawing.PointF> P = (a, b) => new System.Drawing.PointF(x + a * s, y + b * s);
+            using (var p = new System.Drawing.Pen(c, Math.Max(1.4f, s / 10)) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round })
+            using (var b = new System.Drawing.SolidBrush(c))
+                switch (name)
+                {
+                    case "look": // a palette
+                        g.DrawEllipse(p, x + 0.08f * s, y + 0.1f * s, 0.84f * s, 0.8f * s);
+                        foreach (var d in new[] { P(0.32f, 0.35f), P(0.55f, 0.28f), P(0.7f, 0.48f) }) g.FillEllipse(b, d.X - 0.07f * s, d.Y - 0.07f * s, 0.14f * s, 0.14f * s);
+                        break;
+                    case "place": // a window on a screen
+                        g.DrawRectangle(p, x + 0.08f * s, y + 0.12f * s, 0.84f * s, 0.62f * s);
+                        g.DrawLine(p, P(0.35f, 0.9f), P(0.65f, 0.9f));
+                        g.FillRectangle(b, x + 0.2f * s, y + 0.24f * s, 0.32f * s, 0.24f * s);
+                        break;
+                    case "general": // a gear
+                        g.DrawEllipse(p, x + 0.3f * s, y + 0.3f * s, 0.4f * s, 0.4f * s);
+                        for (int i = 0; i < 8; i++) { double a = i * Math.PI / 4; g.DrawLine(p, x + s / 2 + (float)Math.Cos(a) * 0.3f * s, y + s / 2 + (float)Math.Sin(a) * 0.3f * s, x + s / 2 + (float)Math.Cos(a) * 0.44f * s, y + s / 2 + (float)Math.Sin(a) * 0.44f * s); }
+                        break;
+                    case "clock":
+                        g.DrawEllipse(p, x + 0.08f * s, y + 0.08f * s, 0.84f * s, 0.84f * s);
+                        g.DrawLines(p, new[] { P(0.5f, 0.26f), P(0.5f, 0.5f), P(0.68f, 0.62f) });
+                        break;
+                    case "timer":
+                        g.DrawEllipse(p, x + 0.12f * s, y + 0.2f * s, 0.76f * s, 0.76f * s);
+                        g.DrawLine(p, P(0.38f, 0.06f), P(0.62f, 0.06f)); g.DrawLine(p, P(0.5f, 0.58f), P(0.5f, 0.38f));
+                        break;
+                    case "cloud":
+                        using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+                        {
+                            path.AddArc(x + 0.06f * s, y + 0.42f * s, 0.36f * s, 0.36f * s, 90, 180);
+                            path.AddArc(x + 0.24f * s, y + 0.2f * s, 0.46f * s, 0.46f * s, 180, 160);
+                            path.AddArc(x + 0.58f * s, y + 0.4f * s, 0.36f * s, 0.38f * s, 270, 180);
+                            path.CloseFigure(); g.DrawPath(p, path);
+                        }
+                        break;
+                    case "places": // a map pin
+                        using (var path = new System.Drawing.Drawing2D.GraphicsPath())
+                        {
+                            path.AddArc(x + 0.2f * s, y + 0.06f * s, 0.6f * s, 0.6f * s, 150, 240);
+                            path.AddLine(P(0.76f, 0.52f), P(0.5f, 0.94f)); path.AddLine(P(0.5f, 0.94f), P(0.24f, 0.52f));
+                            g.DrawPath(p, path);
+                        }
+                        g.DrawEllipse(p, x + 0.4f * s, y + 0.26f * s, 0.2f * s, 0.2f * s);
+                        break;
+                    case "dock": // four tiles
+                        foreach (var o in new[] { P(0.1f, 0.1f), P(0.56f, 0.1f), P(0.1f, 0.56f), P(0.56f, 0.56f) }) g.DrawRectangle(p, o.X, o.Y, 0.34f * s, 0.34f * s);
+                        break;
+                    case "list":
+                        for (int i = 0; i < 3; i++) { float yy = 0.24f + 0.26f * i; g.FillEllipse(b, x + 0.08f * s, y + (yy - 0.06f) * s, 0.12f * s, 0.12f * s); g.DrawLine(p, P(0.32f, yy), P(0.92f, yy)); }
+                        break;
+                    default: // about: an i in a circle
+                        g.DrawEllipse(p, x + 0.08f * s, y + 0.08f * s, 0.84f * s, 0.84f * s);
+                        g.DrawLine(p, P(0.5f, 0.46f), P(0.5f, 0.72f));
+                        g.FillEllipse(b, x + 0.44f * s, y + 0.26f * s, 0.12f * s, 0.12f * s);
+                        break;
+                }
+        }
+
+        // The pages every widget app shares: Look, Placement, General and About. Leave a hook null and its row isn't shown.
+        public class Common
+        {
+            public string Title, Version, Blurb;
+            public Action OpenTheme;
+            public Func<int> Scale; public Action<int> SetScale;
+            public int[] Widths; public Func<int> CardWidth; public Action<int> SetCardWidth;
+            public Func<string> FontName; public Action<string> SetFontName;
+            public string[] Fonts;
+            public Func<int> Opacity; public Action<int> SetOpacity;
+            public int[] Scales, Opacities;
+            public Func<int> Layer; public Action<int> SetLayer;
+            public Func<bool> Locked; public Action<bool> SetLocked; public string LockText = "Lock position";
+            public Func<bool> ClickThrough; public Action<bool> SetClickThrough;
+            public Func<bool> Snap; public Action<bool> SetSnap;
+            public Func<bool> RunAtStartup; public Action<bool> SetRunAtStartup;
+            public Action BackUp, Restore; public Func<string> LastBackup;
+
+            public List<Page> Pages()
+            {
+                var list = new List<Page>();
+                list.Add(new Page { Name = "Look", Glyph = "look", Sub = "Theme, size, font and background of the widget.", Build = b =>
+                {
+                    b.Section("Theme");
+                    if (OpenTheme != null) b.Buttons("Widget theme", "Its colours, including Match app theme", b.Button("Choose…", OpenTheme));
+                    b.Section("Size and text");
+                    if (Scale != null) b.Choice("Size", null, Scales.Select(v => v + "%").ToArray(), Array.IndexOf(Scales, Scale()), i => SetScale(Scales[i]), 120);
+                    if (Widths != null && CardWidth != null)
+                    {
+                        string[] names = { "Narrow", "Normal", "Wide" };
+                        b.Choice("Width", null, names.Take(Widths.Length).ToArray(), Array.IndexOf(Widths, CardWidth()), i => SetCardWidth(Widths[i]), 120);
+                    }
+                    if (FontName != null)
+                    {
+                        var fonts = new List<string> { "Default" }; fonts.AddRange(Fonts);
+                        if (FontName() != "" && !fonts.Contains(FontName())) fonts.Add(FontName());
+                        b.Choice("Font", "Default is Segoe UI Variable", fonts.ToArray(), FontName() == "" ? 0 : fonts.IndexOf(FontName()), i => SetFontName(i == 0 ? "" : fonts[i]), 200);
+                    }
+                    if (Opacity != null) b.Choice("Background opacity", "0% leaves just the text", Opacities.Select(v => v + "%").ToArray(), Array.IndexOf(Opacities, Opacity()), i => SetOpacity(Opacities[i]), 120);
+                } });
+                list.Add(new Page { Name = "Placement", Glyph = "place", Sub = "Where the widget sits, and whether it can be moved.", Build = b =>
+                {
+                    b.Section("Placement");
+                    if (Layer != null) b.Choice("Layer", "On the desktop, it stays behind your windows", new[] { "On the desktop", "Normal window", "Always on top" }, Layer(), SetLayer, 180);
+                    if (Locked != null) b.Switch(LockText, "Stops it being dragged by accident", Locked(), SetLocked);
+                    if (ClickThrough != null) b.Switch("Click-through when locked", "Clicks pass to whatever is underneath", ClickThrough(), SetClickThrough);
+                    if (Snap != null) b.Switch("Snap to screen edges", null, Snap(), SetSnap);
+                } });
+                list.Add(new Page { Name = "General", Glyph = "general", Sub = "The app theme, startup and backups.", Build = b =>
+                {
+                    b.Section("App theme");
+                    b.Choice("Theme", "Every Kinetik app's windows and menus", Look.Themes, Math.Max(0, Array.IndexOf(Look.Themes, Look.SavedTheme)), i => { Look.Save(Look.Themes[i], null); b.Refresh(); b.w.Recolour(); }, 180);
+                    b.Choice("Accent colour", null, Look.Accents, Math.Max(0, Array.IndexOf(Look.Accents, Look.SavedAccent)), i => { Look.Save(null, Look.Accents[i]); b.Refresh(); b.w.Recolour(); }, 180);
+                    if (RunAtStartup != null) { b.Section("Startup"); b.Switch("Run at startup", "Starts when you sign in to Windows", RunAtStartup(), SetRunAtStartup); }
+                    if (BackUp != null)
+                    {
+                        b.Section("Backup");
+                        b.Buttons("Settings backup", "Last backup: " + (LastBackup != null ? LastBackup() : "–"), b.Button("Back up", () => { BackUp(); b.Refresh(); }), b.Button("Restore…", Restore));
+                    }
+                } });
+                list.Add(new Page { Name = "About", Glyph = "about", Sub = "Version and licence.", Build = b =>
+                {
+                    b.Section(Title);
+                    b.Row("Version", null, new System.Windows.Forms.Label { Text = Version, AutoSize = true, ForeColor = Look.Current.Text, BackColor = Look.Current.Card, Font = b.w.UI(10f) });
+                    b.Row(Blurb ?? "One of the Kinetik apps", "Free software under the GNU General Public License v3", null);
+                } });
+                return list;
+            }
+        }
+
+        // After the app theme changes: this window in the new colours.
+        internal void Recolour()
+        {
+            var l = Look.Current;
+            BackColor = l.Bg; nav.BackColor = l.Nav; header.BackColor = l.Bg; content.BackColor = l.Bg;
+            foreach (System.Windows.Forms.Control c in nav.Controls) { c.BackColor = l.Nav; foreach (System.Windows.Forms.Control n in c.Controls) { n.BackColor = l.Nav; n.Invalidate(); } }
+            if (content.Parent != null) content.Parent.BackColor = l.Bg;
+            l.Window(Handle);
+            nav.Invalidate(); header.Invalidate();
+        }
+    }
+
     // A drop-down list whose closed box and open list are both drawn in the theme (Windows draws a light arrow box otherwise).
     public class Dropdown : System.Windows.Forms.ComboBox
     {
@@ -864,6 +1228,7 @@ namespace KinetikSuite
             if (e.Index < 0) return;
             var l = Look.Current;
             bool edit = (e.State & System.Windows.Forms.DrawItemState.ComboBoxEdit) != 0, sel = (e.State & System.Windows.Forms.DrawItemState.Selected) != 0 && !edit;
+            if (edit) return; // the closed box is drawn whole in WndProc
             using (var b = new System.Drawing.SolidBrush(sel ? l.Hover : l.Field)) e.Graphics.FillRectangle(b, e.Bounds);
             System.Windows.Forms.TextRenderer.DrawText(e.Graphics, GetItemText(Items[e.Index]), Font, new System.Drawing.Rectangle(e.Bounds.X + 6, e.Bounds.Y, e.Bounds.Width - 6, e.Bounds.Height), sel ? l.Text : l.Text,
                 System.Windows.Forms.TextFormatFlags.VerticalCenter | System.Windows.Forms.TextFormatFlags.Left | System.Windows.Forms.TextFormatFlags.EndEllipsis | System.Windows.Forms.TextFormatFlags.NoPrefix);
@@ -872,18 +1237,50 @@ namespace KinetikSuite
         protected override void OnMouseLeave(EventArgs e) { hot = false; Invalidate(); base.OnMouseLeave(e); }
         protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        struct PaintStruct
+        {
+            public IntPtr Hdc; public int Erase; public int L, T, R, B; public int Restore, IncUpdate;
+            [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.ByValArray, SizeConst = 32)] public byte[] Reserved;
+        }
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr BeginPaint(IntPtr h, out PaintStruct ps);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool EndPaint(IntPtr h, ref PaintStruct ps);
+
+        // The closed box is drawn here entirely, in place of Windows' own painting, which leaves edges of its own.
         protected override void WndProc(ref System.Windows.Forms.Message m)
         {
-            base.WndProc(ref m);
-            if (m.Msg != 0x000F) return; // WM_PAINT: draw the closed box over what Windows drew
+            if (m.Msg == 0x0085) { PaintFrame(); return; } // WM_NCPAINT: the thin frame outside the box, in the row's colour
+            if (m.Msg != 0x000F || DroppedDown) { base.WndProc(ref m); return; } // WM_PAINT
+            PaintStruct ps;
+            BeginPaint(Handle, out ps);
+            try { using (var g = System.Drawing.Graphics.FromHdc(ps.Hdc)) PaintBox(g); }
+            finally { EndPaint(Handle, ref ps); }
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetWindowDC(IntPtr h);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern int ReleaseDC(IntPtr h, IntPtr dc);
+        void PaintFrame()
+        {
+            var dc = GetWindowDC(Handle);
+            if (dc == IntPtr.Zero) return;
+            try
+            {
+                using (var g = System.Drawing.Graphics.FromHdc(dc))
+                using (var pen = new System.Drawing.Pen(Parent != null ? Parent.BackColor : Look.Current.Card, 2))
+                    g.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
+            }
+            finally { ReleaseDC(Handle, dc); }
+        }
+
+        void PaintBox(System.Drawing.Graphics g)
+        {
             var l = Look.Current;
-            using (var g = System.Drawing.Graphics.FromHwnd(Handle))
             {
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
                 using (var b = new System.Drawing.SolidBrush(Parent != null ? Parent.BackColor : l.Card)) g.FillRectangle(b, ClientRectangle);
                 var r = new System.Drawing.RectangleF(0.5f, 0.5f, Width - 2, Height - 2);
                 Paths.Fill(g, r, 6, hot && Enabled ? l.Hover : l.Field);
-                Paths.Stroke(g, r, 6, Focused ? l.Accent : l.Border);
+                Paths.Stroke(g, r, 6, Focused && ShowFocusCues ? l.Accent : l.Border);
                 System.Windows.Forms.TextRenderer.DrawText(g, SelectedIndex >= 0 ? GetItemText(SelectedItem) : "", Font, new System.Drawing.Rectangle(8, 0, Width - 36, Height), Enabled ? l.Text : l.Sub,
                     System.Windows.Forms.TextFormatFlags.VerticalCenter | System.Windows.Forms.TextFormatFlags.Left | System.Windows.Forms.TextFormatFlags.EndEllipsis | System.Windows.Forms.TextFormatFlags.SingleLine | System.Windows.Forms.TextFormatFlags.NoPrefix);
                 Paths.Chevron(g, new System.Drawing.RectangleF(Width - 28, 0, 20, Height), l.Sub);

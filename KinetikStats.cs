@@ -12834,6 +12834,21 @@ class CommonMenu
         if (Exit != null) items.Add(Item("Exit", false, Exit));
     }
 
+    // The same options as the shared pages of a settings window (Look, Placement, General, About).
+    public KinetikSuite.SettingsWindow.Common ForSettings()
+    {
+        return new KinetikSuite.SettingsWindow.Common
+        {
+            Title = Title, Version = Version, OpenTheme = OpenTheme,
+            Scale = Scale, SetScale = SetScale, Scales = Scales, Widths = Widths, CardWidth = CardWidth, SetCardWidth = SetCardWidth,
+            FontName = FontName, SetFontName = SetFontName, Fonts = Fonts.Where(HasFont).ToArray(),
+            Opacity = Opacity, SetOpacity = SetOpacity, Opacities = Opacities,
+            Layer = Layer, SetLayer = SetLayer, Locked = Locked, SetLocked = SetLocked, LockText = LockText,
+            ClickThrough = ClickThrough, SetClickThrough = SetClickThrough, Snap = Snap, SetSnap = SetSnap,
+            RunAtStartup = RunAtStartup, SetRunAtStartup = SetRunAtStartup, BackUp = BackUp, Restore = Restore, LastBackup = LastBackup,
+        };
+    }
+
     public void AddAll(ToolStripItemCollection items) { AddLook(items); AddEnd(items); }
 }
 #pragma warning restore 0649
