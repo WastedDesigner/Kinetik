@@ -1,3 +1,10 @@
+# Kinetik Stats v4.0.1
+
+A QR code for the web dashboard.
+
+- **New: QR code** button next to **Copy link** in Settings → Dashboard. Point your phone's camera at it to open the web dashboard, no typing needed. It shows when **Allow other devices on my network** is on, and the code is made inside the app, so the link and its key never go to an online QR service.
+
+
 # Kinetik Stats v4.0.0
 
 Kinetik is now the name of the suite of Kinetik apps, and this app is Kinetik Stats.

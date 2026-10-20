@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik Stats")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("4.0.0.0")]
-[assembly: AssemblyFileVersion("4.0.0.0")]
-[assembly: AssemblyInformationalVersion("4.0.0")]
+[assembly: AssemblyVersion("4.0.1.0")]
+[assembly: AssemblyFileVersion("4.0.1.0")]
+[assembly: AssemblyInformationalVersion("4.0.1")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -9998,6 +9998,323 @@ class WidgetThemeTile : Control
     }
 }
 
+// ======================================================================= QR code
+// Turns the web dashboard's link into a QR code a phone camera can scan. Made here rather than by an online
+// service, because the link carries the dashboard's key. Byte mode, error correction level M, versions 1 to 40.
+static class QrCode
+{
+    static readonly int[] EccPerBlock = { -1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28 };
+    static readonly int[] Blocks = { -1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49 };
+
+    // The modules, [y, x], true for dark. Null if the text is too long for any version.
+    public static bool[,] Encode(string text)
+    {
+        var bytes = Encoding.UTF8.GetBytes(text);
+        int ver = 1;
+        for (; ver <= 40; ver++) if (4 + (ver < 10 ? 8 : 16) + bytes.Length * 8 <= DataCodewords(ver) * 8) break;
+        if (ver > 40) return null;
+
+        // Mode, length, data, terminator, then padding up to the version's capacity
+        var bits = new List<bool>();
+        Action<int, int> put = (v, n) => { for (int i = n - 1; i >= 0; i--) bits.Add(((v >> i) & 1) != 0); };
+        put(4, 4); put(bytes.Length, ver < 10 ? 8 : 16);
+        foreach (var b in bytes) put(b, 8);
+        int cap = DataCodewords(ver) * 8;
+        put(0, Math.Min(4, cap - bits.Count));
+        put(0, (8 - bits.Count % 8) % 8);
+        for (int pad = 0xEC; bits.Count < cap; pad ^= 0xEC ^ 0x11) put(pad, 8);
+        var data = new byte[bits.Count / 8];
+        for (int i = 0; i < bits.Count; i++) if (bits[i]) data[i >> 3] |= (byte)(0x80 >> (i & 7));
+
+        int size = ver * 4 + 17;
+        var m = new bool[size, size];
+        var fn = new bool[size, size];
+        DrawFunctions(m, fn, ver);
+        DrawCodewords(m, fn, Interleave(data, ver));
+
+        // Use the mask Windows' and phones' decoders find easiest: the one with the lowest penalty
+        int best = 0; long bestScore = long.MaxValue;
+        for (int mask = 0; mask < 8; mask++)
+        {
+            ApplyMask(m, fn, mask); DrawFormat(m, fn, mask);
+            long score = Penalty(m);
+            if (score < bestScore) { best = mask; bestScore = score; }
+            ApplyMask(m, fn, mask);
+        }
+        ApplyMask(m, fn, best); DrawFormat(m, fn, best);
+        return m;
+    }
+
+    // Black on white with the four-module quiet zone scanners need around it.
+    public static Bitmap Render(bool[,] m, int scale)
+    {
+        int size = m.GetLength(0), px = (size + 8) * scale;
+        var bmp = new Bitmap(px, px);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.Clear(Color.White);
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                    if (m[y, x]) g.FillRectangle(Brushes.Black, (x + 4) * scale, (y + 4) * scale, scale, scale);
+        }
+        return bmp;
+    }
+
+    static int RawModules(int ver)
+    {
+        int r = (16 * ver + 128) * ver + 64;
+        if (ver >= 2) { int n = ver / 7 + 2; r -= (25 * n - 10) * n - 55; if (ver >= 7) r -= 36; }
+        return r;
+    }
+
+    static int DataCodewords(int ver) { return RawModules(ver) / 8 - EccPerBlock[ver] * Blocks[ver]; }
+
+    static void Set(bool[,] m, bool[,] fn, int x, int y, bool dark) { m[y, x] = dark; fn[y, x] = true; }
+
+    static void DrawFunctions(bool[,] m, bool[,] fn, int ver)
+    {
+        int size = m.GetLength(0);
+        for (int i = 0; i < size; i++) { Set(m, fn, 6, i, i % 2 == 0); Set(m, fn, i, 6, i % 2 == 0); }
+        foreach (var p in new[] { new Point(3, 3), new Point(size - 4, 3), new Point(3, size - 4) })
+            for (int dy = -4; dy <= 4; dy++)
+                for (int dx = -4; dx <= 4; dx++)
+                {
+                    int d = Math.Max(Math.Abs(dx), Math.Abs(dy)), x = p.X + dx, y = p.Y + dy;
+                    if (x >= 0 && x < size && y >= 0 && y < size) Set(m, fn, x, y, d != 2 && d != 4);
+                }
+        var al = Alignment(ver, size);
+        for (int i = 0; i < al.Count; i++)
+            for (int j = 0; j < al.Count; j++)
+            {
+                if ((i == 0 && j == 0) || (i == 0 && j == al.Count - 1) || (i == al.Count - 1 && j == 0)) continue;
+                for (int dy = -2; dy <= 2; dy++)
+                    for (int dx = -2; dx <= 2; dx++)
+                        Set(m, fn, al[i] + dx, al[j] + dy, Math.Max(Math.Abs(dx), Math.Abs(dy)) != 1);
+            }
+        DrawFormat(m, fn, 0); // reserves the format areas; redrawn once the mask is picked
+        if (ver >= 7)
+        {
+            int rem = ver;
+            for (int i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >> 11) * 0x1F25);
+            int v = ver << 12 | rem;
+            for (int i = 0; i < 18; i++)
+            {
+                bool bit = ((v >> i) & 1) != 0;
+                int a = size - 11 + i % 3, b = i / 3;
+                Set(m, fn, a, b, bit); Set(m, fn, b, a, bit);
+            }
+        }
+    }
+
+    static List<int> Alignment(int ver, int size)
+    {
+        var r = new List<int>();
+        if (ver == 1) return r;
+        int n = ver / 7 + 2, step = (ver * 8 + n * 3 + 5) / (n * 4 - 4) * 2;
+        r.Add(6);
+        for (int pos = size - 7; r.Count < n; pos -= step) r.Insert(1, pos);
+        return r;
+    }
+
+    // Level M is 00 in the format bits
+    static void DrawFormat(bool[,] m, bool[,] fn, int mask)
+    {
+        int size = m.GetLength(0), data = mask, rem = data;
+        for (int i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >> 9) * 0x537);
+        int bits = (data << 10 | rem) ^ 0x5412;
+        Func<int, bool> bit = i => ((bits >> i) & 1) != 0;
+        for (int i = 0; i <= 5; i++) Set(m, fn, 8, i, bit(i));
+        Set(m, fn, 8, 7, bit(6)); Set(m, fn, 8, 8, bit(7)); Set(m, fn, 7, 8, bit(8));
+        for (int i = 9; i < 15; i++) Set(m, fn, 14 - i, 8, bit(i));
+        for (int i = 0; i < 8; i++) Set(m, fn, size - 1 - i, 8, bit(i));
+        for (int i = 8; i < 15; i++) Set(m, fn, 8, size - 15 + i, bit(i));
+        Set(m, fn, 8, size - 8, true);
+    }
+
+    // Splits the data into blocks, adds each block's Reed-Solomon error correction, and interleaves them.
+    static byte[] Interleave(byte[] data, int ver)
+    {
+        int blocks = Blocks[ver], ecc = EccPerBlock[ver], raw = RawModules(ver) / 8;
+        int shortBlocks = blocks - raw % blocks, shortLen = raw / blocks;
+        var div = RsDivisor(ecc);
+        var all = new List<byte[]>();
+        for (int i = 0, k = 0; i < blocks; i++)
+        {
+            int len = shortLen - ecc + (i < shortBlocks ? 0 : 1);
+            var dat = new byte[len];
+            Array.Copy(data, k, dat, 0, len); k += len;
+            var rem = RsRemainder(dat, div);
+            var block = new byte[shortLen + 1];
+            Array.Copy(dat, block, len);
+            Array.Copy(rem, 0, block, shortLen + 1 - ecc, ecc);
+            all.Add(block);
+        }
+        var r = new List<byte>(raw);
+        for (int i = 0; i <= shortLen; i++)
+            for (int j = 0; j < blocks; j++)
+                if (i != shortLen - ecc || j >= shortBlocks) r.Add(all[j][i]);
+        return r.ToArray();
+    }
+
+    static byte[] RsDivisor(int degree)
+    {
+        var r = new byte[degree];
+        r[degree - 1] = 1;
+        int root = 1;
+        for (int i = 0; i < degree; i++)
+        {
+            for (int j = 0; j < degree; j++) { r[j] = Mul(r[j], root); if (j + 1 < degree) r[j] ^= r[j + 1]; }
+            root = Mul(root, 2);
+        }
+        return r;
+    }
+
+    static byte[] RsRemainder(byte[] data, byte[] div)
+    {
+        var r = new byte[div.Length];
+        foreach (var b in data)
+        {
+            int f = b ^ r[0];
+            Array.Copy(r, 1, r, 0, r.Length - 1); r[r.Length - 1] = 0;
+            for (int i = 0; i < r.Length; i++) r[i] ^= Mul(div[i], f);
+        }
+        return r;
+    }
+
+    static byte Mul(int x, int y)
+    {
+        int z = 0;
+        for (int i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >> 7) * 0x11D); z ^= ((y >> i) & 1) * x; }
+        return (byte)z;
+    }
+
+    static void DrawCodewords(bool[,] m, bool[,] fn, byte[] data)
+    {
+        int size = m.GetLength(0), i = 0;
+        for (int right = size - 1; right >= 1; right -= 2)
+        {
+            if (right == 6) right = 5;
+            for (int vert = 0; vert < size; vert++)
+                for (int j = 0; j < 2; j++)
+                {
+                    int x = right - j, y = ((right + 1) & 2) == 0 ? size - 1 - vert : vert;
+                    if (!fn[y, x] && i < data.Length * 8) { m[y, x] = ((data[i >> 3] >> (7 - (i & 7))) & 1) != 0; i++; }
+                }
+        }
+    }
+
+    static void ApplyMask(bool[,] m, bool[,] fn, int mask)
+    {
+        int size = m.GetLength(0);
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                bool flip;
+                switch (mask)
+                {
+                    case 0: flip = (x + y) % 2 == 0; break;
+                    case 1: flip = y % 2 == 0; break;
+                    case 2: flip = x % 3 == 0; break;
+                    case 3: flip = (x + y) % 3 == 0; break;
+                    case 4: flip = (x / 3 + y / 2) % 2 == 0; break;
+                    case 5: flip = x * y % 2 + x * y % 3 == 0; break;
+                    case 6: flip = (x * y % 2 + x * y % 3) % 2 == 0; break;
+                    default: flip = ((x + y) % 2 + x * y % 3) % 2 == 0; break;
+                }
+                if (flip && !fn[y, x]) m[y, x] = !m[y, x];
+            }
+    }
+
+    // The standard's four penalty rules: long runs, 2x2 blocks, finder-like patterns, and dark/light balance.
+    static long Penalty(bool[,] m)
+    {
+        int size = m.GetLength(0), dark = 0;
+        long p = 0;
+        var finder = new[] { true, false, true, true, true, false, true, false, false, false, false };
+        for (int pass = 0; pass < 2; pass++)
+            for (int a = 0; a < size; a++)
+            {
+                int run = 0; bool last = false;
+                for (int b = 0; b < size; b++)
+                {
+                    bool v = pass == 0 ? m[a, b] : m[b, a];
+                    if (b > 0 && v == last) run++; else { if (run >= 5) p += run - 2; run = 1; last = v; }
+                    if (b + 11 <= size)
+                    {
+                        bool fwd = true, back = true;
+                        for (int k = 0; k < 11; k++)
+                        {
+                            bool w = pass == 0 ? m[a, b + k] : m[b + k, a];
+                            if (w != finder[k]) fwd = false;
+                            if (w != finder[10 - k]) back = false;
+                        }
+                        if (fwd) p += 40;
+                        if (back) p += 40;
+                    }
+                }
+                if (run >= 5) p += run - 2;
+            }
+        for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                if (m[y, x]) dark++;
+                if (x + 1 < size && y + 1 < size && m[y, x] == m[y, x + 1] && m[y, x] == m[y + 1, x] && m[y, x] == m[y + 1, x + 1]) p += 3;
+            }
+        int total = size * size;
+        int k2 = (Math.Abs(dark * 20 - total * 10) + total - 1) / total - 1;
+        return p + Math.Max(0, k2) * 10;
+    }
+}
+
+// A small window with the web dashboard's QR code, for pointing a phone's camera at.
+class QrWindow : Form
+{
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int v, int size);
+    readonly Bitmap image;
+
+    public QrWindow(string link)
+    {
+        Text = "Scan with your phone";
+        FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false; ShowInTaskbar = false;
+        StartPosition = FormStartPosition.CenterParent;
+        BackColor = Theme.Bg; ForeColor = Theme.Text; Font = Theme.UI(9.5f);
+        AutoScaleMode = AutoScaleMode.Dpi;
+        using (var st = Assembly.GetExecutingAssembly().GetManifestResourceStream("icon.ico"))
+            if (st != null) Icon = new Icon(st);
+
+        var m = QrCode.Encode(link);
+        int scale = m == null ? 1 : Math.Max(4, 300 / (m.GetLength(0) + 8));
+        image = m == null ? null : QrCode.Render(m, scale);
+        int side = image == null ? 300 : image.Width;
+        var pic = new PictureBox { Image = image, SizeMode = PictureBoxSizeMode.CenterImage, Location = new Point(24, 24), Size = new Size(side, side), BackColor = Color.White };
+        var hint = new Label
+        {
+            Text = m == null ? "This link is too long for a QR code. Use Copy link instead." : "Point your phone's camera at the code. The phone needs to be on the same network as this PC.",
+            ForeColor = Theme.Sub, Location = new Point(24, side + 36), MaximumSize = new Size(side, 0), AutoSize = true
+        };
+        var close = new KButton("Close", true);
+        close.Click += (s, e) => Close();
+        Controls.Add(hint);
+        close.Location = new Point(24 + side - close.Width, hint.Bottom + 16);
+        Controls.Add(pic); Controls.Add(close);
+        KeyPreview = true;
+        KeyDown += (s, e) => { if (e.KeyCode == Keys.Escape || e.KeyCode == Keys.Enter) Close(); };
+        ClientSize = new Size(side + 48, close.Bottom + 24);
+    }
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        int dark = Theme.Light ? 0 : 1; DwmSetWindowAttribute(Handle, 20, ref dark, 4);
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && image != null) image.Dispose();
+        base.Dispose(disposing);
+    }
+}
+
 // ======================================================================= Settings UI
 // The colours of Kinetik's own windows, menus and hover cards: the theme and accent shared by every Kinetik app
 // (KinetikSuite.Look), picked on the Theme page.
@@ -12594,12 +12911,16 @@ class SettingsForm : Form
         var tools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Bg, Margin = new Padding(0, 2, 0, 4) };
         var open = Btn("Open in browser", (s, e) => WebDash.Open(c), true); open.Margin = new Padding(0, 0, 8, 0);
         var copy = Btn("Copy link", (s, e) => { try { Clipboard.SetText(WebDash.Link(c)); } catch { } }); copy.Margin = new Padding(0, 0, 8, 0);
+        // A phone can't open this PC's localhost link, so the QR code only comes with "Allow other devices"
+        var qr = Btn("QR code", (s, e) => { using (var w = new QrWindow(WebDash.Link(c))) w.ShowDialog(this); }); qr.Margin = new Padding(0, 0, 8, 0);
         var renew = Btn("New link", (s, e) =>
         {
             if (MessageBox.Show(this, "Make a new link? The old one stops working, so devices using it will need the new one.", "Kinetik Stats", MessageBoxButtons.OKCancel, MessageBoxIcon.Question) != DialogResult.OK) return;
             c.WebKey = WebDash.NewKey(); Apply(); RefreshPage();
         });
-        tools.Controls.Add(open); tools.Controls.Add(copy); tools.Controls.Add(renew);
+        tools.Controls.Add(open); tools.Controls.Add(copy);
+        if (c.WebLan) tools.Controls.Add(qr);
+        tools.Controls.Add(renew);
         list.Controls.Add(tools);
         Hint(c.WebLan ? "Open this link on your phone or another PC on the same network. Anyone with the link can see your readings, so only share it with devices you trust. New link makes the old one stop working."
                       : "This link works in a browser on this PC. Switch on \"Allow other devices\" to open the dashboard on your phone.", 56);
