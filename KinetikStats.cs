@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik Stats")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("4.0.1.0")]
-[assembly: AssemblyFileVersion("4.0.1.0")]
-[assembly: AssemblyInformationalVersion("4.0.1")]
+[assembly: AssemblyVersion("4.1.0.0")]
+[assembly: AssemblyFileVersion("4.1.0.0")]
+[assembly: AssemblyInformationalVersion("4.1.0")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -131,6 +131,9 @@ class Settings
     public bool BarHover = true;      // hovering a stat on the bar shows its last minute and the top process
     public bool AllTaskbars = false;  // also show the bar on other monitors' taskbars
     public bool UpdateBeta = false;   // offer test versions in the update check
+    // Screens: switch monitors off from the menu or Ctrl+Shift+F8 (Screens)
+    public bool ScreensHotkey = true; // Ctrl+Shift+F8: every screen to sleep, or back on any Kinetik switched off
+    public bool ScreensBlank = false; // cover a screen with black instead of switching it off over DDC/CI
     // Notifications
     public bool AlertTemps = true, AlertBattery = true, AlertDisk = true, AlertPing = false;
     public bool TrackScreenTime = true; // the Screen time page's record of which app is in front (ScreenTime)
@@ -2871,6 +2874,8 @@ class StatsBar : Form
         menu.Items.Add(webItem);
         var profilesItem = new ToolStripMenuItem("Profiles");
         menu.Items.Add(profilesItem);
+        var screensItem = new ToolStripMenuItem("Screens");
+        menu.Items.Add(screensItem);
         menu.Opening += (s, e) =>
         {
             Theme.Use(); // the Kinetik apps' theme may have changed in another app
@@ -2890,6 +2895,7 @@ class StatsBar : Form
             }
             if (profilesItem.DropDownItems.Count == 0) profilesItem.DropDownItems.Add(new ToolStripMenuItem("Save one in Settings → General") { Enabled = false });
             unlockOverlay.Visible = Cfg.OverlayShow && Cfg.OverlayLocked;
+            FillScreensMenu(screensItem);
         };
         menu.Items.Add("Refresh batteries now", null, (s, e) => ThreadPool.QueueUserWorkItem(_ => Sampler.ReadBatteries()));
         if (!Program.IsAdmin) menu.Items.Add("Restart as administrator (CPU temp)", null, (s, e) => Program.RestartAsAdmin());
@@ -2898,11 +2904,13 @@ class StatsBar : Form
 
         Sampler = new Sampler(Cfg, () => { try { BeginInvoke((Action)Render); } catch { } });
         Watch = new GameWatch(this);
+        Screens.Changed += () => NotifySettings("Screens"); // the Screens page follows changes made from the menu or a hotkey
         hoverTimer.Tick += (s, e) => ShowHover();
         mediaTimer.Tick += (s, e) => { mediaTimer.Stop(); if (mediaAnchor.Contains(Cursor.Position)) ShowMediaCard(mediaAnchor); };
         HandleCreated += (s, e) =>
         {
             Sampler.Start(); TrimSoon(15000); ListenForShow();
+            Screens.Init(this);
             try { RegisterPowerSettingNotification(Handle, ref DisplayState, 0); } catch { } // answered straight away with the current state
             if (File.Exists(Shortcuts.DesktopPath)) ThreadPool.QueueUserWorkItem(_ => Shortcuts.CreateDesktop(Cfg.TrayStyle)); // keeps its icon current
         };
@@ -3006,6 +3014,7 @@ class StatsBar : Form
         if (mediaCard != null) { mediaCard.Close(); mediaCard.Dispose(); mediaCard = null; }
         if (dash != null) dash.Close();
         WebDash.Stop();
+        Screens.RestoreAll(); // nothing stays switched off once Kinetik isn't there to switch it back on
         if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; } // otherwise a dead icon lingers until hovered
         if (taskButton != null) { taskButton.Dispose(); taskButton = null; }
         base.OnFormClosing(e);
@@ -4020,7 +4029,7 @@ class StatsBar : Form
         BeginInvoke((Action)(() => { Render(true); NotifySettings("Overlay"); }));
     }
 
-    bool benchKeyOn, dashKeyOn;
+    bool benchKeyOn, dashKeyOn, screensKeyOn;
 
     // ---- Live dashboard: a window made when it's opened and gone when it's closed, plus the web dashboard's server.
     DashboardForm dash;
@@ -4062,9 +4071,11 @@ class StatsBar : Form
         SyncKey(1, Keys.F10, Cfg.OverlayHotkey, ref hotkeyOn);
         SyncKey(2, Keys.F11, Cfg.BenchHotkey, ref benchKeyOn);
         SyncKey(3, Keys.F9, Cfg.Dashboard && Cfg.DashboardHotkey, ref dashKeyOn);
+        SyncKey(4, Keys.F8, Cfg.ScreensHotkey, ref screensKeyOn);
         if (Cfg.OverlayHotkey && !hotkeyOn) Cfg.OverlayHotkey = false; // another app already has it
         if (Cfg.BenchHotkey && !benchKeyOn) Cfg.BenchHotkey = false;
         if (Cfg.Dashboard && Cfg.DashboardHotkey && !dashKeyOn) Cfg.DashboardHotkey = false;
+        if (Cfg.ScreensHotkey && !screensKeyOn) Cfg.ScreensHotkey = false;
     }
 
     void SyncKey(int id, Keys key, bool want, ref bool on)
@@ -4087,10 +4098,53 @@ class StatsBar : Form
             if (m.WParam.ToInt32() == 1) ToggleOverlay();
             else if (m.WParam.ToInt32() == 2) Watch.ToggleRecording();
             else if (m.WParam.ToInt32() == 3) ToggleDashboard();
+            else if (m.WParam.ToInt32() == 4) ScreensHotkey();
             return;
         }
         if (m.Msg == 0x218 && m.WParam.ToInt32() == 0x8013) try { OnPowerSetting(m.LParam); } catch { } // WM_POWERBROADCAST, PBT_POWERSETTINGCHANGE
         base.WndProc(ref m);
+    }
+
+    // ---- Screens: every screen to sleep, or one at a time (Screens).
+    // Ctrl+Shift+F8 brings back screens Kinetik switched off; with none off, it sends every screen to sleep.
+    void ScreensHotkey()
+    {
+        if (Screens.AnyOff) Screens.TurnAllOn();
+        else Screens.AllOff(true);
+    }
+
+    public void TurnScreenOff(Screens.Info m) { Screens.TurnOff(m, Cfg.ScreensBlank); }
+
+    void FillScreensMenu(ToolStripMenuItem parent)
+    {
+        var old = parent.DropDownItems.Cast<ToolStripItem>().ToList();
+        parent.DropDownItems.Clear();
+        foreach (var it in old) it.Dispose();
+        var all = new ToolStripMenuItem("Turn off all screens", null, (s, e) => Screens.AllOff(false));
+        if (Cfg.ScreensHotkey && !Screens.AnyOff) all.ShortcutKeyDisplayString = "Ctrl+Shift+F8";
+        parent.DropDownItems.Add(all);
+        var list = Screens.List();
+        if (list.Count > 1)
+        {
+            parent.DropDownItems.Add(new ToolStripSeparator());
+            foreach (var m in list)
+            {
+                var screen = m;
+                bool off = Screens.IsOff(m.Device);
+                var item = new ToolStripMenuItem((off ? "Turn on " : "Turn off ") + m.Label + (m.Primary ? " (main)" : ""));
+                item.Checked = off;
+                item.Click += (s, e) => { if (Screens.IsOff(screen.Device)) Screens.TurnOn(screen.Device); else TurnScreenOff(screen); };
+                parent.DropDownItems.Add(item);
+            }
+        }
+        if (Screens.AnyOff)
+        {
+            var on = new ToolStripMenuItem("Turn all back on", null, (s, e) => Screens.TurnAllOn());
+            if (Cfg.ScreensHotkey) on.ShortcutKeyDisplayString = "Ctrl+Shift+F8";
+            parent.DropDownItems.Add(on);
+        }
+        parent.DropDownItems.Add(new ToolStripSeparator());
+        parent.DropDownItems.Add("Screens settings…", null, (s, e) => OpenSettings("Screens"));
     }
 
     // ---- Notifications, as Windows toasts through the tray icon (a temporary one when the tray icon is off).
@@ -4125,6 +4179,356 @@ class StatsBar : Form
     {
         if (settingsForm != null && !settingsForm.IsDisposed) settingsForm.RefreshIfShowing(page);
     }
+}
+
+// ======================================================================= Screens: switch monitors off
+// "All screens" asks Windows to put every display to sleep, the same as the power-saving timeout, so any key or
+// mouse move wakes them. One screen at a time goes through DDC/CI, the control channel inside the monitor cable
+// that monitors' own menus use: VCP code D6 (power mode) set to 4 switches the panel off while Windows keeps the
+// display, its windows and the desktop layout as they are, and 1 switches it back on. Built-in laptop panels, TVs
+// and monitors with DDC/CI switched off in their menus don't answer, so those are covered with a black window
+// instead (also used for every screen with "Black out instead"). Kinetik switches back on every screen it turned
+// off when it exits, and the next start finishes the job if it closed without doing so.
+static class Screens
+{
+    public class Info
+    {
+        public string Device;      // \\.\DISPLAY1
+        public string Name;        // "DELL U2720Q", or "Built-in display"
+        public Rectangle Bounds;
+        public bool Primary;
+        public int Number;         // 1, 2, … from left to right, then top to bottom
+        public string Label { get { return Number + " · " + Name; } }
+    }
+
+    const string StateValue = "ScreensTurnedOff"; // DDC-off screens, so a crash can't leave one off for good
+    static readonly HashSet<string> ddcOff = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    static readonly Dictionary<string, ScreenBlank> blanks = new Dictionary<string, ScreenBlank>(StringComparer.OrdinalIgnoreCase);
+    static Control ui;
+    public static event Action Changed;
+
+    public static void Init(Control owner)
+    {
+        if (ui != null) return;
+        ui = owner;
+        SystemEvents.DisplaySettingsChanged += (s, e) => { try { ui.BeginInvoke((Action)OnDisplaysChanged); } catch { } };
+        // Screens left off by a copy that didn't get to switch them back on.
+        string[] left;
+        try
+        {
+            using (var k = Registry.CurrentUser.OpenSubKey(Settings.Key))
+                left = k == null ? new string[0] : ((k.GetValue(StateValue) as string) ?? "").Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries);
+        }
+        catch { left = new string[0]; }
+        if (left.Length == 0) return;
+        ThreadPool.QueueUserWorkItem(_ => { foreach (var d in left) Ddc(d, 1); });
+        SaveState();
+    }
+
+    public static bool IsOff(string device) { return ddcOff.Contains(device) || blanks.ContainsKey(device); }
+    public static bool IsBlanked(string device) { return blanks.ContainsKey(device); }
+    public static bool AnyOff { get { return ddcOff.Count > 0 || blanks.Count > 0; } }
+
+    // ---- Turning screens off and on. Everything here runs on the UI thread; DDC/CI calls go to the thread pool,
+    // as a monitor can take a moment to answer.
+    public static void TurnOff(Info m, bool blankOnly)
+    {
+        if (IsOff(m.Device)) return;
+        // Switching off the last screen still on would leave nothing to see Kinetik on, and nothing a mouse can wake.
+        var list = List();
+        if (list.Count(x => !IsOff(x.Device)) <= 1) { AllOff(false); return; }
+        if (blankOnly) { Blank(m); return; }
+        ddcOff.Add(m.Device); SaveState(); Raise();
+        string device = m.Device;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            bool ok = Ddc(device, 4);
+            // Some monitors accept the command and switch straight back on while they still get a picture. Check.
+            if (ok) { Thread.Sleep(2500); uint v; if (ReadPower(device, out v) && v == 1) ok = false; }
+            if (ok) return;
+            Post(() =>
+            {
+                if (!ddcOff.Remove(device)) return; // turned back on meanwhile
+                SaveState();
+                var now = List().FirstOrDefault(x => x.Device.Equals(device, StringComparison.OrdinalIgnoreCase));
+                if (now != null) Blank(now); else Raise();
+            });
+        });
+    }
+
+    public static void TurnOn(string device)
+    {
+        ScreenBlank b;
+        if (blanks.TryGetValue(device, out b)) { blanks.Remove(device); b.Close(); b.Dispose(); }
+        if (ddcOff.Remove(device)) { SaveState(); ThreadPool.QueueUserWorkItem(_ => Ddc(device, 1)); }
+        Raise();
+    }
+
+    public static void TurnAllOn()
+    {
+        foreach (var d in ddcOff.Concat(blanks.Keys).ToList()) TurnOn(d);
+    }
+
+    // Every screen to sleep, as Windows does after its timeout. From a hotkey, waits until the keys are let go, as
+    // releasing them would wake the screens straight away.
+    public static void AllOff(bool fromHotkey)
+    {
+        var t = new System.Windows.Forms.Timer { Interval = 50 };
+        var started = DateTime.UtcNow;
+        t.Tick += (s, e) =>
+        {
+            double ms = (DateTime.UtcNow - started).TotalMilliseconds;
+            bool held = fromHotkey && ((GetAsyncKeyState(0x11) | GetAsyncKeyState(0x10) | GetAsyncKeyState(0x77)) & 0x8000) != 0 && ms < 3000; // Ctrl, Shift, F8
+            if (held || ms < 400) return;
+            t.Stop(); t.Dispose();
+            try { SendMessage(ui.Handle, 0x112, (IntPtr)0xF170, (IntPtr)2); } // WM_SYSCOMMAND, SC_MONITORPOWER, off
+            catch (Exception ex) { Program.Log(ex); }
+        };
+        t.Start();
+    }
+
+    static void Blank(Info m)
+    {
+        if (blanks.ContainsKey(m.Device)) return;
+        var b = new ScreenBlank(m.Bounds, null);
+        string device = m.Device;
+        b.Wake += () => TurnOn(device);
+        blanks[device] = b;
+        b.Show();
+        Raise();
+    }
+
+    // Shows each screen's number for a couple of seconds, like Windows' Identify.
+    public static void Identify()
+    {
+        foreach (var m in List())
+        {
+            var w = new ScreenBlank(new Rectangle(m.Bounds.X + 40, m.Bounds.Y + 40, 260, 180), m.Number.ToString()) { Opacity = 0.92 };
+            var t = new System.Windows.Forms.Timer { Interval = 2500 };
+            t.Tick += (s, e) => { t.Stop(); t.Dispose(); w.Close(); w.Dispose(); };
+            w.Show(); t.Start();
+        }
+    }
+
+    // On exit: nothing stays off once Kinetik isn't there to switch it back on.
+    public static void RestoreAll()
+    {
+        foreach (var b in blanks.Values.ToList()) { b.Close(); b.Dispose(); }
+        blanks.Clear();
+        var devices = ddcOff.ToList();
+        ddcOff.Clear();
+        if (devices.Count == 0) return;
+        var t = new Thread(() => { foreach (var d in devices) Ddc(d, 1); }) { IsBackground = false };
+        t.Start();
+        if (t.Join(4000)) SaveState(); // otherwise the list stays saved and the next start tries again
+    }
+
+    static void OnDisplaysChanged()
+    {
+        var now = List().ToDictionary(x => x.Device, StringComparer.OrdinalIgnoreCase);
+        foreach (var d in blanks.Keys.ToList())
+        {
+            Info m;
+            if (now.TryGetValue(d, out m)) blanks[d].Bounds = m.Bounds;
+            else { blanks[d].Close(); blanks[d].Dispose(); blanks.Remove(d); }
+        }
+        if (ddcOff.RemoveWhere(d => !now.ContainsKey(d)) > 0) SaveState();
+        Raise();
+    }
+
+    static void SaveState()
+    {
+        if (KinetikSuite.RegistryFiles.CannotSave) return;
+        try { using (var k = Registry.CurrentUser.CreateSubKey(Settings.Key)) k.SetValue(StateValue, string.Join("|", ddcOff)); }
+        catch (Exception e) { Program.Log(e); }
+    }
+
+    static void Raise() { var h = Changed; if (h != null) h(); }
+    static void Post(Action a) { try { ui.BeginInvoke(a); } catch { } }
+
+    // ---- The screens connected now, with the names Windows' Settings shows for them.
+    public static List<Info> List()
+    {
+        var names = FriendlyNames();
+        var list = new List<Info>();
+        MonitorEnumProc proc = (IntPtr h, IntPtr dc, ref RECT r, IntPtr data) =>
+        {
+            var mi = new MONITORINFOEX { cbSize = Marshal.SizeOf(typeof(MONITORINFOEX)) };
+            if (GetMonitorInfo(h, ref mi))
+            {
+                string name;
+                if (!names.TryGetValue(mi.szDevice, out name) || string.IsNullOrWhiteSpace(name)) name = "Screen";
+                list.Add(new Info
+                {
+                    Device = mi.szDevice, Name = name, Primary = (mi.dwFlags & 1) != 0,
+                    Bounds = Rectangle.FromLTRB(mi.rcMonitor.L, mi.rcMonitor.T, mi.rcMonitor.R, mi.rcMonitor.B)
+                });
+            }
+            return true;
+        };
+        EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, proc, IntPtr.Zero);
+        GC.KeepAlive(proc);
+        list = list.OrderBy(x => x.Bounds.X).ThenBy(x => x.Bounds.Y).ToList();
+        for (int i = 0; i < list.Count; i++) list[i].Number = i + 1;
+        return list;
+    }
+
+    // GDI device name (\\.\DISPLAY1) → monitor name from its EDID, through the display configuration API.
+    static Dictionary<string, string> FriendlyNames()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            uint np, nm;
+            if (GetDisplayConfigBufferSizes(2, out np, out nm) != 0) return map; // QDC_ONLY_ACTIVE_PATHS
+            IntPtr paths = Marshal.AllocHGlobal((int)np * PathSize), modes = Marshal.AllocHGlobal((int)Math.Max(1, nm) * 64);
+            IntPtr src = Marshal.AllocHGlobal(84), tgt = Marshal.AllocHGlobal(420);
+            try
+            {
+                if (QueryDisplayConfig(2, ref np, paths, ref nm, modes, IntPtr.Zero) != 0) return map;
+                for (int i = 0; i < np; i++)
+                {
+                    IntPtr p = paths + i * PathSize;
+                    // DISPLAYCONFIG_SOURCE_DEVICE_NAME: header (type, size, adapter LUID, source id), then the GDI name.
+                    Header(src, 1, 84, Marshal.ReadInt64(p, 0), Marshal.ReadInt32(p, 8));
+                    if (DisplayConfigGetDeviceInfo(src) != 0) continue;
+                    string gdi = Marshal.PtrToStringUni(src + 20);
+                    // DISPLAYCONFIG_TARGET_DEVICE_NAME: the target's output technology at 24, its friendly name at 36.
+                    Header(tgt, 2, 420, Marshal.ReadInt64(p, 20), Marshal.ReadInt32(p, 28));
+                    if (DisplayConfigGetDeviceInfo(tgt) != 0) continue;
+                    string name = Marshal.PtrToStringUni(tgt + 36);
+                    uint tech = (uint)Marshal.ReadInt32(tgt, 24);
+                    if (string.IsNullOrWhiteSpace(name) && (tech == 0x80000000 || tech == 11 || tech == 13)) name = "Built-in display"; // internal, eDP, embedded UDI
+                    if (!string.IsNullOrEmpty(gdi) && !map.ContainsKey(gdi)) map[gdi] = name;
+                }
+            }
+            finally { Marshal.FreeHGlobal(paths); Marshal.FreeHGlobal(modes); Marshal.FreeHGlobal(src); Marshal.FreeHGlobal(tgt); }
+        }
+        catch (Exception e) { Program.Log(e); }
+        return map;
+    }
+
+    const int PathSize = 72; // DISPLAYCONFIG_PATH_INFO
+
+    static void Header(IntPtr b, int type, int size, long adapter, int id)
+    {
+        for (int i = 0; i < size; i += 4) Marshal.WriteInt32(b, i, 0);
+        Marshal.WriteInt32(b, 0, type); Marshal.WriteInt32(b, 4, size); Marshal.WriteInt64(b, 8, adapter); Marshal.WriteInt32(b, 16, id);
+    }
+
+    // ---- DDC/CI. Returns whether any physical monitor behind the display accepted the command.
+    static bool Ddc(string device, uint power)
+    {
+        bool ok = false;
+        ForPhysical(device, h => { if (SetVCPFeature(h, 0xD6, power)) ok = true; });
+        return ok;
+    }
+
+    static bool ReadPower(string device, out uint value)
+    {
+        uint v = 0; bool ok = false;
+        ForPhysical(device, h => { uint cur, max; if (!ok && GetVCPFeatureAndVCPFeatureReply(h, 0xD6, IntPtr.Zero, out cur, out max)) { v = cur; ok = true; } });
+        value = v;
+        return ok;
+    }
+
+    static void ForPhysical(string device, Action<IntPtr> act)
+    {
+        IntPtr mon = IntPtr.Zero;
+        MonitorEnumProc proc = (IntPtr h, IntPtr dc, ref RECT r, IntPtr data) =>
+        {
+            var mi = new MONITORINFOEX { cbSize = Marshal.SizeOf(typeof(MONITORINFOEX)) };
+            if (GetMonitorInfo(h, ref mi) && string.Equals(mi.szDevice, device, StringComparison.OrdinalIgnoreCase)) { mon = h; return false; }
+            return true;
+        };
+        try
+        {
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, proc, IntPtr.Zero);
+            GC.KeepAlive(proc);
+            uint n;
+            if (mon == IntPtr.Zero || !GetNumberOfPhysicalMonitorsFromHMONITOR(mon, out n) || n == 0 || n > 16) return;
+            var arr = new PHYSICAL_MONITOR[n];
+            if (!GetPhysicalMonitorsFromHMONITOR(mon, n, arr)) return;
+            try { foreach (var pm in arr) act(pm.hPhysicalMonitor); }
+            finally { DestroyPhysicalMonitors(n, arr); }
+        }
+        catch (Exception e) { Program.Log(e); }
+    }
+
+    // ---- Native
+    [StructLayout(LayoutKind.Sequential)] struct RECT { public int L, T, R, B; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct MONITORINFOEX { public int cbSize; public RECT rcMonitor, rcWork; public int dwFlags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string szDevice; }
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct PHYSICAL_MONITOR { public IntPtr hPhysicalMonitor; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string szPhysicalMonitorDescription; }
+    delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdc, ref RECT rect, IntPtr data);
+
+    [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumProc proc, IntPtr data);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr h, ref MONITORINFOEX mi);
+    [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, IntPtr l);
+    [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
+    [DllImport("user32.dll")] static extern int GetDisplayConfigBufferSizes(uint flags, out uint paths, out uint modes);
+    [DllImport("user32.dll")] static extern int QueryDisplayConfig(uint flags, ref uint paths, IntPtr pathArray, ref uint modes, IntPtr modeArray, IntPtr topology);
+    [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(IntPtr packet);
+    [DllImport("dxva2.dll")] static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(IntPtr h, out uint n);
+    [DllImport("dxva2.dll")] static extern bool GetPhysicalMonitorsFromHMONITOR(IntPtr h, uint n, [Out] PHYSICAL_MONITOR[] monitors);
+    [DllImport("dxva2.dll")] static extern bool DestroyPhysicalMonitors(uint n, PHYSICAL_MONITOR[] monitors);
+    [DllImport("dxva2.dll")] static extern bool SetVCPFeature(IntPtr h, byte code, uint value);
+    [DllImport("dxva2.dll")] static extern bool GetVCPFeatureAndVCPFeatureReply(IntPtr h, byte code, IntPtr type, out uint current, out uint max);
+}
+
+// A black, always-on-top window over one screen: "off" for screens that can't be switched off over DDC/CI, and the
+// numbers Identify shows. Double-click wakes a blacked-out screen; moving the mouse over it shows how, for a moment.
+class ScreenBlank : Form
+{
+    public event Action Wake;
+    readonly string number;
+    readonly System.Windows.Forms.Timer hintTimer = new System.Windows.Forms.Timer { Interval = 2500 };
+    bool hint;
+    Point lastMouse;
+
+    public ScreenBlank(Rectangle bounds, string number)
+    {
+        this.number = number;
+        FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true;
+        StartPosition = FormStartPosition.Manual; Bounds = bounds;
+        BackColor = Color.Black; DoubleBuffered = true;
+        hintTimer.Tick += (s, e) => { hintTimer.Stop(); hint = false; Invalidate(); };
+        if (number == null)
+        {
+            DoubleClick += (s, e) => { var w = Wake; if (w != null) w(); };
+            MouseMove += (s, e) =>
+            {
+                if (e.Location == lastMouse) return; // a window appearing under the cursor sends one too
+                lastMouse = e.Location;
+                if (!hint) { hint = true; Invalidate(); }
+                hintTimer.Stop(); hintTimer.Start();
+            };
+        }
+    }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+    protected override CreateParams CreateParams
+    {
+        get { var p = base.CreateParams; p.ExStyle |= 0x80 | 0x8 | 0x08000000; return p; } // tool window, topmost, no activate
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+        if (number != null)
+        {
+            g.Clear(Color.FromArgb(24, 24, 28));
+            using (var f = new Font("Segoe UI", 72f, FontStyle.Bold))
+                TextRenderer.DrawText(g, number, f, ClientRectangle, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            return;
+        }
+        if (!hint) return;
+        using (var f = new Font("Segoe UI", 12f))
+            TextRenderer.DrawText(g, "Double-click to turn this screen back on", f, ClientRectangle, Color.FromArgb(110, 110, 120), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+    }
+
+    protected override void Dispose(bool disposing) { if (disposing) hintTimer.Dispose(); base.Dispose(disposing); }
 }
 
 // ======================================================================= Safe file writes
@@ -11788,7 +12192,7 @@ class SettingsForm : Form
     static readonly KeyValuePair<string, string[]>[] NavGroups =
     {
         G("TASKBAR", "Stats", "Arrange", "Appearance", "Colours"),
-        G("ON SCREEN", "Widget", "Overlay", "Dashboard"),
+        G("ON SCREEN", "Widget", "Overlay", "Dashboard", "Screens"),
         G("THIS PC", "Screen time", "Timeline", "Crashes"),
         G("APP", "Theme", "General", "About"),
     };
@@ -11802,6 +12206,7 @@ class SettingsForm : Form
         { "Widget", "A panel of live stats and graphs on your desktop." },
         { "Overlay", "A slim strip of stats over your games, with an FPS counter." },
         { "Dashboard", "Every reading with graphs, in a window or a browser." },
+        { "Screens", "Switch your monitors off, all together or one at a time." },
         { "Screen time", "How long you used each app, day by day, and what each one asked of your PC." },
         { "Timeline", "What was installed, updated, removed or switched on, day by day." },
         { "Crashes", "Crashes, freezes, driver resets, blue screens and sudden shutdowns, explained." },
@@ -11815,7 +12220,7 @@ class SettingsForm : Form
 
     static readonly Dictionary<string, IconFn> navIcons = new Dictionary<string, IconFn>
     {
-        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "Widget", Icons.Monitor }, { "Overlay", Icons.Gamepad }, { "Dashboard", Icons.Pulse }, { "Screen time", Icons.Hourglass }, { "Timeline", Icons.Clock }, { "Crashes", Icons.Alert }, { "Theme", Icons.Contrast }, { "General", Icons.Gear }, { "About", Icons.Info }
+        { "Stats", Icons.Chip }, { "Arrange", Icons.Grip }, { "Appearance", Icons.Text }, { "Colours", Icons.Palette }, { "Widget", Icons.Monitor }, { "Overlay", Icons.Gamepad }, { "Dashboard", Icons.Pulse }, { "Screens", Icons.Power }, { "Screen time", Icons.Hourglass }, { "Timeline", Icons.Clock }, { "Crashes", Icons.Alert }, { "Theme", Icons.Contrast }, { "General", Icons.Gear }, { "About", Icons.Info }
     };
 
     Label NavItem(string name)
@@ -11947,6 +12352,7 @@ class SettingsForm : Form
         else if (name == "Widget") BuildWidget();
         else if (name == "Overlay") BuildOverlay();
         else if (name == "Dashboard") BuildDashboard();
+        else if (name == "Screens") BuildScreens();
         else if (name == "Screen time") BuildScreenTime();
         else if (name == "Timeline") BuildTimeline();
         else if (name == "Crashes") BuildCrashes();
@@ -12811,6 +13217,43 @@ class SettingsForm : Form
         };
         arrangeList.IconClicked += ShowIconPicker;
         list.Controls.Add(arrangeList);
+    }
+
+    // ---- Screens: switch monitors off, every one at once or one at a time.
+    void BuildScreens()
+    {
+        Hint("Switch screens off without unplugging or reaching for their buttons. Kinetik switches every screen it turned off back on when it closes.", 48);
+
+        Header("All screens");
+        Add(Icons.Power, Theme.Accent, "Turn off all screens", "Like Windows' power-saving timeout: any key or mouse move wakes them", Btn("Turn off", (s, e) => Screens.AllOff(false), true));
+        Switch(Icons.Bolt, Theme.Accent, "Hotkey: Ctrl+Shift+F8", "ScreensHotkey", "Turns every screen off, or back on any screens Kinetik switched off");
+
+        var list = Screens.List();
+        Header("One at a time");
+        if (list.Count < 2)
+            Hint("With a second screen connected, you can switch each one off on its own here and from the right-click menu.", 40);
+        else
+        {
+            Hint("A screen switched off stays off while you use the others, until you turn it back on here, from the right-click menu or with Ctrl+Shift+F8.", 48);
+            foreach (var m in list)
+            {
+                var screen = m;
+                bool off = Screens.IsOff(m.Device);
+                string state = off ? (Screens.IsBlanked(m.Device) ? "Blacked out: double-click it to turn it back on" : "Switched off") : (m.Primary ? "Main screen" : "On");
+                string desc = state + " · " + m.Bounds.Width + "×" + m.Bounds.Height;
+                var btn = Btn(off ? "Turn on" : "Turn off", (s, e) =>
+                {
+                    if (Screens.IsOff(screen.Device)) Screens.TurnOn(screen.Device); else bar.TurnScreenOff(screen); // the page refreshes itself
+                }, off);
+                Add(Icons.Monitor, off ? Theme.Sub : Theme.Accent, m.Label, desc, btn);
+            }
+            var tools = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, BackColor = Theme.Card, Margin = Padding.Empty };
+            tools.Controls.Add(Btn("Identify", (s, e) => Screens.Identify()));
+            if (Screens.AnyOff) { var allOn = Btn("Turn all back on", (s, e) => Screens.TurnAllOn()); allOn.Margin = new Padding(6, 0, 0, 0); tools.Controls.Add(allOn); }
+            Add(Icons.Info, Theme.Accent, "Which is which?", "Shows each screen's number on it for a moment", tools);
+            Switch(Icons.Contrast, Theme.Accent, "Black out instead", "ScreensBlank", "Covers the screen with black rather than switching it off. For monitors that switch straight back on.");
+            Hint("Screens are switched off over DDC/CI, the control channel monitors' own menus use. Laptop screens, TVs and monitors with DDC/CI off in their menu are blacked out instead.", 48);
+        }
     }
 
     void BuildDashboard()

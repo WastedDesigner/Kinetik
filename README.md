@@ -28,6 +28,7 @@ Every stat can be switched on or off, reordered, restyled and grouped with divid
 - [Game overlay](#game-overlay)
 - [Dashboard](#dashboard)
 - [Now playing](#now-playing)
+- [Screens](#screens)
 - [Screen time](#screen-time)
 - [Timeline and Crashes](#timeline-and-crashes)
 - [Themes](#themes)
@@ -175,6 +176,17 @@ Shows what's playing in Spotify, browsers and media players, with its cover art,
 - Hover for a card with the cover, artist, album, progress and playback buttons
 - Long titles scroll instead of being cut short
 
+## Screens
+
+Switch your monitors off without reaching for their buttons, from **Screens** in the right-click menu, **Settings → Screens** or **Ctrl+Shift+F8**.
+
+- **Turn off all screens:** puts every screen to sleep, like Windows' power-saving timeout. Any key or mouse move wakes them.
+- **One screen at a time:** with two or more screens, switch any one off while you keep using the others. It stays off until you turn it back on from the menu, Settings or **Ctrl+Shift+F8**. Windows keeps the screen and the windows on it where they are, so nothing gets rearranged.
+- **Ctrl+Shift+F8** turns every screen off, or, when Kinetik has switched some off, turns them back on.
+- **Identify** shows each screen's number on it, so you know which is which.
+- Screens are switched off over **DDC/CI**, the control channel monitors' own menus use. Laptop screens, TVs and monitors with DDC/CI off in their menu are **blacked out** instead: double-click a blacked-out screen to turn it back on. **Black out instead** does this for every screen, for monitors that switch straight back on.
+- Switching off the last screen that's still on turns every screen off instead, so you're never left with nothing a mouse can wake. Kinetik switches every screen it turned off back on when it closes, and the next start does it if it didn't get the chance.
+
 ## Screen time
 
 How long you used each app, day by day, and what each one asked of your PC. Open it from **Settings → Screen time**.
@@ -231,6 +243,7 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 | **Appearance** | Font and size, one or two lines, spacing sliders (with **Reset spacing**), divider style and height, hover graphs, animated icons and their frame rate, and the background pill's opacity and corner roundness. |
 | **Colours** | Match the taskbar theme, text and warning colours, a colour for each icon group, and the background colour. |
 | **Overlay** | Turn the game overlay on, show it automatically in games, move it to the game's monitor, close it with the game, the Ctrl+Shift+F10 hotkey, lock (click-through), position, session summaries, benchmark recording (Ctrl+Shift+F11), text labels or icons, size, background opacity, and its own **Contents** list. |
+| **Screens** | **Turn off all screens**, the Ctrl+Shift+F8 hotkey, each screen with its own **Turn off** / **Turn on** button, **Identify**, **Turn all back on** and **Black out instead**. |
 | **Dashboard** | Turn the dashboard window and web dashboard on, share the web dashboard on your network, **New link**, theme, graph length, and the **Layout** editor for cards and their stats. |
 | **Widget** | Turn the desktop widget on, and set its placement, lock, click-through and snapping, style, theme, colours, size, width, roundness, shadow, animated icons, title, headings and graph history. Its **Contents** list works like the Arrange page. |
 | **Screen time** | Screen time for a day or a range, hour-by-hour or day-by-day chart, apps by screen time, processor, memory or disk, **Keep screen time** and **Clear history**. |
@@ -253,15 +266,16 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 ## Tips and shortcuts
 
 - **Tray icon:** click for Settings, right-click for the same menu as the bar. If it's hidden under the **^** arrow, drag it onto the taskbar.
-- **Right-click menu:** Settings…, Arrange stats…, Desktop widget, Unlock desktop widget (when it's locked), Game overlay, Unlock game overlay (when it's locked), Record benchmark, Profiles, Refresh batteries now, Restart as administrator, Exit
+- **Right-click menu:** Settings…, Arrange stats…, Desktop widget, Unlock desktop widget (when it's locked), Game overlay, Unlock game overlay (when it's locked), Record benchmark, Profiles, Screens, Refresh batteries now, Restart as administrator, Exit
 - **Widget:** drag to move it, and right-click it for Widget settings, Lock position and Hide widget. If it's locked and click-through, unlock it from the bar's right-click menu.
 - **Game overlay:** **Ctrl+Shift+F10** shows or hides it, even in a game. Right-click it (while unlocked) for Overlay settings, Lock position and Hide overlay.
 - **Benchmarks:** **Ctrl+Shift+F11** starts and stops recording, even in a game
+- **Screens:** **Ctrl+Shift+F8** turns every screen off, or back on the ones Kinetik switched off
 - **Arrange page keys:** ↑ / ↓ select a row, **Alt+↑ / Alt+↓** (or Ctrl) move it, **Space** switches it on or off, **Delete** removes a divider
 - **Sliders:** click one first, then use the mouse wheel or ← / → keys for fine adjustments
 - **Text labels instead of icons:** open the icon picker and choose **Text** for a compact, icon-free look
 - **Grouping:** add dividers, then pick a divider style on the Appearance page. **Blank space** gives gaps without lines.
-- **Command line:** `KinetikStats.exe --settings Arrange` opens Settings on a specific page (Stats, Arrange, Appearance, Colours, Widget, Overlay, Dashboard, Screen time, Timeline, Crashes, Theme, General or About; put "Screen time" in quotes)
+- **Command line:** `KinetikStats.exe --settings Arrange` opens Settings on a specific page (Stats, Arrange, Appearance, Colours, Widget, Overlay, Dashboard, Screens, Screen time, Timeline, Crashes, Theme, General or About; put "Screen time" in quotes)
 
 ## CPU temperature
 
@@ -302,9 +316,14 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Base FPS and render latency need a game with NVIDIA Reflex. Other games show `--` for them.
 - Showing the overlay automatically, session summaries and moving to the game's monitor recognise games that fill their screen (fullscreen or borderless), not windowed ones.
 - The public IP stat asks api.ipify.org for your address every 5 minutes while it's shown. It's off unless you switch it on.
+- Switching a single screen off needs a monitor that supports DDC/CI with it switched on in the monitor's own menu. A few monitors accept the command but wake up again straight away, or ignore DDC/CI after switching off and need their power button; use **Black out instead** for those. On an LCD, a blacked-out screen still has its backlight on.
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v4.1.0: Screens
+
+- **New: Screens.** Turn every screen off, or one screen at a time while you keep using the others, from the right-click menu, **Settings → Screens** or **Ctrl+Shift+F8** ([see above](#screens)).
 
 ### v4.0.0: Kinetik Stats
 

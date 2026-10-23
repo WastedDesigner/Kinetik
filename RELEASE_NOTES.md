@@ -1,3 +1,14 @@
+# Kinetik Stats v4.1.0
+
+Switch your monitors off, all together or one at a time.
+
+- **New: Screens** in the right-click menu and Settings. **Turn off all screens** puts every screen to sleep, like Windows' power-saving timeout, and any key or mouse move wakes them.
+- **New: one screen at a time.** With two or more screens, switch any one off while you keep using the others. It stays off until you turn it back on from the menu, Settings or the hotkey, and Windows keeps its windows where they are.
+- **New hotkey: Ctrl+Shift+F8** turns every screen off, or back on any screens Kinetik switched off.
+- Screens are switched off over DDC/CI. Laptop screens, TVs and monitors without it are blacked out instead (double-click to turn one back on), and **Black out instead** does that for every screen. **Identify** shows each screen's number on it.
+- Kinetik turns every screen it switched off back on when it closes, and switching off the last screen still on turns them all off instead, so a mouse move can always wake them.
+
+
 # Kinetik Stats v4.0.1
 
 A QR code for the web dashboard.
