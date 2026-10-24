@@ -1,3 +1,10 @@
+# Kinetik Stats v4.0.2
+
+A fix for AMD and Intel graphics cards.
+
+- **Fixed: AMD and Intel GPUs could go missing** when Kinetik Stats runs as administrator. The CPU, drive and RAM sensors start together with the GPU, and if one of them failed, AMD and Intel cards weren't read until the next restart (NVIDIA cards were fine). Now the graphics card is read even when those sensors fail.
+
+
 # Kinetik Stats v4.0.1
 
 A QR code for the web dashboard.

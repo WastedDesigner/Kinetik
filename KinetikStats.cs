@@ -39,9 +39,9 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Kinetik Stats")]
 [assembly: AssemblyCompany("Akila Sella Hennedige")]
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
-[assembly: AssemblyVersion("4.0.1.0")]
-[assembly: AssemblyFileVersion("4.0.1.0")]
-[assembly: AssemblyInformationalVersion("4.0.1")]
+[assembly: AssemblyVersion("4.0.2.0")]
+[assembly: AssemblyFileVersion("4.0.2.0")]
+[assembly: AssemblyInformationalVersion("4.0.2")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -463,7 +463,18 @@ class HwSensors
             if (withCpu && cpu == null) Error = "no CPU found";
             return true;
         }
-        catch (Exception e) { Error = e.GetType().Name + ": " + e.Message; return false; }
+        catch (Exception e)
+        {
+            Error = e.GetType().Name + ": " + e.Message;
+            Close();
+            // The CPU, drive and RAM sensors open in the same call; one of them failing mustn't take AMD / Intel GPUs with it.
+            if (!withCpu && !withDrives) return false;
+            var err = Error;
+            if (!Open(false, false)) return false;
+            Error = err;
+            CpuEnabled = withCpu; DrivesEnabled = withDrives; // so the sampler doesn't reopen to retry them every second
+            return true;
+        }
     }
 
     public void Close()
