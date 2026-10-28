@@ -30,7 +30,7 @@ try {
     }
     [IO.Compression.ZipFile]::CreateFromDirectory($stage, $archive)
     $exeHash = Get-Sha256 (Join-Path $stage 'Kinetik.exe')
-    if ($exeHash -ne (Get-Sha256 'KinetikStats.exe')) { throw 'Bridge exe differs from KinetikStats.exe' }
+    if ($exeHash -ne (Get-Sha256 (Join-Path $PSScriptRoot 'KinetikStats.exe'))) { throw 'Bridge exe differs from KinetikStats.exe' }
     ((Get-Sha256 $archive) + '  Kinetik.zip') | Set-Content -LiteralPath ($archive + '.sha256') -Encoding ASCII
     Write-Host "Verified $archive (bridge for Kinetik 3.2 and earlier)"
     Write-Host ('SHA-256 of `Kinetik.exe`: `' + $exeHash + '`')

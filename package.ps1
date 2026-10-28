@@ -17,7 +17,14 @@ try {
         if (-not (Test-Path -LiteralPath $name -PathType Leaf)) { throw "Missing package input: $name" }
         Copy-Item -LiteralPath $name -Destination $stage
     }
-    if (Test-Path -LiteralPath 'RELEASE_NOTES_2026-10-16.md') { Copy-Item -LiteralPath 'RELEASE_NOTES_2026-10-16.md' -Destination $stage }
+    $notesFiles = @('RELEASE_NOTES_2026-10-16.md')
+    if ($App -eq 'KinetikDock') {
+        $notesFiles += @('RELEASE_NOTES_2026-10-17.md', 'PERFORMANCE_1.2.md', 'FEATURE_AND_OPTIMISATION_PLAN.md')
+        if (Test-Path -LiteralPath 'screenshots') { Copy-Item -LiteralPath 'screenshots' -Destination $stage -Recurse }
+    }
+    foreach ($notes in $notesFiles) {
+        if (Test-Path -LiteralPath $notes) { Copy-Item -LiteralPath $notes -Destination $stage }
+    }
     if ($App -in @('Kinetik', 'KinetikStats', 'KinetikScreen')) {
         if (-not (Test-Path -LiteralPath 'lib\LibreHardwareMonitorLib.dll')) { throw 'Missing sensor library' }
         New-Item -ItemType Directory -Path (Join-Path $stage 'lib') | Out-Null
