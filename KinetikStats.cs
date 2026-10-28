@@ -2880,6 +2880,10 @@ class StatsBar : Form
         menu.Items.Add(benchItem);
         menu.Items.Add(dashItem);
         menu.Items.Add(webItem);
+        // The free-space reading's drive, opened in Kinetik Files' space map to see what's filling it.
+        var spaceItem = new ToolStripMenuItem("What's filling the drive…");
+        spaceItem.Click += (s, e) => Shortcuts.OpenSpaceMap(SpaceDrive());
+        menu.Items.Add(spaceItem);
         var profilesItem = new ToolStripMenuItem("Profiles");
         menu.Items.Add(profilesItem);
         menu.Opening += (s, e) =>
@@ -2890,6 +2894,7 @@ class StatsBar : Form
             benchItem.Checked = Watch.IsRecording; benchItem.Text = Watch.IsRecording ? "Stop recording benchmark" : "Record benchmark";
             benchItem.ShortcutKeyDisplayString = Cfg.BenchHotkey ? "Ctrl+Shift+F11" : null;
             dashItem.Visible = Cfg.Dashboard; dashItem.ShortcutKeyDisplayString = Cfg.DashboardHotkey ? "Ctrl+Shift+F9" : null;
+            spaceItem.Visible = Shortcuts.FilesExe != null; spaceItem.Text = "What's filling " + SpaceDrive().TrimEnd('\\') + "? (Kinetik Files)";
             webItem.Visible = Cfg.WebDashboard && WebDash.Status == "" && Cfg.WebKey != "";
             var oldProfiles = profilesItem.DropDownItems.Cast<ToolStripItem>().ToList();
             profilesItem.DropDownItems.Clear();
@@ -3135,10 +3140,15 @@ class StatsBar : Form
         base.OnMouseWheel(e);
     }
 
+    string SegId(Point p) { var sg = SegAt(p); return sg == null ? null : sg.Id; }
+    string SpaceDrive() { return string.IsNullOrEmpty(Cfg.FreeDrive) ? Path.GetPathRoot(Environment.SystemDirectory) : Cfg.FreeDrive; }
+
     public void Clicked(MouseButtons b)
     {
         HideHover();
         if (b == MouseButtons.Right) menu.Show(Cursor.Position);
+        else if (b == MouseButtons.Left && Shortcuts.FilesExe != null && IsHandleCreated && SegId(PointToClient(Cursor.Position)) == "DiskFree")
+            Shortcuts.OpenSpaceMap(SpaceDrive()); // the free-space reading opens what's filling that drive
         else if (b == MouseButtons.Left && Cfg.ClickTaskMgr)
             try { Process.Start(new ProcessStartInfo(Program.SystemExe("taskmgr.exe")) { UseShellExecute = true }); } catch { }
     }
@@ -7539,6 +7549,36 @@ static class Shortcuts
     }
 
     public static void RemoveDesktop() { try { File.Delete(DesktopPath); } catch { } }
+
+    // Kinetik Files, if it's installed (its installer's place, as its "Open in Kinetik Files" verbs use).
+    public static string FilesExe
+    {
+        get { var p = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Programs\Kinetik Files\KinetikFiles.exe"); return File.Exists(p) ? p : null; }
+    }
+
+    // Opens Kinetik Files' space map of a drive. Through a shortcut that Explorer opens, so Files starts unelevated,
+    // like the user's other apps, even though Kinetik Stats may run as administrator.
+    public static void OpenSpaceMap(string drive)
+    {
+        var exe = FilesExe;
+        if (exe == null) return;
+        try
+        {
+            var lnkPath = Path.Combine(Path.GetTempPath(), "Kinetik Files space map.lnk");
+            var shellType = Type.GetTypeFromProgID("WScript.Shell");
+            object shell = Activator.CreateInstance(shellType);
+            object lnk = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell, new object[] { lnkPath });
+            var t = lnk.GetType();
+            Action<string, object> set = (name, v) => t.InvokeMember(name, BindingFlags.SetProperty, null, lnk, new[] { v });
+            set("TargetPath", exe);
+            set("Arguments", "--spacemap \"" + drive.TrimEnd('\\') + "\\\\\"");
+            set("WorkingDirectory", Path.GetDirectoryName(exe));
+            t.InvokeMember("Save", BindingFlags.InvokeMethod, null, lnk, null);
+            Marshal.FinalReleaseComObject(lnk); Marshal.FinalReleaseComObject(shell);
+            Process.Start(new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), "\"" + lnkPath + "\""));
+        }
+        catch (Exception e) { Program.Log(e); }
+    }
 }
 
 // ======================================================================= Icon animation
