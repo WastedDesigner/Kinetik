@@ -1,3 +1,11 @@
+# Kinetik Stats v4.1.0
+
+Rounder, softer menus.
+
+- **Menus are rounded** to match the window's corners, with a little more room around each item and a soft accent-tinted highlight under the mouse instead of a flat bar. The same menus are in Kinetik Files 2.0.
+- The release scripts find their files from any folder they're run in.
+
+
 # Kinetik Stats v4.0.2
 
 A fix for AMD and Intel graphics cards.
