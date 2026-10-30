@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>Kinetik Files</string>
+	<key>CFBundleDisplayName</key>
+	<string>Kinetik Files</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.wasteddesigner.kinetik.files</string>
+	<key>CFBundleExecutable</key>
+	<string>KinetikFiles</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>Akila Sella Hennedige · GPL-3.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Kinetik Files asks Finder to show its Get Info window.</string>
+	<key>NSDesktopFolderUsageDescription</key>
+	<string>Kinetik Files shows the files on your Desktop.</string>
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Kinetik Files shows the files in your Documents folder.</string>
+	<key>NSDownloadsFolderUsageDescription</key>
+	<string>Kinetik Files shows the files in your Downloads folder.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Kinetik Files shows the files on USB drives and memory cards.</string>
+	<key>NSNetworkVolumesUsageDescription</key>
+	<string>Kinetik Files shows the files on network drives.</string>
+	<!-- Folders can be opened with Kinetik Files (open -a, drag onto the Dock icon, and as the folder viewer). -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Folder</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.folder</string>
+				<string>public.volume</string>
+			</array>
+		</dict>
+	</array>
+	<!-- "Open in Kinetik Files" in every app's Services menu. -->
+	<key>NSServices</key>
+	<array>
+		<dict>
+			<key>NSMenuItem</key>
+			<dict>
+				<key>default</key>
+				<string>Open in Kinetik Files</string>
+			</dict>
+			<key>NSMessage</key>
+			<string>openFolder</string>
+			<key>NSRequiredContext</key>
+			<dict/>
+			<key>NSSendFileTypes</key>
+			<array>
+				<string>public.folder</string>
+				<string>public.item</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
