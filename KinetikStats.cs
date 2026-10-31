@@ -42,7 +42,7 @@ using Microsoft.Win32;
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
 [assembly: AssemblyVersion("5.0.0.0")]
 [assembly: AssemblyFileVersion("5.0.0.0")]
-[assembly: AssemblyInformationalVersion("5.0.0-beta.1")]
+[assembly: AssemblyInformationalVersion("5.0.0-beta.2")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -2849,8 +2849,16 @@ class StatsBar : Form
             if (File.Exists(Shortcuts.DesktopPath)) ThreadPool.QueueUserWorkItem(_ => Shortcuts.CreateDesktop(Cfg.TrayStyle)); // keeps its icon current
         };
         SystemEvents.SessionSwitch += OnSessionSwitch;
+        // A scrolling title is redrawn 60 times a second even at a lower animation rate, so it glides instead of stepping.
+        var scrollTimer = new System.Windows.Forms.Timer { Interval = 16 };
+        scrollTimer.Tick += (s, e) => ScrollFrame();
         var animTimer = new System.Windows.Forms.Timer { Interval = 16 };
-        animTimer.Tick += (s, e) => { animTimer.Interval = 1000 / Math.Max(10, Cfg.AnimFps); AnimFrame(); };
+        animTimer.Tick += (s, e) =>
+        {
+            animTimer.Interval = 1000 / Math.Max(10, Cfg.AnimFps);
+            AnimFrame();
+            scrollTimer.Enabled = Cfg.AnimFps < 60 && !Paused && Scrolling;
+        };
         animTimer.Start();
     }
 
@@ -3924,6 +3932,24 @@ class StatsBar : Form
         if ((Cfg.BarAnimate || (shownL != null && shownL.Scrolls)) && shownL != null && IsHandleCreated && lastX != int.MinValue) Push(shownL, shownH, lastX, lastY);
         if (corner != null && corner.Last != null && corner.Last.Scrolls) corner.Push(corner.Last, corner.H, corner.X, corner.Y);
         if (Cfg.BarAnimate) foreach (var m in mirrors) if (m.Last != null) m.Push(m.Last, m.H, m.X, m.Y);
+    }
+
+    bool Scrolling
+    {
+        get
+        {
+            return (shownL != null && shownL.Scrolls) || (corner != null && corner.Last != null && corner.Last.Scrolls)
+                || mirrors.Any(m => m.Last != null && m.Last.Scrolls);
+        }
+    }
+
+    // Extra frames for a scrolling title only: the icons keep to the animation rate.
+    void ScrollFrame()
+    {
+        if (Paused) return;
+        if (shownL != null && shownL.Scrolls && IsHandleCreated && lastX != int.MinValue) Push(shownL, shownH, lastX, lastY);
+        if (corner != null && corner.Last != null && corner.Last.Scrolls) corner.Push(corner.Last, corner.H, corner.X, corner.Y);
+        foreach (var m in mirrors) if (m.Last != null && m.Last.Scrolls) m.Push(m.Last, m.H, m.X, m.Y);
     }
 
     // ---- Desktop widget: created and destroyed to match the settings.
