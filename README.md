@@ -212,13 +212,13 @@ Kinetik Stats can tell you when something needs attention, using Windows' own no
 
 ## Download and use
 
-1. Download `KinetikStats.zip` from the [Releases](../../releases/latest) page and extract it to a folder of your choice. It contains `KinetikStats.exe` and a `lib` folder.
+1. Download `KinetikStats.zip` from the [Releases](../../releases/latest) page and extract it to a folder of your choice. It contains `KinetikStats.exe`. Kinetik Stats needs the free [.NET 8 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/8.0) from Microsoft; Windows offers to get it the first time if it's missing.
 2. Run `KinetikStats.exe`. The bar appears on your taskbar next to the tray icons.
 3. **Right-click** the bar and choose **Settings…** to customise it, or **Arrange stats…** to go straight to the order and icons.
 
-It's portable, with no installer. Keep the `lib` folder next to `KinetikStats.exe`: it holds the LibreHardwareMonitor library that reads CPU temperature and AMD / Intel GPUs. Kinetik Stats checks each DLL in it against the version it was built with and won't load one that's been changed. (If you turn on Run at startup as administrator, Kinetik Stats copies itself to `C:\Program Files\KinetikStats` along with its `lib` folder, so the elevated startup task runs a copy only admins can change.) Settings are saved in the registry at `HKCU\Software\KinetikStats`.
+It's portable, with no installer: one exe, with the LibreHardwareMonitor library that reads CPU temperature and AMD / Intel GPUs built in. (If you turn on Run at startup as administrator, Kinetik Stats copies itself to `C:\Program Files\KinetikStats`, so the elevated startup task runs a copy only admins can change.) Settings are saved in the registry at `HKCU\Software\KinetikStats`.
 
-**Updating:** from v3.0.0 on, use **Settings → About → Check for updates**, which installs the new version for you. Or right-click the bar, choose **Exit**, extract the new zip over your old folder (replacing `KinetikStats.exe` and `lib`) and run it again. Your settings carry over. Versions up to v2.0.3 were a single exe; for those, put the new `KinetikStats.exe` and `lib` folder where the old exe was.
+**Updating:** from v3.0.0 on, use **Settings → About → Check for updates**, which installs the new version for you. Or right-click the bar, choose **Exit**, extract the new zip over your old folder (replacing `KinetikStats.exe`) and run it again. Your settings carry over. The `lib` folder earlier versions needed can be deleted.
 
 Windows SmartScreen may warn you because the exe isn't code-signed. Click **More info → Run anyway**.
 
@@ -265,7 +265,7 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 
 ## CPU temperature
 
-Windows doesn't provide CPU temperatures to normal apps, so Kinetik Stats reads them through [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)'s library, which ships in the `lib` folder next to the exe. This requires:
+Windows doesn't provide CPU temperatures to normal apps, so Kinetik Stats reads them through [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor)'s library, which is built into the exe. This requires:
 
 - **Administrator rights:** right-click the bar and choose **Restart as administrator**. To have it start elevated automatically, turn on **Run at startup** while it's running as admin.
 - **The PawnIO driver:** it's installed along with the LibreHardwareMonitor app, or you can get it from [pawnio.eu](https://pawnio.eu). If it's missing, **Settings → General** says so and has a **Get PawnIO** button. Restart Kinetik Stats after installing it.
@@ -284,7 +284,7 @@ While Base FPS or render latency is shown, games with NVIDIA Reflex measure thei
 ## Requirements
 
 - Windows 10 / 11 (64-bit)
-- .NET Framework 4.7.2 or later (already included in Windows 10 and 11)
+- The [.NET 8 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/8.0)
 - An up-to-date graphics driver for GPU stats. NVIDIA cards are read through the driver's `nvml.dll`, and AMD / Intel cards through LibreHardwareMonitor. Neither needs admin rights.
 
 ### Choosing a GPU
@@ -463,18 +463,13 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 
 ## Building from source
 
-No Visual Studio or SDK needed. It compiles with the .NET Framework compiler that's built into Windows.
+It builds with the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (`global.json` pins it); NuGet fetches LibreHardwareMonitorLib 0.9.6 and its dependencies. Run:
 
-1. Put the [LibreHardwareMonitorLib 0.9.6](https://www.nuget.org/packages/LibreHardwareMonitorLib/0.9.6) NuGet package's .NET Framework DLLs (`runtimes/win-x64/lib/net472`), along with its dependencies' DLLs, into a `lib\` folder next to the source. The dependencies are DiskInfoToolkit, BlackSharp.Core, HidSharp, RAMSPDToolkit-NDD, System.Memory, System.Buffers, System.Numerics.Vectors, System.Runtime.CompilerServices.Unsafe, System.CodeDom, System.Threading.AccessControl, System.Security.AccessControl and System.Security.Principal.Windows.
-2. Run:
+```bat
+build.bat
+```
 
-   ```bat
-   build.bat
-   ```
-
-   This produces `KinetikStats.exe` with the app icon embedded. It loads the DLLs from the `lib\` folder next to it, so it runs straight from the source folder. `build.bat package` also makes `KinetikStats.zip` (the exe, `lib\*.dll` and the license) for a release.
-
-   Kinetik Stats only loads DLLs whose SHA-256 matches the list in `LibHashes` in `KinetikStats.cs`. If you use different versions of the DLLs, update that list.
+This produces `KinetikStats.exe`: one exe with the app icon and the sensor library built in. Build files go to `%LOCALAPPDATA%\Kinetik\Build`, outside OneDrive. `build.bat package` also makes `KinetikStats.zip` (the exe and the license) for a release.
 
 ## Feedback
 

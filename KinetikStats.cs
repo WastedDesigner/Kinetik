@@ -2,7 +2,7 @@
 // Shows network speed and ping, CPU (usage, clock, temp, power, per-core), RAM and commit, GPU (usage, temp, clock,
 // fan, VRAM, power), disk activity / throughput / free space, processes, uptime, and battery levels of the PC and
 // connected Bluetooth devices. Every item can be reordered, given its own icon and colour, and split into groups
-// with dividers. CPU temperature/power come from LibreHardwareMonitorLib (in the lib folder) and need admin rights.
+// with dividers. CPU temperature/power come from LibreHardwareMonitorLib (built in) and need admin rights.
 // Also a desktop widget, and a game overlay strip with an FPS counter (read from Windows' graphics ETW events).
 // Right-click the bar for Settings. Build: build.bat (uses the .NET Framework compiler built into Windows).
 //
@@ -12,6 +12,7 @@
 // option) any later version. It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
 // without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the LICENSE
 // file or <https://www.gnu.org/licenses/> for details.
+#nullable disable
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -1257,14 +1258,10 @@ class Sampler
     {
         try
         {
-            System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
-            var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create("https://api.ipify.org");
-            req.UserAgent = "KinetikStats";
-            req.Timeout = req.ReadWriteTimeout = 8000;
-            using (var resp = req.GetResponse())
-            using (var rd = new StreamReader(resp.GetResponseStream()))
+            using (var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(8) })
             {
-                var text = new string(rd.ReadToEnd().Take(64).ToArray()).Trim();
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("KinetikStats");
+                var text = new string(http.GetStringAsync("https://api.ipify.org").GetAwaiter().GetResult().Take(64).ToArray()).Trim();
                 System.Net.IPAddress ip;
                 publicIp = System.Net.IPAddress.TryParse(text, out ip) ? ip.ToString() : "";
             }
@@ -1420,7 +1417,7 @@ class Sampler
             sensors = hw;
             lhmGpus = hw.GpuNames;
         }
-        catch (IOException) { sensorStatus = "unavailable – keep the lib folder next to KinetikStats.exe"; sensorsFailed = true; }
+        catch (IOException) { sensorStatus = "unavailable – the sensor library didn't load"; sensorsFailed = true; }
         catch (Exception e) { sensorStatus = "unavailable (" + e.Message + ")"; sensorsFailed = true; }
     }
 
@@ -2262,8 +2259,6 @@ static class Program
         try { using (var k = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\PawnIO")) return k != null; }
         catch { return false; }
     }
-    static readonly Dictionary<string, Assembly> loaded = new Dictionary<string, Assembly>();
-
     [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
     [DllImport("kernel32.dll")] static extern bool SetDefaultDllDirectories(int flags);
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
@@ -2275,7 +2270,6 @@ static class Program
         // No background GC thread: this app's heap is tiny, so concurrent collection only costs memory.
         GCSettings.LatencyMode = GCLatencyMode.Batch;
         try { SetDefaultDllDirectories(0x800); } catch { } // LOAD_LIBRARY_SEARCH_SYSTEM32
-        AppDomain.CurrentDomain.AssemblyResolve += ResolveLib;
         Updates.CleanUp();
         if (RunUnderNewName(args)) return;
         bool created;
@@ -2407,26 +2401,11 @@ static class Program
         try { SetProcessWorkingSetSize(GetCurrentProcess(), (IntPtr)(-1), (IntPtr)(-1)); } catch { }
     }
 
-    // LibreHardwareMonitor and its dependencies ship in a lib folder next to the exe. The runtime never looks there
-    // by itself, so they only load through here, and only if each file matches the copy this build was made with:
-    // a DLL swapped into the folder (which may be user-writable) can't run inside Kinetik, even when it's elevated.
-    // Update this list whenever the DLLs in lib\ change.
-    static readonly Dictionary<string, string> LibHashes = new Dictionary<string, string>
-    {
-        { "BlackSharp.Core", "CAFB93AFCC8D8A367E21F619673D05C06887D8964867FED1371F02DED1CD3E23" },
-        { "DiskInfoToolkit", "1ACBF51B3C10C51C986CF43021680D34A2E38D9A5BA652BCFA9A1B5F7FC09800" },
-        { "HidSharp", "79F2BC8DDFF102E6DBEDE84B2C211A3AEA2ED675BF762FA0F02ECB65F61EE812" },
-        { "LibreHardwareMonitorLib", "6EBC194316536BA61AF5BE24508AD9FCBB2ECC685E716C12E787C79530F66BF0" },
-        { "RAMSPDToolkit-NDD", "B6882354C7C8EC186617E421507743DBFAE09C5C1FC24CEF76A1D0C0C26651DE" },
-        { "System.Buffers", "2D78D770C9CB997199154AE8C018B9F1D1EFBC86729F7264DDE6DBAD2A12CAC3" },
-        { "System.CodeDom", "FD9DE6770340B32D1A57E21833620F5F440638CE518A38D55712424162B847E5" },
-        { "System.Memory", "D5E8E4866F9CFA66F7765660F84B210198893E55335487AFE5EBDA342C0E913D" },
-        { "System.Numerics.Vectors", "20C2FA81B8C70D651099D762954F285FD4F942E63B2D7217C145DAB8D4B2F4C9" },
-        { "System.Runtime.CompilerServices.Unsafe", "08CBD7278B66F1E68425A82D4B97181A4130D93E3DD91831407ABA7212CCDACF" },
-        { "System.Security.AccessControl", "FF14C5F628B9A6798D173AEFBBA0A43D61E66F715108E2576AC0D3DFAB9071D0" },
-        { "System.Security.Principal.Windows", "B4D8E15ADC235D0E858E39B5133E5D00A4BAA8C94F4F39E3B5E791B0F9C0C806" },
-        { "System.Threading.AccessControl", "5E3A3902F04F840C0FC1F9C2F249F804F6CFDF7901B2E06778BC2A4603AE4694" },
-    };
+    // Releases before 5.0 kept LibreHardwareMonitor and its dependencies in a lib folder next to the exe; it's built
+    // into the exe now, so these are only removed with the old copies that carried them.
+    static readonly string[] OldLibs = { "BlackSharp.Core", "DiskInfoToolkit", "HidSharp", "LibreHardwareMonitorLib", "RAMSPDToolkit-NDD",
+        "System.Buffers", "System.CodeDom", "System.Memory", "System.Numerics.Vectors", "System.Runtime.CompilerServices.Unsafe",
+        "System.Security.AccessControl", "System.Security.Principal.Windows", "System.Threading.AccessControl" };
 
     static string LibDir(string exe) { return Path.Combine(Path.GetDirectoryName(exe), "lib"); }
 
@@ -2435,41 +2414,6 @@ static class Program
         using (var sha = System.Security.Cryptography.SHA256.Create())
         using (var f = File.OpenRead(path))
             return BitConverter.ToString(sha.ComputeHash(f)).Replace("-", "");
-    }
-
-    // True when lib\<name>.dll next to the given exe is exactly the expected file.
-    static bool LibOk(string exe, string name)
-    {
-        string want, path = Path.Combine(LibDir(exe), name + ".dll");
-        try { return LibHashes.TryGetValue(name, out want) && File.Exists(path) && Sha256(path) == want; }
-        catch { return false; }
-    }
-
-    static Assembly ResolveLib(object sender, ResolveEventArgs e)
-    {
-        var name = new AssemblyName(e.Name).Name;
-        lock (loaded)
-        {
-            Assembly a = null;
-            if (loaded.TryGetValue(name, out a)) return a;
-            loaded[name] = null; // the fallbacks below can ask for the same name again; this ends that loop
-            if (LibHashes.ContainsKey(name))
-            {
-                // Only ever the verified file: a missing or changed one fails the load (sensors then report why).
-                if (LibOk(Application.ExecutablePath, name)) a = Assembly.LoadFrom(Path.Combine(LibDir(Application.ExecutablePath), name + ".dll"));
-                if (a != null || !name.StartsWith("System.")) { loaded[name] = a; return a; }
-            }
-            // Newer framework-package versions requested by the library (e.g. System.Management) → use the built-in one.
-            if (a == null) a = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(x => x.GetName().Name == name);
-            if (a == null)
-            {
-#pragma warning disable 618
-                try { a = Assembly.LoadWithPartialName(name); } catch { }
-#pragma warning restore 618
-            }
-            loaded[name] = a;
-            return a;
-        }
     }
 
     public static void RestartAsAdmin()
@@ -2589,7 +2533,7 @@ static class Program
         {
             foreach (var exe in new[] { "Kinetik.exe", ExeName }) { var f = Path.Combine(dir, exe); if (File.Exists(f)) File.Delete(f); }
             var lib = Path.Combine(dir, "lib");
-            foreach (var name in LibHashes.Keys) { var f = Path.Combine(lib, name + ".dll"); if (File.Exists(f)) File.Delete(f); }
+            foreach (var name in OldLibs) { var f = Path.Combine(lib, name + ".dll"); if (File.Exists(f)) File.Delete(f); }
             if (Directory.Exists(lib) && !Directory.EnumerateFileSystemEntries(lib).Any()) Directory.Delete(lib);
             if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
         }
@@ -2612,25 +2556,13 @@ static class Program
             var a = new FileInfo(me); var b = new FileInfo(InstalledExe);
             Version mine, theirs;
             bool known = Version.TryParse(FileVersionInfo.GetVersionInfo(me).FileVersion, out mine) & Version.TryParse(FileVersionInfo.GetVersionInfo(InstalledExe).FileVersion, out theirs);
+            // A newer installed copy is left alone.
             if (known && (mine > theirs || (mine == theirs && Sha256(me) != Sha256(InstalledExe)))) File.Copy(me, InstalledExe, true);
-            else if (!known || mine < theirs) return; // leave a newer installed copy (and its lib folder) alone
-            CopyLib();
         }
         catch { }
     }
 
-    // Brings the installed lib folder in line with this build's, from this exe's own (verified) lib folder.
-    static void CopyLib()
-    {
-        var me = Application.ExecutablePath;
-        if (SamePath(me, InstalledExe)) return;
-        Directory.CreateDirectory(LibDir(InstalledExe));
-        foreach (var name in LibHashes.Keys)
-            if (!LibOk(InstalledExe, name) && LibOk(me, name))
-                File.Copy(Path.Combine(LibDir(me), name + ".dll"), Path.Combine(LibDir(InstalledExe), name + ".dll"), true);
-    }
-
-    // Copies this exe and its lib folder into Program Files (created by an admin process, so it inherits the
+    // Copies this exe into Program Files (created by an admin process, so it inherits the
     // admin-only write access).
     static bool InstallCopy()
     {
@@ -2639,7 +2571,6 @@ static class Program
             Directory.CreateDirectory(InstallDir);
             var me = Application.ExecutablePath;
             if (!SamePath(me, InstalledExe)) File.Copy(me, InstalledExe, true);
-            CopyLib();
             return File.Exists(InstalledExe);
         }
         catch { return false; }
@@ -2651,7 +2582,7 @@ static class Program
         try
         {
             if (File.Exists(InstalledExe)) File.Delete(InstalledExe);
-            foreach (var name in LibHashes.Keys) { var p = Path.Combine(LibDir(InstalledExe), name + ".dll"); if (File.Exists(p)) File.Delete(p); }
+            foreach (var name in OldLibs) { var p = Path.Combine(LibDir(InstalledExe), name + ".dll"); if (File.Exists(p)) File.Delete(p); }
             if (Directory.Exists(LibDir(InstalledExe))) Directory.Delete(LibDir(InstalledExe));
             Directory.Delete(InstallDir);
         }
@@ -2981,7 +2912,7 @@ class StatsBar : Form
             // No integrity label ("S:(ML…)"): setting one needs a privilege apps don't hold, and the event gets this process's level anyway.
             sec.SetSecurityDescriptorSddlForm("D:(A;;0x1F0003;;;SY)(A;;0x1F0003;;;BA)(A;;0x1F0003;;;" + WindowsIdentity.GetCurrent().User.Value + ")");
             bool created;
-            return new EventWaitHandle(false, EventResetMode.AutoReset, name, out created, sec);
+            return System.Threading.EventWaitHandleAcl.Create(false, EventResetMode.AutoReset, name, out created, sec);
         }
         catch { return new EventWaitHandle(false, EventResetMode.AutoReset, name); }
     }
@@ -4896,6 +4827,12 @@ class MediaCard : Form
 // everything again. It checks in under HKCU\Software\Kinetik\Companion with the stats it needs; while it has done
 // so in the last 30 seconds, Kinetik measures those stats and writes each sample to a shared memory block that
 // only this Windows account can read. Kinetik never reads anything back from it.
+sealed class MapSecurity : System.Security.AccessControl.ObjectSecurity<System.IO.MemoryMappedFiles.MemoryMappedFileRights>
+{
+    public MapSecurity() : base(false, System.Security.AccessControl.ResourceType.KernelObject) { }
+    public void Apply(System.Runtime.InteropServices.SafeHandle h) { Persist(h, System.Security.AccessControl.AccessControlSections.Access); }
+}
+
 static class StatsShare
 {
     public const string MapName = "Local\\Kinetik.Stats";
@@ -4943,15 +4880,16 @@ static class StatsShare
             {
                 // This account may read it. Elevated, Kinetik writes through the Administrators group, so programs running
                 // as the account (not elevated) can't change it; otherwise the account itself needs to write.
-                var sec = new System.IO.MemoryMappedFiles.MemoryMappedFileSecurity();
+                var sec = new MapSecurity();
                 var rw = System.IO.MemoryMappedFiles.MemoryMappedFileRights.ReadWrite;
                 sec.AddAccessRule(new System.Security.AccessControl.AccessRule<System.IO.MemoryMappedFiles.MemoryMappedFileRights>(
                     WindowsIdentity.GetCurrent().User, Program.IsAdmin ? System.IO.MemoryMappedFiles.MemoryMappedFileRights.Read : rw, System.Security.AccessControl.AccessControlType.Allow));
                 if (Program.IsAdmin)
                     sec.AddAccessRule(new System.Security.AccessControl.AccessRule<System.IO.MemoryMappedFiles.MemoryMappedFileRights>(
                         new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), rw, System.Security.AccessControl.AccessControlType.Allow));
-                map = System.IO.MemoryMappedFiles.MemoryMappedFile.CreateOrOpen(MapName, Size, System.IO.MemoryMappedFiles.MemoryMappedFileAccess.ReadWrite,
-                    System.IO.MemoryMappedFiles.MemoryMappedFileOptions.None, sec, HandleInheritability.None);
+                map = System.IO.MemoryMappedFiles.MemoryMappedFile.CreateOrOpen(MapName, Size, System.IO.MemoryMappedFiles.MemoryMappedFileAccess.ReadWrite);
+                // .NET 8 can't create a mapping with an access list, so it's set right after (this process creates it, so it may).
+                try { sec.Apply(map.SafeMemoryMappedFileHandle); } catch (Exception e) { Program.Log(e); }
             }
             var bytes = Encoding.UTF8.GetBytes(Serialize(s, inGame));
             if (bytes.Length > Size - 16) return;
@@ -5483,7 +5421,7 @@ static class WebDash
     {
         const string abc = "abcdefghjkmnpqrstuvwxyz23456789";
         var bytes = new byte[16];
-        using (var rng = new System.Security.Cryptography.RNGCryptoServiceProvider()) rng.GetBytes(bytes);
+        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
         return new string(bytes.Select(x => abc[x % abc.Length]).ToArray());
     }
 
@@ -5976,6 +5914,14 @@ static class WifiSignal
 // Windows Installer apps, its own install date), and those are read from its logs when the Timeline page opens.
 // Everything else (every app, drivers, startup apps, BIOS, power plan, memory, drives…) is noticed by comparing a
 // small snapshot of the PC with the previous one, when Kinetik starts and every 3 hours. It all stays on this PC.
+// The JSON files kept in AppData: public fields, by name.
+static class Json
+{
+    static readonly System.Text.Json.JsonSerializerOptions Options = new System.Text.Json.JsonSerializerOptions { IncludeFields = true };
+    public static T Read<T>(string text) { return System.Text.Json.JsonSerializer.Deserialize<T>(text, Options); }
+    public static string Write<T>(T value) { return System.Text.Json.JsonSerializer.Serialize(value, Options); }
+}
+
 class PcChange
 {
     public long T;                // local time, in DateTime ticks
@@ -6029,7 +5975,7 @@ static class PcHistory
         {
             var f = new FileInfo(FilePath);
             if (f.Exists && f.Length < (8 << 20))
-                store = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 8 << 20 }.Deserialize<PcHistoryStore>(File.ReadAllText(f.FullName));
+                store = Json.Read<PcHistoryStore>(File.ReadAllText(f.FullName));
         }
         catch (Exception e) { Program.Log(e); }
         if (store == null) store = new PcHistoryStore();
@@ -6055,7 +6001,7 @@ static class PcHistory
                 else Diff(store.Snap, now, new DateTime(store.Last), t, store.Events);
                 store.Snap = now; store.Last = t.Ticks;
                 if (store.Events.Count > MaxEvents) store.Events.RemoveRange(0, store.Events.Count - MaxEvents);
-                SafeFile.Write(FilePath, new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 8 << 20 }.Serialize(store));
+                SafeFile.Write(FilePath, Json.Write(store));
             }
         }
         catch (Exception e) { Program.Log(e); }
@@ -6777,7 +6723,7 @@ static class ScreenTime
             var f = new FileInfo(FileFor(date));
             if (f.Exists && f.Length < (4 << 20))
             {
-                var d = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 4 << 20 }.Deserialize<DayUsage>(File.ReadAllText(f.FullName));
+                var d = Json.Read<DayUsage>(File.ReadAllText(f.FullName));
                 if (d != null)
                 {
                     if (d.Hours == null || d.Hours.Length != 24) d.Hours = new int[24];
@@ -6804,7 +6750,7 @@ static class ScreenTime
 
     static void Write(DayUsage d)
     {
-        SafeFile.Write(FileFor(d.Date), new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 4 << 20 }.Serialize(d));
+        SafeFile.Write(FileFor(d.Date), Json.Write(d));
     }
 
     public static void Save(bool force)
@@ -7005,13 +6951,12 @@ static class ScreenTime
     // One record per day from..to (inclusive); a day with nothing recorded is empty.
     public static List<DayUsage> Range(DateTime from, DateTime to)
     {
-        var json = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 4 << 20 };
         var list = new List<DayUsage>();
         for (var d = from.Date; d <= to.Date; d = d.AddDays(1))
         {
             var key = Key(d);
             DayUsage u = null;
-            lock (gate) if (today != null && today.Date == key) u = json.Deserialize<DayUsage>(json.Serialize(today)); // a copy, as it keeps changing
+            lock (gate) if (today != null && today.Date == key) u = Json.Read<DayUsage>(Json.Write(today)); // a copy, as it keeps changing
             list.Add(u ?? Read(key) ?? new DayUsage { Date = key });
         }
         return list;
@@ -7100,38 +7045,46 @@ static class Updates
 
     static string Get(string url, int limit, string accept)
     {
-        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
-        var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
-        req.UserAgent = "KinetikStats/" + Current;
-        req.Accept = accept;
-        req.Timeout = req.ReadWriteTimeout = 15000;
-        using (var resp = req.GetResponse())
-        using (var st = resp.GetResponseStream())
-        using (var ms = new MemoryStream())
-        {
-            var buf = new byte[8192]; int n;
-            while ((n = st.Read(buf, 0, buf.Length)) > 0) { ms.Write(buf, 0, n); if (ms.Length > limit) throw new IOException("Response too large"); }
-            return Encoding.UTF8.GetString(ms.ToArray());
-        }
+        return Encoding.UTF8.GetString(Fetch(url, limit, accept, 15, "Response too large"));
     }
 
     static byte[] GetBytes(string url, int limit)
     {
-        System.Net.ServicePointManager.SecurityProtocol |= System.Net.SecurityProtocolType.Tls12;
-        var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create(url);
-        req.UserAgent = "KinetikStats/" + Current;
-        req.Timeout = req.ReadWriteTimeout = 30000;
-        using (var resp = (System.Net.HttpWebResponse)req.GetResponse())
+        return Fetch(url, limit, null, 30, "Download too large");
+    }
+
+    // Reads at most `limit` bytes, and only over https, redirects included.
+    static byte[] Fetch(string url, int limit, string accept, int seconds, string tooLarge)
+    {
+        using (var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(seconds) })
+        using (var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, url))
         {
-            if (resp.ResponseUri.Scheme != "https") throw new IOException("Not a secure download");
-            using (var st = resp.GetResponseStream())
-            using (var ms = new MemoryStream())
+            req.Headers.UserAgent.ParseAdd("KinetikStats/" + Current);
+            if (accept != null) req.Headers.Accept.ParseAdd(accept);
+            using (var resp = http.Send(req, System.Net.Http.HttpCompletionOption.ResponseHeadersRead))
             {
-                var buf = new byte[65536]; int n;
-                while ((n = st.Read(buf, 0, buf.Length)) > 0) { ms.Write(buf, 0, n); if (ms.Length > limit) throw new IOException("Download too large"); }
-                return ms.ToArray();
+                resp.EnsureSuccessStatusCode();
+                if (resp.RequestMessage.RequestUri.Scheme != "https") throw new IOException("Not a secure download");
+                using (var st = resp.Content.ReadAsStream())
+                using (var ms = new MemoryStream())
+                {
+                    var buf = new byte[65536]; int n;
+                    while ((n = st.Read(buf, 0, buf.Length)) > 0) { ms.Write(buf, 0, n); if (ms.Length > limit) throw new IOException(tooLarge); }
+                    return ms.ToArray();
+                }
             }
         }
+    }
+
+    static string Str(System.Text.Json.JsonElement e, string name)
+    {
+        System.Text.Json.JsonElement v;
+        return e.TryGetProperty(name, out v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() : null;
+    }
+    static bool Bool(System.Text.Json.JsonElement e, string name)
+    {
+        System.Text.Json.JsonElement v;
+        return e.TryGetProperty(name, out v) && v.ValueKind == System.Text.Json.JsonValueKind.True;
     }
 
     // done(newest release, error) runs on the UI thread of `owner`. Test versions only when beta is set.
@@ -7142,25 +7095,25 @@ static class Updates
             Release best = null; string err = null;
             try
             {
-                var json = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 4 << 20 };
                 var body = Get(beta ? Repo + "?per_page=15" : Repo + "/latest", 4 << 20, "application/vnd.github+json");
-                var list = beta ? ((object[])json.DeserializeObject(body)).Cast<Dictionary<string, object>>() : new[] { (Dictionary<string, object>)json.DeserializeObject(body) };
+                using var doc = System.Text.Json.JsonDocument.Parse(body);
+                var list = beta ? doc.RootElement.EnumerateArray().ToArray() : new[] { doc.RootElement };
                 foreach (var d in list)
                 {
-                    if (d.ContainsKey("draft") && true.Equals(d["draft"])) continue;
-                    if (!beta && d.ContainsKey("prerelease") && true.Equals(d["prerelease"])) continue;
+                    if (Bool(d, "draft")) continue;
+                    if (!beta && Bool(d, "prerelease")) continue;
                     Version v; string suf;
-                    if (!Parse(d["tag_name"] as string, out v, out suf)) continue;
-                    var r = new Release { Version = v, Suffix = suf, Tag = (string)d["tag_name"], Url = d["html_url"] as string ?? Page };
-                    var notes = d.ContainsKey("body") ? d["body"] as string ?? "" : "";
+                    if (!Parse(Str(d, "tag_name"), out v, out suf)) continue;
+                    var r = new Release { Version = v, Suffix = suf, Tag = Str(d, "tag_name"), Url = Str(d, "html_url") ?? Page };
+                    var notes = Str(d, "body") ?? "";
                     var m = Regex.Match(notes, @"SHA-256 of `KinetikStats\.exe`:?\*?\*?\s*`([0-9A-Fa-f]{64})`");
                     if (m.Success) r.ExeSha = m.Groups[1].Value.ToUpperInvariant();
-                    var assets = d.ContainsKey("assets") ? d["assets"] as object[] : null;
-                    if (assets != null)
-                        foreach (Dictionary<string, object> a in assets)
+                    System.Text.Json.JsonElement assets;
+                    if (d.TryGetProperty("assets", out assets) && assets.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        foreach (var a in assets.EnumerateArray())
                         {
-                            var url = a["browser_download_url"] as string;
-                            if ((a["name"] as string) == "KinetikStats.zip" && url != null && url.StartsWith(Downloads + r.Tag + "/")) r.ZipUrl = url;
+                            var url = Str(a, "browser_download_url");
+                            if (Str(a, "name") == "KinetikStats.zip" && url != null && url.StartsWith(Downloads + r.Tag + "/")) r.ZipUrl = url;
                         }
                     if (best == null || Compare(r.Version, r.Suffix, best.Version, best.Suffix) > 0) best = r;
                 }
@@ -7170,8 +7123,6 @@ static class Updates
             try { owner.BeginInvoke((Action)(() => done(best, err))); } catch { }
         });
     }
-
-    static readonly Regex LibEntry = new Regex(@"^lib/([A-Za-z0-9.\-_]+\.dll)$");
 
     // Downloads the release's zip into memory, checks KinetikStats.exe against the SHA-256 in its release notes, and
     // stages and flushes the complete replacement set before moving installed files.
@@ -7193,7 +7144,7 @@ static class Updates
                     {
                         var name = en.FullName.Replace('\\', '/');
                         if (name.EndsWith("/")) continue;
-                        if (name != Program.ExeName && name != "LICENSE" && !LibEntry.IsMatch(name)) continue; // nothing else is written
+                        if (name != Program.ExeName && name != "LICENSE") continue; // nothing else is written
                         expanded += en.Length;
                         if (expanded > (128 << 20) || files.ContainsKey(name)) throw new IOException("Invalid or oversized release archive");
                         if (en.Length > 32 << 20) throw new IOException(name + " is too large");

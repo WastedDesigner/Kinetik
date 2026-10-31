@@ -207,6 +207,9 @@ namespace KinetikSuite
                 throw;
             }
         }
+#if NET
+#pragma warning disable SYSLIB0014 // shortcut: HttpWebRequest still works on .NET 8; move to HttpClient once every suite app is on .NET 8.
+#endif
         public static byte[] Get(string url, int limit, string agent, CancellationToken cancel, int timeoutMs = 20000, string accept = null)
         {
             Uri uri;
@@ -389,7 +392,11 @@ namespace KinetikSuite
             // No integrity label ("S:(ML…)"): setting one needs a privilege apps don't hold, and the event gets this process's level anyway.
             security.SetSecurityDescriptorSddlForm("D:(A;;0x1F0003;;;SY)(A;;0x1F0003;;;BA)(A;;0x1F0003;;;" + System.Security.Principal.WindowsIdentity.GetCurrent().User.Value + ")");
             bool created;
+#if NET
+            signal = EventWaitHandleAcl.Create(false, EventResetMode.AutoReset, @"Local\" + id + ".Shutdown", out created, security);
+#else
             signal = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\" + id + ".Shutdown", out created, security);
+#endif
             // A registered wait sleeps until requested instead of waking every widget four times a second.
             dispatcher = new System.Windows.Forms.Control();
             dispatcher.CreateControl();

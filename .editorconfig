@@ -1,0 +1,5 @@
+root = true
+
+# Shared with the suite apps that still build with the C# 5 compiler, so it cannot carry #nullable itself.
+[SuiteSupport.cs]
+generated_code = true

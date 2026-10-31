@@ -1,0 +1,8 @@
+<Project>
+  <!-- Build output goes outside OneDrive. -->
+  <PropertyGroup>
+    <KinetikBuildRoot>$(LOCALAPPDATA)\Kinetik\Build\$(MSBuildProjectName)\</KinetikBuildRoot>
+    <BaseOutputPath>$(KinetikBuildRoot)bin\</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(KinetikBuildRoot)obj\</BaseIntermediateOutputPath>
+  </PropertyGroup>
+</Project>

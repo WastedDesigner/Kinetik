@@ -20,8 +20,6 @@ try {
     }
     Copy-Item -LiteralPath 'KinetikStats.exe' -Destination (Join-Path $stage 'Kinetik.exe')
     Copy-Item -LiteralPath 'README.md', 'LICENSE' -Destination $stage
-    New-Item -ItemType Directory -Path (Join-Path $stage 'lib') | Out-Null
-    Get-ChildItem -LiteralPath 'lib' -Filter '*.dll' | Copy-Item -Destination (Join-Path $stage 'lib')
     if (Test-Path -LiteralPath $archive) {
         $old = Join-Path $PSScriptRoot '..\Old Versions\releases'
         New-Item -ItemType Directory -Path $old -Force | Out-Null

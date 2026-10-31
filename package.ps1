@@ -25,7 +25,7 @@ try {
     foreach ($notes in $notesFiles) {
         if (Test-Path -LiteralPath $notes) { Copy-Item -LiteralPath $notes -Destination $stage }
     }
-    if ($App -in @('Kinetik', 'KinetikStats', 'KinetikScreen')) {
+    if ($App -in @('Kinetik', 'KinetikScreen')) {
         if (-not (Test-Path -LiteralPath 'lib\LibreHardwareMonitorLib.dll')) { throw 'Missing sensor library' }
         New-Item -ItemType Directory -Path (Join-Path $stage 'lib') | Out-Null
         Get-ChildItem -LiteralPath 'lib' -Filter '*.dll' | Copy-Item -Destination (Join-Path $stage 'lib')
