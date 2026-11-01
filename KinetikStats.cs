@@ -42,7 +42,7 @@ using Microsoft.Win32;
 [assembly: AssemblyCopyright("Copyright © 2026 Akila Sella Hennedige. GNU GPL v3.")]
 [assembly: AssemblyVersion("5.0.0.0")]
 [assembly: AssemblyFileVersion("5.0.0.0")]
-[assembly: AssemblyInformationalVersion("5.0.0-beta.2")]
+[assembly: AssemblyInformationalVersion("5.0.0")]
 // Every native DLL this app imports by name (user32, wlanapi, nvml…) is loaded from System32 only, never from the
 // exe's folder or the current directory, so a planted DLL next to Kinetik can't hijack it.
 [assembly: DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
@@ -5219,8 +5219,9 @@ static class Dash
         return v;
     }
 
-    // What the dashboard needs measured while it's being looked at: only the stats that are switched on in it.
-    public static bool Wants(Settings c, string id) { return Viewing && Current(c).Item3.Contains(id); }
+    // What the dashboard needs measured while it's being looked at: the window's stats that are switched on, and every
+    // stat while a browser is polling, since its pages are its own.
+    public static bool Wants(Settings c, string id) { return (windowOpen && Current(c).Item3.Contains(id)) || (WebActive && WebWants.Contains(id)); }
 
     // Graph line colours: the card's colour, then the second stat's own colour (or the accent, if that's the same).
     public static Color SeriesColor(DashView v, int i, Settings c)
@@ -5243,6 +5244,8 @@ static class Dash
     public static void WebPolled() { Interlocked.Exchange(ref webSeen, DateTime.UtcNow.Ticks); }
 
     // True while the window is open, or a browser asked for readings in the last 15 seconds.
+    static bool WebActive { get { return DateTime.UtcNow.Ticks - Interlocked.Read(ref webSeen) < 15 * TimeSpan.TicksPerSecond; } }
+
     public static bool Viewing { get { return windowOpen || DateTime.UtcNow.Ticks - Interlocked.Read(ref webSeen) < 15 * TimeSpan.TicksPerSecond; } }
 
     public static double Num(string id, Snapshot s)
@@ -5352,28 +5355,24 @@ static class Dash
         return sb.Append('"').ToString();
     }
 
-    // The readings for the web dashboard. full adds the cards' layout and the history so far. lv changes whenever
-    // the layout does, so an open page knows to ask for the new one.
+    // Every stat the web page can show (the cores have a tile of their own), in the cards' order.
+    static readonly string[] WebIds = Cards.Where(d => !d.Cores).SelectMany(d => d.Stats).Distinct().ToArray();
+    static readonly HashSet<string> WebWants = new HashSet<string>(WebIds.SelectMany(id => id == "TotalPower" ? new[] { "CpuPower", "GpuPower" } : new[] { id }));
+
+    static string Hex(Color col) { return "#" + col.R.ToString("x2") + col.G.ToString("x2") + col.B.ToString("x2"); }
+
+    // The readings for the web page: every stat, whatever the dashboard window shows. full adds what only changes with
+    // the settings (the list of stats, their colours, the themes) and the history so far.
     public static string Json(Snapshot s, Settings c, bool full)
     {
-        var cur = Current(c);
-        var vs = cur.Item2;
-        var graphIds = vs.SelectMany(v => v.Graph).Distinct().ToList();
-        var textIds = vs.SelectMany(v => (v.Big == null ? new string[0] : new[] { v.Big }).Concat(v.Rows.Select(r => r.Value))).Concat(new[] { "Uptime" }).Distinct().ToList();
-        var sb = new StringBuilder(full ? 65536 : 2048);
+        var sb = new StringBuilder(full ? 65536 : 4096);
         int sq; lock (gate) sq = seq;
-        sb.Append("{\"seq\":").Append(sq).Append(",\"lv\":").Append(cur.Item1.GetHashCode()).Append(",\"interval\":").Append(Math.Max(250, c.Interval))
-          .Append(",\"cap\":").Append(Capacity).Append(",\"minutes\":").Append(c.DashMinutes).Append(",\"theme\":").Append(c.DashTheme);
+        sb.Append("{\"seq\":").Append(sq).Append(",\"interval\":").Append(Math.Max(250, c.Interval))
+          .Append(",\"cap\":").Append(Capacity).Append(",\"theme\":").Append(c.DashTheme);
         sb.Append(",\"names\":{\"cpu\":").Append(Js(NameOf("cpu", s))).Append(",\"gpu\":").Append(Js(NameOf("gpu", s))).Append(",\"game\":").Append(Js(NameOf("game", s))).Append('}');
-        sb.Append(",\"colors\":{");
-        for (int i = 0; i < ColorKeys.Length; i++)
-        {
-            var col = ColorOf(ColorKeys[i], c);
-            sb.Append(i > 0 ? "," : "").Append('"').Append(ColorKeys[i]).Append("\":\"#").Append(col.R.ToString("x2")).Append(col.G.ToString("x2")).Append(col.B.ToString("x2")).Append('"');
-        }
-        sb.Append("},\"text\":{");
+        sb.Append(",\"text\":{");
         bool first = true;
-        foreach (var id in textIds)
+        foreach (var id in WebIds.Append("FpsNote"))
         {
             var t = Text(id, s);
             if (t == null) continue;
@@ -5381,26 +5380,39 @@ static class Dash
             first = false;
         }
         sb.Append("},\"v\":{");
-        for (int i = 0; i < graphIds.Count; i++) sb.Append(i > 0 ? "," : "").Append('"').Append(graphIds[i]).Append("\":").Append(N(Num(graphIds[i], s)));
+        for (int i = 0; i < Graphed.Length; i++) sb.Append(i > 0 ? "," : "").Append('"').Append(Graphed[i]).Append("\":").Append(N(Num(Graphed[i], s)));
         sb.Append("},\"cores\":[").Append(string.Join(",", s.Cores.Select(v => N(v)))).Append(']');
         if (full)
         {
             sb.Append(",\"themes\":[").Append(string.Join(",", Themes.Select(x => Js(x)))).Append(']');
-            sb.Append(",\"cards\":[");
-            for (int i = 0; i < vs.Count; i++)
+            sb.Append(",\"cat\":[");
+            var colors = new StringBuilder();
+            foreach (var id in WebIds)
             {
-                var d = vs[i];
-                Func<int, string> hex = k => { var col = SeriesColor(d, k, c); return Js("#" + col.R.ToString("x2") + col.G.ToString("x2") + col.B.ToString("x2")); };
-                sb.Append(i > 0 ? "," : "").Append("{\"t\":").Append(Js(d.Title)).Append(",\"c\":").Append(Js(d.Card.Color)).Append(",\"b\":").Append(Js(d.Big))
-                  .Append(",\"bl\":").Append(Js(d.BigLabel)).Append(",\"n\":").Append(Js(d.Name)).Append(",\"p\":").Append(d.Pct ? "true" : "false")
-                  .Append(",\"k\":").Append(d.Cores ? "true" : "false").Append(",\"g\":[").Append(string.Join(",", d.Graph.Select(x => Js(x))))
-                  .Append("],\"gc\":[").Append(string.Join(",", Enumerable.Range(0, d.Graph.Length).Select(hex)))
-                  .Append("],\"gl\":[").Append(string.Join(",", d.Graph.Select(x => Js(Label(d.Card.Key, x))))).Append("],\"r\":[")
-                  .Append(string.Join(",", d.Rows.Select(r => "[" + Js(r.Key) + "," + Js(r.Value) + "]"))).Append("]}");
+                var card = Cards.First(d => !d.Cores && d.Stats.Contains(id));
+                string label = Label(card.Key, id);
+                if (!label.Contains(card.Title)) label = card.Title + " " + label;
+                Color col;
+                try { col = id == "TotalPower" ? c.CpuColor : Stats.Get(id, c).Color; } catch { col = ColorOf(card.Color, c); }
+                sb.Append(colors.Length > 0 ? "," : "").Append("{\"id\":").Append(Js(id)).Append(",\"l\":").Append(Js(label)).Append(",\"c\":").Append(Js(card.Color))
+                  .Append(",\"g\":").Append(Js(card.Title)).Append(",\"f\":").Append(Js(Family(id))).Append('}');
+                colors.Append(colors.Length > 0 ? "," : "").Append('"').Append(id).Append("\":\"").Append(Hex(col)).Append('"');
             }
-            sb.Append("],\"hist\":{");
-            for (int i = 0; i < graphIds.Count; i++)
-                sb.Append(i > 0 ? "," : "").Append('"').Append(graphIds[i]).Append("\":[").Append(string.Join(",", History(graphIds[i], Capacity).Select(v => N(v)))).Append(']');
+            sb.Append("],\"colors\":{").Append(colors).Append('}');
+            // The dashboard's cards, as starting points for the page's own: their colour, stats switched on by default and row labels.
+            sb.Append(",\"cards\":[");
+            for (int i = 0; i < Cards.Length; i++)
+            {
+                var d = Cards[i];
+                var on = d.Cores ? new[] { "cores" } : d.Stats.Where(id => !d.Off.Contains(id)).ToArray();
+                sb.Append(i > 0 ? "," : "").Append("{\"k\":").Append(Js(d.Key)).Append(",\"t\":").Append(Js(d.Title)).Append(",\"col\":").Append(Js(Hex(ColorOf(d.Color, c))))
+                  .Append(",\"on\":").Append(d.OnByDefault ? "true" : "false").Append(",\"s\":[").Append(string.Join(",", on.Select(x => Js(x))))
+                  .Append("],\"lb\":{").Append(string.Join(",", d.Stats.Select(id => Js(id) + ":" + Js(Label(d.Key, id))))).Append("}}");
+            }
+            sb.Append(']');
+            sb.Append(",\"hist\":{");
+            for (int i = 0; i < Graphed.Length; i++)
+                sb.Append(i > 0 ? "," : "").Append('"').Append(Graphed[i]).Append("\":[").Append(string.Join(",", History(Graphed[i], Capacity).Select(v => N(v)))).Append(']');
             sb.Append('}');
         }
         return sb.Append('}').ToString();
@@ -5567,96 +5579,173 @@ static class WebDash
         string reason = code == 200 ? "OK" : code == 403 ? "Forbidden" : code == 404 ? "Not Found" : "Method Not Allowed";
         var h = "HTTP/1.1 " + code + " " + reason + "\r\nContent-Type: " + type + "\r\nContent-Length: " + b.Length +
             "\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nX-Frame-Options: DENY" +
-            "\r\nContent-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'" +
+            "\r\nContent-Security-Policy: default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src data:; frame-ancestors 'none'" +
             "\r\nConnection: close\r\n\r\n";
         var hb = Encoding.ASCII.GetBytes(h);
         s.Write(hb, 0, hb.Length);
         s.Write(b, 0, b.Length);
     }
 
-    // The page itself: no external files, so it works offline and leaks nothing. It polls /data once per update.
-    const string Page = @"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
-<meta name='theme-color' content='#141418'><title>Kinetik Stats dashboard</title>
+    // The page itself: no external files, so it works offline and leaks nothing. It polls /data once per update and lays the
+    // stats out itself, in pages of cards the visitor edits on their own device.
+    const string Page = @"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1,viewport-fit=cover'>
+<meta name='theme-color' content='#141418'><meta name='mobile-web-app-capable' content='yes'><meta name='apple-mobile-web-app-capable' content='yes'><meta name='apple-mobile-web-app-status-bar-style' content='black-translucent'>
+<title>Kinetik Stats</title>
 <style>
-:root{--bg:#141418;--card:#1e1e24;--line:#2c2c34;--text:#ececf0;--sub:#9696a2;--dim:#2a2a32;--alt:#4cc2ff}
-body.term{--bg:#030a05;--card:#030a05;--line:#228c3e;--text:#5aff78;--sub:#2eaa50;--dim:rgba(90,255,120,.22);--alt:#cdffd7}
-body.amber{--bg:#0c0700;--card:#0c0700;--line:#965c0c;--text:#ffb628;--sub:#b97616;--dim:rgba(255,182,40,.22);--alt:#ffe8b4}
-body.yellow{--bg:#000;--card:#000;--line:#968400;--text:#ffe200;--sub:#c8b200;--dim:rgba(255,226,0,.22);--alt:#ffffbe}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:14px/1.35 'Segoe UI',system-ui,-apple-system,Roboto,sans-serif}
+:root{--bg:#141418;--card:#1e1e24;--line:#2c2c34;--text:#ececf0;--sub:#9696a2;--dim:#2a2a32;--alt:#4cc2ff;--acc:#4cc2ff;--warn:#ffb628;--hot:#ff6e6e}
+body.term{--bg:#030a05;--card:#030a05;--line:#228c3e;--text:#5aff78;--sub:#2eaa50;--dim:rgba(90,255,120,.22);--alt:#cdffd7;--acc:#5aff78}
+body.amber{--bg:#0c0700;--card:#0c0700;--line:#965c0c;--text:#ffb628;--sub:#b97616;--dim:rgba(255,182,40,.22);--alt:#ffe8b4;--acc:#ffb628}
+body.yellow{--bg:#000;--card:#000;--line:#968400;--text:#ffe200;--sub:#c8b200;--dim:rgba(255,226,0,.22);--alt:#ffffbe;--acc:#ffe200}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.35 'Segoe UI',system-ui,-apple-system,Roboto,sans-serif;-webkit-user-select:none;user-select:none;overscroll-behavior:none}
 body.mono{font-family:'Cascadia Mono',Consolas,'Courier New',monospace;font-size:13px}
-header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px 16px 4px}
-h1{font-size:18px;margin:0}
-body.mono h1{font-size:15px}
+button,select,input{font:inherit;color:inherit}
+button{background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:0 10px;min-height:34px;cursor:pointer;white-space:nowrap}
+button.on{color:var(--text);border-color:var(--acc)}
+button svg{display:block;margin:auto}
+body.mono button{border-radius:0;background:var(--bg);color:var(--text)}
+body.mono button.on{background:var(--text);color:var(--bg);border-color:var(--text)}
+header{display:flex;align-items:center;gap:8px;padding:calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 6px calc(12px + env(safe-area-inset-left))}
+h1{font-size:17px;margin:0;white-space:nowrap}
+body.mono h1{font-size:14px}
 .cur{display:inline-block;width:.6em;height:1.05em;background:var(--text);vertical-align:-.15em;margin-left:2px;animation:blink 1s steps(1) infinite}
 @keyframes blink{50%{opacity:0}}
-#meta{color:var(--sub);font-size:13px;flex:1;min-width:200px}
-#rng{display:flex;gap:4px}
-#rng button,#theme{background:var(--card);color:var(--sub);border:1px solid var(--line);border-radius:6px;padding:4px 10px;font:inherit;cursor:pointer}
-#theme{color:var(--text)}
-#rng button.on{color:var(--text);border-color:#4cc2ff}
-body.mono #rng button,body.mono #theme{border-radius:0;background:var(--bg);color:var(--text)}
-body.mono #rng button.on{background:var(--text);color:var(--bg);border-color:var(--text)}
-#off{display:none;color:#ff6e6e;padding:6px 16px 0}
-main{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding:10px 16px 20px}
-body.mono main{gap:18px 12px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-height:220px;display:flex;flex-direction:column;position:relative}
-body.mono .card{border-radius:0;padding-top:16px}
-.t{display:flex;align-items:center;gap:8px;color:var(--sub);font-weight:600;font-size:13px}
-.t i{width:10px;height:10px;border-radius:3px;flex:none}
-.t .n{margin-left:auto;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:62%}
-body.mono .t{position:absolute;top:-.75em;left:8px;right:8px;color:var(--text);font-weight:700}
+#meta{color:var(--sub);font-size:12px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;min-width:0}
+#tabs::-webkit-scrollbar{display:none}
+.ib{padding:0;width:34px;flex:none}
+#dot{width:8px;height:8px;border-radius:50%;background:#3ddc84;flex:none}
+#dot.bad{background:var(--hot)}
+@media (max-width:820px){#meta{display:none}#tabs{flex:1}}
+@media (max-width:420px){h1{display:none}}
+#off{display:none;color:var(--hot);padding:2px 14px 4px;font-size:13px}
+main{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));grid-auto-rows:var(--row,250px);gap:10px;padding:6px calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left))}
+main.fixed{grid-template-columns:repeat(var(--cols),minmax(0,1fr))}
+body.mono main{row-gap:16px;padding-top:12px}
+body.fit{height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+body.fit header,body.fit #off,body.fit #bar{flex:none}
+body.fit main{flex:1;min-height:0;grid-template-columns:repeat(var(--cols),minmax(0,1fr));grid-template-rows:repeat(var(--rows),minmax(0,1fr));grid-auto-rows:unset}
+.card{position:relative;min-width:0;min-height:0;background:var(--card);border:1px solid var(--line);border-radius:12px;container-type:inline-size}
+body.fit .card{container-type:size}
+body.mono .card{border-radius:0}
+.in{position:absolute;inset:0;padding:.85em 1.05em .7em;display:flex;flex-direction:column;font-size:calc(clamp(8px,min(4.3cqw,7.2cqh),24px)*var(--scale,1))}
+body.mono .in{padding-top:1.15em}
+.t{display:flex;align-items:center;gap:.6em;color:var(--sub);font-weight:600;font-size:.95em;flex:none}
+.t i{width:.75em;height:.75em;border-radius:3px;flex:none}
+.t .n{margin-left:auto;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+body.mono .t{position:absolute;top:-.75em;left:.6em;right:.6em;color:var(--text);font-weight:700}
 body.mono .t i{display:none}
-body.mono .tt,body.mono .t .n{background:var(--bg);padding:0 4px}
+body.mono .tt,body.mono .t .n{background:var(--bg);padding:0 .3em}
 body.mono .tt::before{content:'[ '}
 body.mono .tt::after{content:' ]'}
-body.mono .tt,body.mono .t .n,body.mono .bl,body.mono .st,body.mono .rows b,body.mono .leg,body.mono .note{text-transform:lowercase}
 body.mono .t .n{color:var(--sub);font-weight:400}
-.top{display:flex;gap:14px;margin:6px 0 8px}
-.lft{min-width:42%}
-.big{font-size:30px;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
-body.mono .big{font-size:27px}
-.bl,.st{color:var(--sub);font-size:12px}
-.rows{flex:1;display:grid;grid-template-columns:auto 1fr auto;gap:2px 6px;font-size:13px;align-content:start;margin-top:4px}
-.rows b{color:var(--sub);font-weight:400;white-space:nowrap}
+body.mono .tt,body.mono .t .n,body.mono .bl,body.mono .st,body.mono .rows b,body.mono .leg,body.mono .note{text-transform:lowercase}
+.top{display:flex;gap:1em;margin:.45em 0 .5em;flex:0 1 auto;min-height:0;overflow:hidden}
+.lft{min-width:40%;max-width:60%;overflow:hidden}
+.big{font-size:2.3em;font-weight:700;line-height:1.1;white-space:nowrap;font-variant-numeric:tabular-nums;overflow:hidden}
+.bl,.st{color:var(--sub);font-size:.85em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rows{flex:1;min-width:0;display:grid;grid-template-columns:auto 1fr auto;gap:.12em .45em;align-content:start;overflow:hidden;font-size:.95em}
+.rows b{color:var(--sub);font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rows span{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .rows u{text-decoration:none}
-body.mono .rows u{align-self:end;border-bottom:1px dotted var(--dim);margin-bottom:5px}
-.leg{display:flex;gap:12px;font-size:12px;color:var(--sub);margin:0 0 4px}
-.leg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px}
+body.mono .rows u{align-self:end;border-bottom:1px dotted var(--dim);margin-bottom:.35em}
+.leg{display:flex;gap:1em;font-size:.85em;color:var(--sub);margin:0 0 .3em;flex:none;white-space:nowrap;overflow:hidden}
+.leg i{display:inline-block;width:.6em;height:.6em;border-radius:2px;margin-right:.4em}
 body.mono .leg i{border-radius:0}
 body.mono .leg span+span i{background:transparent!important;border:1px solid var(--alt)}
-canvas{width:100%;height:96px;display:block;margin-top:auto}
-.cores{display:flex;gap:3px;align-items:flex-end;height:130px;margin-top:12px}
+canvas{flex:1 0 22%;min-height:0;width:100%;display:block}
+.cores{flex:1;display:flex;gap:3px;align-items:flex-end;margin-top:.7em;min-height:0}
 .cores div{flex:1;background:var(--dim);border-radius:3px;position:relative;height:100%;min-width:2px}
 .cores div i{position:absolute;left:0;right:0;bottom:0;border-radius:3px}
 body.mono .cores div{border-radius:0;background:repeating-linear-gradient(0deg,var(--dim) 0 4px,transparent 4px 6px)}
-body.mono .cores div i{border-radius:0;background:repeating-linear-gradient(0deg,var(--text) 0 4px,transparent 4px 6px)}
-.note{color:var(--sub);font-size:12px;margin-top:8px}
+body.mono .cores div i{border-radius:0;background:repeating-linear-gradient(0deg,var(--text) 0 4px,transparent 4px 6px)!important}
+.note{color:var(--sub);font-size:.85em;margin-top:.5em;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Too short for a graph: drop it and let the text use the height instead. */
+@container (max-height:150px){canvas,.leg{display:none}.top{flex:1}.in{font-size:calc(clamp(8px,min(4.3cqw,10.5cqh),24px)*var(--scale,1))}}
+@container (max-width:240px){.top{flex-direction:column;gap:.2em}.lft{max-width:none}}
 body.mono::after{content:'';position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
+.ed{position:absolute;left:6px;right:6px;bottom:6px;display:flex;gap:4px;justify-content:space-between;z-index:2}
+.ed button{min-height:36px;flex:1;padding:0;background:var(--bg);color:var(--text)}
+.add{display:flex;align-items:center;justify-content:center;border-style:dashed;color:var(--sub);font-size:26px;background:transparent}
+#bar{display:none;gap:6px;flex-wrap:wrap;padding:0 calc(12px + env(safe-area-inset-left)) calc(10px + env(safe-area-inset-bottom))}
+body.editing #bar{display:flex}
+dialog{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:14px 16px;width:min(440px,94vw);max-height:88dvh}
+body.mono dialog{border-radius:0}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+dialog h3{margin:0 0 8px;font-size:16px}
+dialog h4{margin:12px 0 2px;color:var(--sub);font-size:12px;font-weight:600;text-transform:uppercase}
+dialog label{display:flex;align-items:center;gap:10px;min-height:38px}
+dialog select,dialog input[type=range],dialog input[type=text]{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:6px;min-height:36px;padding:0 8px}
+dialog input[type=checkbox]{width:20px;height:20px;accent-color:var(--acc)}
+.row{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.hint{color:var(--sub);font-size:12px;margin:6px 0 0}
 </style></head><body>
-<header><h1 id='h1'>Kinetik Stats</h1><div id='meta'></div><select id='theme' aria-label='Theme'></select><div id='rng'></div></header>
+<header><span id='dot' class='bad'></span><h1 id='h1'>Kinetik Stats</h1><div id='meta'></div><div id='tabs'></div>
+<button id='aw' class='ib' aria-label='Keep screen on'><svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='4'/><path d='M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2'/></svg></button>
+<button id='fs' class='ib' aria-label='Full screen'><svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'/></svg></button>
+<button id='ed' class='ib' aria-label='Edit layout'><svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 20l4-1 11-11-3-3L5 16z'/></svg></button>
+<button id='cf' class='ib' aria-label='Settings'><svg width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M4 7h10M18 7h2M4 17h2M10 17h10'/><circle cx='16' cy='7' r='2'/><circle cx='8' cy='17' r='2'/></svg></button></header>
 <div id='off'></div>
 <main id='grid'></main>
+<div id='bar'><button id='badd'>+ Card</button><button id='bcols'></button><button id='bren'>Rename page</button><button id='bnew'>New page</button><button id='bdel'>Delete page</button><button id='bdone' class='on'>Done</button></div>
+<dialog id='addc'><h3>Add a card</h3><div id='alist' class='row'></div><div class='row'><button id='adone'>Cancel</button></div></dialog>
+<dialog id='pick'><h3>Card</h3><label>Title <input id='ptitle' type='text' maxlength='24'></label><p class='hint'>The first stat you tick is the big reading; the rest are rows. Untick and tick again to move one to the end.</p><div id='plist'></div><div class='row'><button id='pdone' class='on'>Done</button></div></dialog>
+<dialog id='set'><h3>Settings</h3>
+<label>Theme <select id='sth'></select></label>
+<label>Graph span <select id='smin'><option value='1'>1 min</option><option value='2'>2 min</option><option value='5'>5 min</option><option value='10'>10 min</option></select></label>
+<label>Text size <input id='ssc' type='range' min='70' max='160' step='5'></label>
+<label><input id='sfit' type='checkbox'> Fit everything on one screen</label>
+<label>Card height <input id='srow' type='range' min='150' max='420' step='10'></label>
+<label><input id='sgr' type='checkbox'> Graphs</label>
+<div class='row'><button id='srs'>Reset layout</button><button id='sdone' class='on'>Done</button></div>
+<p class='hint'>Card height applies when Fit is off. Layout and settings are saved on this device only.</p></dialog>
 <script>
 const key=new URLSearchParams(location.search).get('k')||'';
 const $=id=>document.getElementById(id);
-let cards=null,lv=null,colors={},hist={},cap=600,interval=1000,minutes=0,theme=-1,fails=0,needHist=true,last=null,seq=-1,dead=false;
-const els={};
-function el(tag,cls,parent){const e=document.createElement(tag);if(cls)e.className=cls;if(parent)parent.appendChild(e);return e}
-function css(v){return getComputedStyle(document.body).getPropertyValue(v).trim()}
-function mono(){return theme>=1}
-function save(k,v){try{localStorage.setItem(k,v)}catch(e){}}
-function load(k){try{return localStorage.getItem(k)}catch(e){return null}}
-function build(){const g=$('grid');g.textContent='';if(!cards.length)el('p','note',g).textContent='No cards are switched on. Choose them in Kinetik Stats: Settings, Dashboard.';for(const c of cards){const s=el('section','card',g),t=el('div','t',s),o={dot:el('i','',t)};el('span','tt',t).textContent=c.t;o.n=el('span','n',t);
- if(c.k){o.cores=el('div','cores',s);o.note=el('div','note',s)}else{const top=el('div','top',s),l=el('div','lft',top);o.big=el('div','big',l);o.bl=el('div','bl',l);o.st=el('div','st',l);o.rows=el('div','rows',top);if(c.g.length>1)o.leg=el('div','leg',s);if(c.g.length)o.cv=el('canvas','',s)}els[c.t]=o}}
-function rng(){const r=$('rng');r.textContent='';for(const m of [1,2,5,10]){const b=el('button',m===minutes?'on':'',r);b.textContent=mono()?m+'m':m+' min';b.onclick=()=>{minutes=m;save('kinetik-min',m);rng();render()}}}
-function applyTheme(t){theme=t;document.body.className=['','mono term','mono amber','mono yellow'][t]||'';$('theme').value=t;save('kinetik-theme',t);
- const h=$('h1');h.textContent=t?'kinetik:~$ dashboard --live':'Kinetik Stats';if(t)el('span','cur',h);
- document.querySelector('meta[name=theme-color]').setAttribute('content',css('--bg'));rng();render()}
-function span(){return Math.max(2,Math.min(cap,Math.round(minutes*60000/interval)))}
+const el=(t,c,p,x)=>{const e=document.createElement(t);if(c)e.className=c;if(p)p.appendChild(e);if(x!=null)e.textContent=x;return e};
+const store={get(k){try{return JSON.parse(localStorage.getItem(k))}catch(e){return null}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const css=v=>getComputedStyle(document.body).getPropertyValue(v).trim();
+let cat=[],byId={},srv={},srvList=[],colors={},themes=[],hist={},cap=600,interval=1000,seq=-1,last=null,fails=0,needHist=true,dead=false,editing=false,views=[],lock=null,serverTheme=0,editCard=null,built=false;
+let cfg=store.get('kinetik-web')||{};
+const save=()=>store.set('kinetik-web',cfg);
+const mono=()=>cfg.theme>=1;
+const page=()=>cfg.pages[cfg.page];
+const mk=k=>{const s=srv[k];return {key:k,t:s.t,s:s.s.slice()}};
+function defaults(){const has=a=>a.filter(k=>srv[k]).map(mk);
+ return {v:2,pages:[{n:'Game',k:has(['game','gpu','cpu','mem']),c:0},{n:'Dashboard',k:srvList.filter(s=>s.on).map(s=>mk(s.k)),c:0},{n:'Network',k:has(['net','disk']),c:0}],page:0,theme:serverTheme,min:5,scale:100,row:250,fit:true,graphs:true,awake:false}}
+// Pages from the first version of this page (one stat per tile) are replaced with the card defaults.
+function ensure(){if(!cat.length)return;const d=defaults();if(cfg.v!==2){cfg.pages=null;cfg.row=null;cfg.v=2}
+ for(const k in d)if(cfg[k]==null)cfg[k]=d[k];if(!cfg.pages.length)cfg.pages=d.pages;cfg.page=Math.max(0,Math.min(cfg.page,cfg.pages.length-1));
+ for(const p of cfg.pages)for(const c of p.k)c.s=c.s.filter(i=>byId[i])}
+function label(c,id){const s=srv[c.key];return (s&&s.lb[id])||(byId[id]||{}).l||id}
+function family(id){return (byId[id]||{}).f}
+function applyLook(){document.body.className=(['','mono term','mono amber','mono yellow'][cfg.theme]||'')+(editing?' editing':'')+(cfg.fit?' fit':'');
+ document.documentElement.style.setProperty('--scale',cfg.scale/100);$('grid').style.setProperty('--row',cfg.row+'px');
+ const h=$('h1');h.textContent=mono()?'kinetik:~$ dash --live':'Kinetik Stats';if(mono())el('span','cur',h);
+ document.querySelector('meta[name=theme-color]').setAttribute('content',css('--bg'))}
+function tabs(){const t=$('tabs');t.textContent='';cfg.pages.forEach((p,i)=>{const b=el('button',i===cfg.page?'on':'',t,mono()?p.n.toLowerCase():p.n);b.onclick=()=>go(i)})}
+function go(i){cfg.page=(i+cfg.pages.length)%cfg.pages.length;save();build()}
+function build(){built=true;const g=$('grid'),p=page();g.textContent='';views=[];applyLook();tabs();
+ g.className=p.c&&!cfg.fit?'fixed':'';g.style.setProperty('--cols',p.c||1);$('bcols').textContent='Columns: '+(p.c||'auto');
+ if(!p.k.length&&!editing)el('p','hint',g,'This page is empty. Tap the pencil to add cards.');
+ p.k.forEach((c,i)=>{const s=el('section','card',g),inn=el('div','in',s),t=el('div','t',inn),o={c,dot:el('i','',t)};el('span','tt',t,c.t);o.n=el('span','n',t);
+  if(c.s[0]==='cores'){o.cores=el('div','cores',inn);o.note=el('div','note',inn)}
+  else{const top=el('div','top',inn),l=el('div','lft',top);o.big=el('div','big',l);o.bl=el('div','bl',l);o.st=el('div','st',l);o.rows=el('div','rows',top);
+   const b=c.s[0],f=family(b);o.g=f?[b].concat(c.s.slice(1).filter(x=>family(x)===f).slice(0,1)):[];o.pct=f==='pct';
+   if(cfg.graphs&&o.g.length){if(o.g.length>1)o.leg=el('div','leg',inn);o.cv=el('canvas','',inn)}}
+  if(editing){const e=el('div','ed',s),m=(txt,fn)=>{const x=el('button','',e,txt);x.onclick=fn};
+   m('◀',()=>mv(i,-1));m('Stats',()=>pick(c));m('✕',()=>{p.k.splice(i,1);save();build()});m('▶',()=>mv(i,1))}
+  views.push(o)});
+ if(editing){const a=el('button','card add',g,'+');a.onclick=addCard}
+ layout();render()}
+function mv(i,d){const k=page().k,j=i+d;if(j<0||j>=k.length)return;[k[i],k[j]]=[k[j],k[i]];save();build()}
+// Fit to screen: the column count that gives the largest text, which scales with the cards' width and height (see .in).
+function layout(){if(!cfg.fit)return;const g=$('grid'),n=g.querySelectorAll('.card').length;if(!n)return;const W=g.clientWidth,H=g.clientHeight,p=page();let c=p.c?Math.min(p.c,n):0;
+ if(!c){let best=-1;for(let k=1;k<=n;k++){const sc=Math.min(W/k*4.3,H/Math.ceil(n/k)*7.2);if(sc>best+1){best=sc;c=k}}}
+ g.style.setProperty('--cols',c);g.style.setProperty('--rows',Math.ceil(n/c))}
+function span(){return Math.max(2,Math.min(cap,Math.round(cfg.min*60000/interval)))}
 function fmt(id,v){if(v==null||isNaN(v))return '--';
- if(/^(Down|Up|DiskRead|DiskWrite)$/.test(id)){if(v>=1073741824)return (v/1073741824).toFixed(2)+' GB/s';if(v>=1048576)return (v/1048576).toFixed(v>=104857600?0:v>=10485760?1:2)+' MB/s';if(v>=1024)return Math.round(v/1024)+' KB/s';return Math.round(v)+' B/s'}
+ if(/^(Down|Up|DiskRead|DiskWrite|NetTotal)$/.test(id)){if(v>=1073741824)return (v/1073741824).toFixed(2)+' GB/s';if(v>=1048576)return (v/1048576).toFixed(v>=104857600?0:v>=10485760?1:2)+' MB/s';if(v>=1024)return Math.round(v/1024)+' KB/s';return Math.round(v)+' B/s'}
  if(/Temp|Hotspot/.test(id))return Math.round(v)+'°C';if(/Power/.test(id))return Math.round(v)+' W';if(/Fps/.test(id))return Math.round(v)+' fps';
  if(id==='CpuClock')return (v/1000).toFixed(2)+' GHz';if(id==='GpuClock')return Math.round(v)+' MHz';if(/^(FrameTime|Latency|Ping)$/.test(id))return v.toFixed(id==='FrameTime'?1:0)+' ms';
  if(/^(RamGb|GpuVram)$/.test(id))return v.toFixed(1)+' GB';if(id==='Processes')return ''+Math.round(v);return Math.round(v)+'%'}
@@ -5676,39 +5765,81 @@ function plot(cv,ids,cols,pct){const dpr=window.devicePixelRatio||1,w=cv.clientW
   const flush=()=>{if(seg.length>1){if(k===0){const gr=x.createLinearGradient(0,0,0,h);gr.addColorStop(0,col+'59');gr.addColorStop(1,col+'05');x.beginPath();x.moveTo(seg[0][0],h);for(const p of seg)x.lineTo(p[0],p[1]);x.lineTo(seg[seg.length-1][0],h);x.closePath();x.fillStyle=gr;x.fill()}
    x.beginPath();x.moveTo(seg[0][0],seg[0][1]);for(const p of seg)x.lineTo(p[0],p[1]);x.strokeStyle=col;x.lineWidth=m?1.3:1.6;x.lineJoin='round';x.stroke()}seg=[]};
   d.forEach((v,i)=>{if(v==null){flush();return}seg.push([px(i,d.length),py(v)])});flush()}}
-function render(){if(!cards||!last)return;const d=last,m=mono(),text=css('--text'),alt=css('--alt');
- const parts=[d.names.cpu,d.names.gpu,d.text.Uptime?'up '+d.text.Uptime:''].filter(Boolean);
- $('meta').textContent=m?'# '+parts.join(' | '):parts.join('  ·  ');
- for(const c of cards){const o=els[c.t],col=m?text:(colors[c.c]||'#4cc2ff');o.dot.style.background=col;o.n.textContent=d.names[c.n]||'';o.n.style.display=o.n.textContent?'':'none';
-  if(c.k){const cores=d.cores||[];if(o.cores.childElementCount!==cores.length){o.cores.textContent='';for(let i=0;i<cores.length;i++)el('i','',el('div','',o.cores))}
-   cores.forEach((v,i)=>{const b=o.cores.children[i].firstChild;b.style.height=Math.max(0,Math.min(100,v||0))+'%';b.style.background=m?'':col});
-   const mx=cores.length?Math.round(Math.max(...cores)):0,av=cores.length?Math.round(cores.reduce((a,b)=>a+b,0)/cores.length):0;
-   o.note.textContent=!cores.length?'Waiting for readings…':m?cores.length+' threads | max '+mx+'% | avg '+av+'%':cores.length+' threads  ·  busiest '+mx+'%  ·  average '+av+'%';continue}
-  o.big.textContent=d.text[c.b]||'--';o.bl.textContent=c.bl;
-  const h=(hist[c.b]||[]).slice(-span()).filter(v=>v!=null);
-  o.st.textContent=h.length>1&&c.g[0]===c.b?'avg '+fmt(c.b,h.reduce((a,b)=>a+b,0)/h.length)+(m?'  ·  max ':'  ·  peak ')+fmt(c.b,Math.max(...h)):'';
-  o.rows.textContent='';let shown=0;for(const r of c.r){const v=d.text[r[1]];if(v==null||shown>=(c.g.length?5:9))continue;el('b','',o.rows).textContent=r[0];el('u','',o.rows);el('span','',o.rows).textContent=m&&r[1]==='FpsNote'?v.toLowerCase():v;shown++}
-  const cols=m?[text,alt]:c.gc;
-  if(o.leg){o.leg.textContent='';c.g.forEach((id,i)=>{const s=el('span','',o.leg);el('i','',s).style.background=cols[i];s.appendChild(document.createTextNode(c.gl[i]||id))})}
-  if(o.cv)plot(o.cv,c.g,cols,c.p)}}
+function warn(id,txt){const v=parseFloat(txt),f=family(id);if(isNaN(v))return '';
+ if(f==='temp')return v>=85?'var(--hot)':v>=75?'var(--warn)':'';if(f==='pct'&&id!=='Disk')return v>=95?'var(--hot)':'';return ''}
+function render(){if(!last)return;const d=last,m=mono(),text=css('--text'),alt=css('--alt'),acc='#4cc2ff',names=d.names||{};
+ const parts=[names.cpu,names.gpu,d.text.Uptime?'up '+d.text.Uptime:''].filter(Boolean);$('meta').textContent=m?'# '+parts.join(' | '):parts.join('  ·  ');
+ for(const o of views){const c=o.c,s=srv[c.key],col=s?s.col:(colors[c.s[0]]||acc);
+  o.dot.style.background=col;o.n.textContent=names[c.key]||'';o.n.style.display=o.n.textContent?'':'none';
+  if(o.cores){const cs=d.cores||[];if(o.cores.childElementCount!==cs.length){o.cores.textContent='';cs.forEach(()=>el('i','',el('div','',o.cores)))}
+   cs.forEach((v,i)=>{const b=o.cores.children[i].firstChild;b.style.height=Math.max(0,Math.min(100,v||0))+'%';b.style.background=col});
+   const mx=cs.length?Math.round(Math.max(...cs)):0,av=cs.length?Math.round(cs.reduce((a,b)=>a+b,0)/cs.length):0;
+   o.note.textContent=!cs.length?'Waiting for readings…':m?cs.length+' threads | max '+mx+'% | avg '+av+'%':cs.length+' threads  ·  busiest '+mx+'%  ·  average '+av+'%';continue}
+  if(!c.s.length){o.big.textContent='';o.bl.textContent='No stats: edit this card';continue}
+  const b=c.s[0],t=d.text[b];o.big.textContent=t==null?'--':t;o.big.style.color=t==null?'var(--sub)':warn(b,t)||'';o.bl.textContent=label(c,b);
+  const h=(hist[b]||[]).slice(-span()).filter(v=>v!=null);
+  o.st.textContent=h.length>1&&o.g.length?'avg '+fmt(b,h.reduce((a,v)=>a+v,0)/h.length)+(m?' · max ':'  ·  peak ')+fmt(b,Math.max(...h)):'';
+  o.rows.textContent='';const rows=c.s.slice(1).filter(x=>x!=='cores').map(x=>[label(c,x),x]);if(c.s.includes('Fps')&&d.text.FpsNote)rows.push(['Status','FpsNote']);
+  for(const r of rows){const v=d.text[r[1]];if(v==null)continue;el('b','',o.rows,r[0]);el('u','',o.rows);const sp=el('span','',o.rows,m&&r[1]==='FpsNote'?v.toLowerCase():v);const w=warn(r[1],v);if(w)sp.style.color=w}
+  if(o.cv){const c2=colors[o.g[1]];const cols=m?[text,alt]:[col,!c2||c2===col?acc:c2];
+   if(o.leg){o.leg.textContent='';o.g.forEach((id,i)=>{const s2=el('span','',o.leg);el('i','',s2).style.background=cols[i];s2.appendChild(document.createTextNode(label(c,id)))})}
+   plot(o.cv,o.g,cols,o.pct)}}}
+function addCard(){const l=$('alist');l.textContent='';const add=c=>{page().k.push(c);save();$('addc').close();build()};
+ for(const s of srvList){const b=el('button','',l,s.t);b.onclick=()=>add(mk(s.k))}
+ const b=el('button','',l,'Custom card');b.onclick=()=>{$('addc').close();const c={key:'',t:'Custom',s:[]};page().k.push(c);save();build();pick(c)};
+ $('addc').showModal()}
+function pick(c){editCard=c;const l=$('plist');l.textContent='';$('ptitle').value=c.t;let grp='';
+ const all=[{id:'cores',l:'CPU cores (bars)',g:'CPU'}].concat(cat);
+ for(const s of all){if(s.g!==grp){grp=s.g;el('h4','',l,grp)}const lb=el('label','',l),x=el('input','',lb);x.type='checkbox';x.checked=c.s.includes(s.id);el('span','',lb,s.l);
+  x.onchange=()=>{if(x.checked)c.s.push(s.id);else c.s=c.s.filter(i=>i!==s.id);save()}}
+ $('pick').showModal()}
+function settings(){const s=$('sth');if(!s.options.length)themes.forEach((t,i)=>{const o=el('option','',s,t);o.value=i});
+ s.value=cfg.theme;$('smin').value=cfg.min;$('ssc').value=cfg.scale;$('srow').value=cfg.row;$('sfit').checked=cfg.fit;$('sgr').checked=cfg.graphs;$('set').showModal()}
+let vid=null;
+const NZ='data:video/mp4;base64,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';
+// The screen wake lock needs HTTPS; over plain http a hidden looping video keeps the screen on instead.
+async function awake(on){cfg.awake=on;save();$('aw').className='ib'+(on?' on':'');
+ try{if(on){if('wakeLock' in navigator&&!lock){lock=await navigator.wakeLock.request('screen');lock.onrelease=()=>lock=null}
+   else if(!('wakeLock' in navigator)){if(!vid){vid=el('video','',document.body);vid.muted=true;vid.loop=true;vid.setAttribute('playsinline','');vid.style.cssText='position:fixed;width:1px;height:1px;opacity:.01;pointer-events:none';vid.src=NZ}await vid.play()}}
+  else{if(lock){await lock.release();lock=null}if(vid)vid.pause()}}catch(e){}}
+const fsEl=document.documentElement,fsOn=()=>document.fullscreenElement||document.webkitFullscreenElement;
+async function fullscreen(){try{if(fsOn())await(document.exitFullscreen||document.webkitExitFullscreen).call(document);
+ else{await(fsEl.requestFullscreen||fsEl.webkitRequestFullscreen).call(fsEl);if(screen.orientation&&screen.orientation.lock)screen.orientation.lock('any').catch(()=>{})}}catch(e){}}
+function edit(on){editing=on;build()}
+$('ed').onclick=()=>edit(!editing);$('bdone').onclick=()=>edit(false);$('cf').onclick=settings;$('badd').onclick=addCard;$('adone').onclick=()=>$('addc').close();
+$('pdone').onclick=()=>{const t=$('ptitle').value.trim();if(t&&editCard)editCard.t=t;save();$('pick').close();build()};$('sdone').onclick=()=>$('set').close();
+$('bcols').onclick=()=>{const p=page();p.c=(p.c+1)%5;save();build()};
+$('bren').onclick=()=>{const n=prompt('Page name',page().n);if(n&&n.trim()){page().n=n.trim().slice(0,20);save();tabs()}};
+$('bnew').onclick=()=>{const n=prompt('New page name');if(n&&n.trim()){cfg.pages.push({n:n.trim().slice(0,20),k:[],c:0});go(cfg.pages.length-1)}};
+$('bdel').onclick=()=>{if(cfg.pages.length>1&&confirm('Delete page '+page().n+'?')){cfg.pages.splice(cfg.page,1);go(Math.max(0,cfg.page-1))}};
+$('sth').onchange=e=>{cfg.theme=+e.target.value;save();build()};
+$('smin').onchange=e=>{cfg.min=+e.target.value;save();render()};
+$('ssc').oninput=e=>{cfg.scale=+e.target.value;save();applyLook();render()};
+$('srow').oninput=e=>{cfg.row=+e.target.value;save();applyLook();render()};
+$('sfit').onchange=e=>{cfg.fit=e.target.checked;save();build()};
+$('sgr').onchange=e=>{cfg.graphs=e.target.checked;save();build()};
+$('aw').onclick=()=>awake(!cfg.awake);
+if(fsEl.requestFullscreen||fsEl.webkitRequestFullscreen)$('fs').onclick=fullscreen;else $('fs').onclick=()=>alert('This browser has no full screen for web pages. On iPhone: Share, then Add to Home Screen, and open Kinetik from the new icon.');
+$('srs').onclick=()=>{if(confirm('Reset all pages and settings on this device?')){cfg={};ensure();save();$('set').close();build()}};
+let sx=0,sy=0;
+$('grid').addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY},{passive:true});
+$('grid').addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;if(!editing&&Math.abs(dx)>70&&Math.abs(dy)<50)go(cfg.page+(dx<0?1:-1))},{passive:true});
 async function poll(){if(dead)return;let wait=interval;
  if(document.hidden){needHist=true;setTimeout(poll,2000);return}
  try{const r=await fetch('data?k='+encodeURIComponent(key)+(needHist?'&hist=1':''),{cache:'no-store'});
   if(r.status===403){dead=true;$('off').textContent='This link isn\'t valid any more. Get the current one from Kinetik Stats: Settings, Dashboard.';$('off').style.display='block';return}
   if(!r.ok)throw new Error(r.status);
-  const d=await r.json();interval=d.interval||1000;cap=d.cap||600;colors=d.colors||colors;
-  if(d.cards&&(d.lv!==lv||!cards)){cards=d.cards;lv=d.lv;build()}
-  if(!d.cards&&d.lv!==lv)needHist=true;
-  if(d.themes&&!$('theme').options.length){d.themes.forEach((t,i)=>{const o=el('option','',$('theme'));o.value=i;o.textContent=t});$('theme').onchange=e=>applyTheme(+e.target.value)}
+  const d=await r.json();interval=d.interval||1000;cap=d.cap||600;
+  if(d.cat){cat=d.cat;byId={cores:{id:'cores',l:'CPU cores',g:'CPU',f:null}};cat.forEach(s=>byId[s.id]=s);colors=d.colors||colors;themes=d.themes||themes;serverTheme=d.theme||0;srvList=d.cards||[];srv={};srvList.forEach(s=>srv[s.k]=s)}
   if(d.hist){hist=d.hist;needHist=false}
   else if(d.seq!==seq){if(d.seq-seq>3)needHist=true;for(const id in d.v){const a=hist[id]||(hist[id]=[]);a.push(d.v[id]);if(a.length>cap)a.splice(0,a.length-cap)}}
-  seq=d.seq;last=d;fails=0;$('off').style.display='none';
-  if(!minutes){const m=+load('kinetik-min');minutes=[1,2,5,10].includes(m)?m:(d.minutes||5)}
-  if(theme<0){const t=load('kinetik-theme');applyTheme(t!==null&&+t>=0&&+t<(d.themes||[]).length?+t:(d.theme||0))}else render()}
- catch(e){fails++;needHist=true;if(fails>1){$('off').textContent='Lost contact with Kinetik Stats. Retrying…';$('off').style.display='block'}wait=Math.min(10000,interval*fails)}
+  seq=d.seq;last=d;fails=0;$('off').style.display='none';$('dot').className='';
+  if(!built&&cat.length){ensure();save();build();$('aw').className='ib'+(cfg.awake?' on':'');if(cfg.awake){awake(true);document.addEventListener('pointerdown',()=>{if(cfg.awake)awake(true)},{once:true})}}else render()}
+ catch(e){fails++;needHist=true;$('dot').className='bad';if(fails>1){$('off').textContent='Lost contact with Kinetik Stats. Retrying…';$('off').style.display='block'}wait=Math.min(10000,interval*fails)}
  setTimeout(poll,wait)}
-window.addEventListener('resize',render);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)render()});
+window.addEventListener('resize',()=>{layout();render()});
+window.addEventListener('orientationchange',()=>setTimeout(()=>{layout();render()},200));
+document.addEventListener('visibilitychange',()=>{if(!document.hidden){if(cfg.awake)awake(true);render()}});
 poll();
 </script></body></html>";
 }

@@ -1,3 +1,12 @@
+# Kinetik Stats v5.0.0
+
+Now on .NET 8, with a new phone-first web dashboard.
+
+- **Now on .NET 8:** one exe with the sensor library built in, so the `lib` folder is gone. It needs the free .NET 8 Desktop Runtime (x64); Windows offers to get it if it's missing. Settings, startup entries and data carry over.
+- **New web dashboard:** every stat as a tile, in pages you build on your phone (Game, Network and All to start). Add, remove and reorder tiles, set columns per page, rename or add pages and swipe between them. It has its own theme, graph span, text size, keep-screen-on and full-screen settings, saved per device.
+- **Smoother Now playing:** a scrolling title moves at 60 fps, whatever the animation rate.
+
+
 # Kinetik Stats v4.1.0
 
 Rounder, softer menus.

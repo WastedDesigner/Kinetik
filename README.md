@@ -19,7 +19,7 @@ Every stat can be switched on or off, reordered, restyled and grouped with divid
 
 ![Kinetik Stats on the taskbar, one-line layout with dividers](screenshots/v3.2/bar-one-line.png)
 
-**Latest version: v4.0.0.** [Download it from Releases](../../releases/latest).
+**Latest version: v5.0.0.** [Download it from Releases](../../releases/latest).
 
 ## Contents
 
@@ -66,7 +66,7 @@ Each one can be turned on or off. There are 44 in total.
 
 The same bar can look very different. Here it is in the compact two-line layout:
 
-![Two-line layout](screenshots/v3.2/bar-two-line.png)
+![Two-line layout](screenshots/v5.0/bar-two-line.png)
 
 And with text labels instead of icons and dot-style dividers:
 
@@ -107,7 +107,7 @@ The widget costs nothing while it's switched off. Stats are only measured when t
 
 Everything about the widget is set on the **Widget** page in Settings:
 
-![The Widget page in Settings](screenshots/v4.0/settings-widget.png)
+![The Widget page in Settings](screenshots/v5.0/settings-widget.png)
 
 ### Quality of life
 
@@ -156,16 +156,18 @@ Turn it on from the bar's right-click menu (**Game overlay**), in **Settings →
 
 Everything about the overlay is set on the **Overlay** page in Settings:
 
-![The Overlay page in Settings](screenshots/v4.0/settings-overlay.png)
+![The Overlay page in Settings](screenshots/v5.0/settings-overlay.png)
 
 ## Dashboard
 
 A full-screen view of everything Kinetik Stats measures, as a window or a web page. Both are off by default, and the extra readings are only measured while the window is open or a browser is showing the page.
 
 - **Dashboard window:** cards for CPU, GPU, memory, network, disk, temperatures, power, game FPS, CPU cores and system, each with the current reading, average, peak and a graph of the last 1–10 minutes. Open it from the right-click menu, **Ctrl+Shift+F9** or `KinetikStats.exe --dashboard`. The grid fits the window and scales its text, gauges and graphs to match.
-- **Web dashboard:** the same dashboard in a browser on this PC or, if you allow it, other devices on your network. Every request needs the secret key in the link shown in Settings, and **New link** replaces it. Profiles and backups leave the key out.
+- **Web dashboard:** a phone-first page for watching your stats while you game, in a browser on this PC or, if you allow it, other devices on your network. It shows every stat as a tile, in pages you build on the device itself (Game, Network and All to start): tap the pencil to add, remove and reorder tiles, set columns per page, rename or add pages, and swipe between them. Settings has the theme, graph span, text size, row height, graphs on/off, keep screen on (needs HTTPS in most browsers) and full screen. Layout is saved per device, so the Layout editor only affects the window. Every request needs the secret key in the link shown in Settings, and **New link** replaces it. Profiles and backups leave the key out.
 - **Layout editor:** **Settings → Dashboard → Layout** reorders cards and their stats and switches them on or off. All 44 stats are available.
 - **Themes:** Modern, plus Terminal, Amber terminal and Yellow terminal looks.
+
+<img src="screenshots/v5.0/web-dashboard.png" alt="The web dashboard on a phone, in the Yellow terminal theme" width="300">
 
 ## Now playing
 
@@ -199,7 +201,7 @@ Two pages in Settings that help answer "what changed?" and "why did that crash?"
 
 The theme is shared by every Kinetik app (the Hub, Calendar, Clock, Dock, Feeds, Focus, Notes and Weather), so picking it once changes them all. Each app's right-click menu also has **App theme**.
 
-![The Theme page in Settings](screenshots/v4.0/settings-theme.png) Widgets keep their own themes, which now include **OLED black** and **Mocha**, plus **Match app theme**, which follows the app theme and accent colour.
+![The Theme page in Settings](screenshots/v5.0/settings-theme.png) Widgets keep their own themes, which now include **OLED black** and **Mocha**, plus **Match app theme**, which follows the app theme and accent colour.
 
 ## Notifications
 
@@ -243,11 +245,11 @@ Windows SmartScreen may warn you because the exe isn't code-signed. Click **More
 ### Screenshots
 
 <table>
-<tr><td width="50%" valign="top"><img src="screenshots/v4.0/settings-stats.png" alt="Stats page"><br><sub><b>Stats</b></sub></td><td width="50%" valign="top"><img src="screenshots/v4.0/settings-arrange.png" alt="Arrange page"><br><sub><b>Arrange</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/v4.0/settings-appearance.png" alt="Appearance page"><br><sub><b>Appearance</b></sub></td><td width="50%" valign="top"><img src="screenshots/v4.0/settings-colours.png" alt="Colours page"><br><sub><b>Colours</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/v4.0/settings-widget.png" alt="Widget page"><br><sub><b>Widget</b></sub></td><td width="50%" valign="top"><img src="screenshots/v4.0/settings-overlay.png" alt="Overlay page"><br><sub><b>Overlay</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/v4.0/settings-dashboard.png" alt="Dashboard page"><br><sub><b>Dashboard</b></sub></td><td width="50%" valign="top"><img src="screenshots/v4.0/settings-general.png" alt="General page"><br><sub><b>General</b></sub></td></tr>
-<tr><td width="50%" valign="top"><img src="screenshots/v4.0/settings-theme.png" alt="Theme page"><br><sub><b>Theme</b></sub></td><td width="50%" valign="top"><img src="screenshots/v4.0/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v5.0/settings-stats.png" alt="Stats page"><br><sub><b>Stats</b></sub></td><td width="50%" valign="top"><img src="screenshots/v5.0/settings-arrange.png" alt="Arrange page"><br><sub><b>Arrange</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v5.0/settings-appearance.png" alt="Appearance page"><br><sub><b>Appearance</b></sub></td><td width="50%" valign="top"><img src="screenshots/v5.0/settings-colours.png" alt="Colours page"><br><sub><b>Colours</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v5.0/settings-widget.png" alt="Widget page"><br><sub><b>Widget</b></sub></td><td width="50%" valign="top"><img src="screenshots/v5.0/settings-overlay.png" alt="Overlay page"><br><sub><b>Overlay</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v5.0/settings-dashboard.png" alt="Dashboard page"><br><sub><b>Dashboard</b></sub></td><td width="50%" valign="top"><img src="screenshots/v5.0/settings-general.png" alt="General page"><br><sub><b>General</b></sub></td></tr>
+<tr><td width="50%" valign="top"><img src="screenshots/v5.0/settings-theme.png" alt="Theme page"><br><sub><b>Theme</b></sub></td><td width="50%" valign="top"><img src="screenshots/v5.0/settings-about.png" alt="About page"><br><sub><b>About</b></sub></td></tr>
 </table>
 
 ## Tips and shortcuts
@@ -305,6 +307,24 @@ On PCs with more than one GPU (for example, a desktop card plus the processor's 
 - Ping uses ICMP, which some networks and servers block. If it always shows the warning colour, try another address such as `8.8.8.8`.
 
 ## Version history
+
+### v5.0.0
+
+- **Now on .NET 8:** Kinetik Stats is one exe with the sensor library built in, so the `lib` folder is gone. It needs the free [.NET 8 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/8.0), which Windows offers to get if it's missing. Settings, startup entries and data carry over.
+- **New web dashboard:** a phone-first page for watching your stats while you game ([see above](#dashboard)). Every stat is a tile, in pages you build on the device itself (Game, Network and All to start): add, remove and reorder tiles, set columns per page, rename or add pages and swipe between them. The page has its own theme, graph span, text size, keep-screen-on and full-screen settings, and its layout is saved per device.
+- **Smoother Now playing:** a scrolling title moves at 60 fps, whatever the animation rate.
+
+### v4.1.0
+
+- **Rounded menus:** right-click menus match the window's rounded corners, with a little more room around each item and a soft accent-tinted highlight under the mouse.
+
+### v4.0.2
+
+- **Fixed: AMD and Intel GPUs could go missing** when running as administrator if another sensor failed to start. The graphics card is now read even then.
+
+### v4.0.1
+
+- **QR code** for the web dashboard link, next to **Copy link** in Settings → Dashboard.
 
 ### v4.0.0: Kinetik Stats
 

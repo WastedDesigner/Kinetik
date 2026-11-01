@@ -33,7 +33,7 @@ for y in range(H):
         px[x, y] = (int(18 + 10 * t + 14 * g), int(17 + 6 * t + 6 * g), int(21 + 14 * t + 4 * g), 255)
 
 # right: the Settings window, then the widget in front of it
-win = Image.open(HERE / "v4.0" / "settings-stats.png").convert("RGBA")
+win = Image.open(HERE / "v5.0" / "settings-stats.png").convert("RGBA")
 win = win.crop((8, 0, win.width - 8, win.height - 8))  # PrintWindow's invisible resize border
 win = rounded(win.resize((int(win.width * 0.52), int(win.height * 0.52)), Image.LANCZOS), 10)
 shadowed(bg, win, (700, 60))
