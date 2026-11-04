@@ -2794,6 +2794,8 @@ class StatsBar : Form
         widgetItem.Click += (s, e) => SetWidget(!Cfg.WidgetShow);
         var unlockItem = new ToolStripMenuItem("Unlock desktop widget");
         unlockItem.Click += (s, e) => { Cfg.WidgetLocked = false; Cfg.Save(); Render(true); NotifySettings("Widget"); };
+        var barItem = new ToolStripMenuItem("Taskbar stats");
+        barItem.Click += (s, e) => { Cfg.ShowBar = !Cfg.ShowBar; Cfg.Save(); Render(true); NotifySettings("General"); };
         var overlayItem = new ToolStripMenuItem("Game overlay");
         overlayItem.Click += (s, e) => ToggleOverlay();
         var benchItem = new ToolStripMenuItem("Record benchmark");
@@ -2804,6 +2806,7 @@ class StatsBar : Form
         webItem.Click += (s, e) => WebDash.Open(Cfg);
         var unlockOverlay = new ToolStripMenuItem("Unlock game overlay");
         unlockOverlay.Click += (s, e) => { Cfg.OverlayLocked = false; Cfg.Save(); Render(true); NotifySettings("Overlay"); };
+        menu.Items.Add(barItem);
         menu.Items.Add(widgetItem);
         menu.Items.Add(unlockItem);
         menu.Items.Add(overlayItem);
@@ -2816,6 +2819,7 @@ class StatsBar : Form
         menu.Opening += (s, e) =>
         {
             Theme.Use(); // the Kinetik apps' theme may have changed in another app
+            barItem.Checked = Cfg.ShowBar;
             widgetItem.Checked = Cfg.WidgetShow; unlockItem.Visible = Cfg.WidgetShow && Cfg.WidgetLocked;
             overlayItem.Checked = Cfg.OverlayShow || Watch.AutoOverlay; overlayItem.ShortcutKeyDisplayString = Cfg.OverlayHotkey ? "Ctrl+Shift+F10" : null;
             benchItem.Checked = Watch.IsRecording; benchItem.Text = Watch.IsRecording ? "Stop recording benchmark" : "Record benchmark";
