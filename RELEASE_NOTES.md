@@ -1,3 +1,10 @@
+# Kinetik Stats v5.0.2
+
+A quicker way to turn the taskbar stats off and on.
+
+- **New: Taskbar stats** in the right-click menu (on the bar or the tray icon) shows or hides the stats in the taskbar. To bring them back once hidden, use the tray icon's menu.
+
+
 # Kinetik Stats v5.0.1
 
 Fixes for full-screen windows, and a way to turn the taskbar stats off.
