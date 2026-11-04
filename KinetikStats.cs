@@ -127,7 +127,7 @@ class Settings
     public int WarnCpu = 90, WarnRam = 90, WarnGpu = 95, WarnCpuTemp = 85, WarnGpuTemp = 83, WarnBattery = 20, WarnPing = 150, WarnFreePct = 10;
     // Behaviour
     public int Interval = 1000, Offset = 0;
-    public bool ClickTaskMgr = true, HideFullscreen = true, TrayIcon = true;
+    public bool ClickTaskMgr = true, HideFullscreen = true, TrayIcon = true, ShowBar = true;
     public bool TrayAnimate = true, TaskbarButton = false;
     public bool BarHover = true;      // hovering a stat on the bar shows its last minute and the top process
     public bool AllTaskbars = false;  // also show the bar on other monitors' taskbars
@@ -3753,10 +3753,23 @@ class StatsBar : Form
 
     public void Render() { Render(false); }
 
+    [DllImport("user32.dll")] static extern int GetClassName(IntPtr h, StringBuilder sb, int n);
+    // F11 in a browser or Explorer isn't reported by SHQueryUserNotificationState, so also look for a window covering its whole monitor.
+    static bool CoversScreen(IntPtr fg)
+    {
+        RECT r;
+        if (fg == IntPtr.Zero || !GetWindowRect(fg, out r)) return false;
+        var sb = new StringBuilder(64); GetClassName(fg, sb, 64);
+        string cls = sb.ToString();
+        if (cls == "Progman" || cls == "WorkerW" || cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd") return false;
+        var b = Screen.FromHandle(fg).Bounds;
+        return r.L <= b.Left && r.T <= b.Top && r.R >= b.Right && r.B >= b.Bottom;
+    }
+
     public void Render(bool force)
     {
         int qs;
-        bool fullscreen = Cfg.HideFullscreen && SHQueryUserNotificationState(out qs) == 0 && (qs == 2 || qs == 3 || qs == 4);
+        bool fullscreen = Cfg.HideFullscreen && (SHQueryUserNotificationState(out qs) == 0 && (qs == 2 || qs == 3 || qs == 4) || CoversScreen(GetForegroundWindow()));
         // Only hide what shares a monitor with the fullscreen app, so the other screens keep their stats.
         Screen fsScreen = null;
         if (fullscreen) { var fg = GetForegroundWindow(); if (fg != IntPtr.Zero) fsScreen = Screen.FromHandle(fg); }
@@ -3786,7 +3799,7 @@ class StatsBar : Form
         if (taskbar == IntPtr.Zero || !GetWindowRect(taskbar, out tb)) return;
         bool hideBar = fullscreen && (fsScreen == null || Screen.FromHandle(taskbar).DeviceName == fsScreen.DeviceName);
         cornerOn = Cfg.NowPlaying && Cfg.NowPlayingCorner && TaskbarCentred();
-        if (hideBar) { ShowWindow(Handle, 0); shownL = null; if (corner != null) corner.HideNow(); return; }
+        if (hideBar || !Cfg.ShowBar) { ShowWindow(Handle, 0); shownL = null; if (corner != null) corner.HideNow(); return; }
         SyncCorner(tb, force);
         if (mediaCard != null && mediaCard.Visible) { if (Sampler.Snap.MediaTitle == "") mediaCard.Hide(); else mediaCard.ShowFor(mediaCard.From); }
 
@@ -13065,8 +13078,9 @@ class SettingsForm : Form
         Theme.Number(off);
         off.ValueChanged += (s, e) => { c.Offset = (int)off.Value; Apply(); };
         Add(Icons.Spacing, Theme.Accent, "Shift left", "Pixels between the bar and the tray icons", off);
+        Switch(Icons.Monitor, Theme.Accent, "Show stats in the taskbar", "ShowBar", "Turn off to use Kinetik only as the game overlay");
         Switch(Icons.Chip, Theme.Accent, "Left-click opens Task Manager", "ClickTaskMgr");
-        Switch(Icons.Monitor, Theme.Accent, "Hide in fullscreen apps", "HideFullscreen", "Games, videos and presentations");
+        Switch(Icons.Monitor, Theme.Accent, "Hide in fullscreen apps", "HideFullscreen", "Games, videos, presentations and full-screen windows (F11)");
         Switch(Icons.Monitor, Theme.Accent, "Show on all taskbars", "AllTaskbars", "A copy of the bar on every monitor's taskbar, left of its clock");
         Switch(Icons.Grid, Theme.Accent, "Show tray icon", "TrayIcon", "Click it for Settings, right-click for the menu");
         Switch(Icons.Fan, Theme.Accent, "Spinning icon", "TrayAnimate", "The fan logo in the tray and taskbar spins faster the busier your CPU is");
