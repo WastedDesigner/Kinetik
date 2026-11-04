@@ -1,3 +1,11 @@
+# Kinetik Stats v5.0.1
+
+Fixes for full-screen windows, and a way to turn the taskbar stats off.
+
+- **Fixed: the bar showed over full-screen windows** such as a browser or Explorer in F11. It now hides over any window that fills its monitor, only on that monitor.
+- **New: Show stats in the taskbar** switch in Settings → Behaviour. Turn it off to use Kinetik only as the game overlay.
+
+
 # Kinetik Stats v5.0.0
 
 Now on .NET 8, with a new phone-first web dashboard.
