@@ -7450,8 +7450,8 @@ static class Profiles
 }
 
 // ======================================================================= Tray icon artwork
-// Kinetik's tray and taskbar icon: a three-bladed fan on a choice of backgrounds, drawn at the exact size needed.
-// It spins with CPU load; the blades repeat every 120°, so a handful of cached frames makes a seamless loop.
+// Kinetik's tray and taskbar icon: a chip with a heartbeat trace on a choice of backgrounds, drawn at the exact size needed.
+// The trace scrolls faster with CPU load; it repeats every cycle, so a handful of cached frames makes a seamless loop.
 static class TrayIconArt
 {
     public const int Frames = 8;
@@ -7460,7 +7460,7 @@ static class TrayIconArt
     // Name → top-left and bottom-right gradient colours; a transparent pair means no tile.
     public static readonly KeyValuePair<string, Color[]>[] Styles =
     {
-        S("Kinetik orange (default)", 255, 255, 106, 43, 255, 255, 140, 60),
+        S("Electric blue chip (default)", 0, 0, 0, 0, 0, 0, 0, 0),
         S("Violet to cyan", 255, 108, 76, 255, 255, 0, 198, 255),
         S("Ocean blue", 255, 30, 90, 230, 255, 0, 170, 255),
         S("Emerald", 255, 0, 150, 90, 255, 60, 220, 140),
@@ -7490,9 +7490,11 @@ static class TrayIconArt
         return ic;
     }
 
-    // The fan has three blades, so it looks the same every 120°.
+    // One animation loop is Period "degrees" (the callers' phase); the heartbeat trace scrolls one full cycle per loop.
     public const float Period = 120f;
 
+    // The chip with a heartbeat trace (electric blue, no tile) or a white chip on a colour tile. Same drawing as the
+    // Kinetik icon; only the trace moves.
     public static Bitmap Draw(int style, int size, float angle)
     {
         var st = Styles[style].Value;
@@ -7503,30 +7505,39 @@ static class TrayIconArt
         {
             g.SmoothingMode = SmoothingMode.AntiAlias; g.PixelOffsetMode = PixelOffsetMode.HighQuality;
             g.Clear(Color.Transparent);
-            float m = Math.Max(0.5f, s * 0.03f), cx = s / 2f, cy = s / 2f;
+            float m = Math.Max(0.5f, s * 0.03f);
             if (!none)
                 using (var tile = Icons.Round(new RectangleF(m, m, s - 2 * m, s - 2 * m), s * 0.23f))
                 using (var grad = new LinearGradientBrush(new RectangleF(0, 0, s, s), st[0], st[1], 45f))
                     g.FillPath(grad, tile);
-            // White blades on colour; dark on the light tile; orange with no tile, so it shows on light and dark taskbars.
-            Color blade = none ? Color.FromArgb(255, 106, 43) : light ? Color.FromArgb(40, 40, 50) : Color.White;
-            float k = none ? 1.2f : 1f;
-            using (var b = new SolidBrush(blade))
+            float k = (none ? 1f : 0.66f) * s / 100f, c = s / 2f;
+            Func<float, float> X = v => c + (v - 64) * k, Y = v => c + (v - 61) * k;
+            Color pin = none ? Color.FromArgb(47, 107, 255) : light ? Color.FromArgb(40, 40, 50) : Color.White;
+            Color pulse = light && !none ? Color.FromArgb(40, 40, 50) : Color.White;
+            using (var pen = new Pen(pin, 7 * k) { StartCap = LineCap.Round, EndCap = LineCap.Round })
+                foreach (float v in new[] { 42f, 64f, 86f })
+                {
+                    g.DrawLine(pen, X(v), Y(17), X(v), Y(28)); g.DrawLine(pen, X(v), Y(94), X(v), Y(105));
+                    g.DrawLine(pen, X(17), Y(v - 3), X(28), Y(v - 3)); g.DrawLine(pen, X(100), Y(v - 3), X(111), Y(v - 3));
+                }
+            var body = new RectangleF(X(25), Y(22), 78 * k, 78 * k);
+            var inner = new RectangleF(X(35), Y(32), 58 * k, 58 * k);
+            using (var bp = Icons.Round(body, 19 * k))
+            using (var bb = new LinearGradientBrush(body, none ? Color.FromArgb(58, 160, 255) : pin, none ? Color.FromArgb(24, 66, 225) : pin, 45f))
+                g.FillPath(bb, bp);
+            using (var ip = Icons.Round(inner, 12 * k))
             {
-                for (int q = 0; q < 3; q++)
-                    using (var path = new GraphicsPath())
-                    using (var mx = new Matrix())
-                    {
-                        path.AddEllipse(cx - s * 0.106f * k, cy - s * (0.1875f + 0.175f) * k, s * 0.212f * k, s * 0.35f * k);
-                        mx.RotateAt(angle + q * 120, new PointF(cx, cy));
-                        path.Transform(mx);
-                        g.FillPath(b, path);
-                    }
-                // Hub: a ring in the tile colour around a small dot.
-                float hr = s * 0.075f * k, dr = s * 0.037f * k;
-                Color hub = none ? Color.White : Mix(st[0], st[1]);
-                using (var hb = new SolidBrush(hub)) g.FillEllipse(hb, cx - hr, cy - hr, hr * 2, hr * 2);
-                g.FillEllipse(b, cx - dr, cy - dr, dr * 2, dr * 2);
+                using (var ib = new LinearGradientBrush(inner, none ? Color.FromArgb(31, 92, 240) : st[0], none ? Color.FromArgb(18, 59, 184) : st[1], 60f))
+                    g.FillPath(ib, ip);
+                g.SetClip(ip);
+                float shift = angle / Period * 58f;
+                var pts = new List<PointF>();
+                var shape = new[] { new[] { 0f, 0 }, new[] { 12f, 0 }, new[] { 18f, -20 }, new[] { 28f, 18 }, new[] { 34f, 0 }, new[] { 58f, 0 } };
+                for (int rep = -1; rep <= 1; rep++)
+                    foreach (var q in shape) pts.Add(new PointF(X(35 + rep * 58 + shift + q[0]), Y(61 + q[1])));
+                using (var pp = new Pen(pulse, 6.5f * k) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
+                    g.DrawLines(pp, pts.ToArray());
+                g.ResetClip();
             }
         }
         return bmp;
@@ -7597,7 +7608,7 @@ static class Shortcuts
     public static string DesktopPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kinetik Stats.lnk"); } }
     public static string LegacyDesktopPath { get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "Kinetik.lnk"); } }
 
-    // A multi-size .ico of the fan logo in the chosen colour, for the shortcut (the exe's own icon is fixed at build time).
+    // A multi-size .ico of the chip logo in the chosen colour, for the shortcut (the exe's own icon is fixed at build time).
     static string IconFile(int style)
     {
         var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KinetikStats");
@@ -13087,7 +13098,7 @@ class SettingsForm : Form
         Switch(Icons.Monitor, Theme.Accent, "Hide in fullscreen apps", "HideFullscreen", "Games, videos, presentations and full-screen windows (F11)");
         Switch(Icons.Monitor, Theme.Accent, "Show on all taskbars", "AllTaskbars", "A copy of the bar on every monitor's taskbar, left of its clock");
         Switch(Icons.Grid, Theme.Accent, "Show tray icon", "TrayIcon", "Click it for Settings, right-click for the menu");
-        Switch(Icons.Fan, Theme.Accent, "Spinning icon", "TrayAnimate", "The fan logo in the tray and taskbar spins faster the busier your CPU is");
+        Switch(Icons.Fan, Theme.Accent, "Animated icon", "TrayAnimate", "The chip logo in the tray and taskbar pulses faster the busier your CPU is");
         Switch(Icons.Monitor, Theme.Accent, "Show on the taskbar", "TaskbarButton", "A taskbar button like other running apps. Click it for Settings.");
         var lnk = new Toggle { On = File.Exists(Shortcuts.DesktopPath) };
         lnk.Changed += (s, e) => { if (lnk.On) Shortcuts.CreateDesktop(c.TrayStyle); else Shortcuts.RemoveDesktop(); lnk.On = File.Exists(Shortcuts.DesktopPath); };
