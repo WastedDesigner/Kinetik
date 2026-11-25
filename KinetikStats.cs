@@ -11848,6 +11848,7 @@ class SettingsForm : Form
     readonly List<Label> navItems = new List<Label>();
     readonly Panel previewPanel;
     const int RowW = 580;
+    int gutter = 24; // left edge of the page's content; grows so the column stays centred when the window is wide
     string page = "Stats";
     ReorderList arrangeList;
     string pendingSelect;
@@ -11875,9 +11876,9 @@ class SettingsForm : Form
         {
             var g = e.Graphics; g.Clear(Theme.Bg);
             const TextFormatFlags one = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix;
-            TextRenderer.DrawText(g, page, Theme.UI(17f, FontStyle.Bold), new Rectangle(28, 20, header.Width - 56, 32), Theme.Text, one);
+            TextRenderer.DrawText(g, page, Theme.UI(17f, FontStyle.Bold), new Rectangle(gutter + 4, 20, Math.Min(RowW, header.Width - 2 * (gutter + 4)), 32), Theme.Text, one);
             string sub; subtitles.TryGetValue(page, out sub);
-            TextRenderer.DrawText(g, sub ?? "", Theme.UI(9.5f), new Rectangle(29, 54, header.Width - 56, 20), Theme.Sub, one);
+            TextRenderer.DrawText(g, sub ?? "", Theme.UI(9.5f), new Rectangle(gutter + 5, 54, Math.Min(RowW, header.Width - 2 * (gutter + 4)), 20), Theme.Sub, one);
         };
         header.Resize += (s, e) => header.Invalidate();
         previewPanel = new Panel { Dock = DockStyle.Top, Height = 74, BackColor = Theme.Bg, Padding = new Padding(28, 2, 28, 14) };
@@ -11912,6 +11913,9 @@ class SettingsForm : Form
         right = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Bg };
         right.Controls.Add(content); right.Controls.Add(previewPanel); right.Controls.Add(header);
         Controls.Add(right); Controls.Add(nav);
+        right.Resize += (s, e) => Recentre();
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
+        Recentre();
 
         previewTimer.Tick += (s, e) => { UpdatePreview(); CheckGpuList(); };
         previewTimer.Start();
@@ -11919,6 +11923,7 @@ class SettingsForm : Form
         FormClosing += (s, e) => { if (saveTimer.Enabled) { saveTimer.Stop(); c.Save(); } };
         FormClosed += (s, e) =>
         {
+            Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
             previewTimer.Dispose(); saveTimer.Dispose();
             if (preview.Image != null) { preview.Image.Dispose(); preview.Image = null; }
         };
@@ -11929,6 +11934,41 @@ class SettingsForm : Form
     {
         base.OnHandleCreated(e);
         KinetikSuite.Look.Current.Window(Handle); // title bar in the page's colour, light or dark
+    }
+
+    // Keeps the page's column (RowW wide) centred when the window is maximised or on a wide monitor,
+    // and the header and taskbar preview lined up with it.
+    void Recentre()
+    {
+        if (right == null || right.ClientSize.Width <= 0) return;
+        int w = right.ClientSize.Width;
+        int g = Math.Max(24, (w - RowW - SystemInformation.VerticalScrollBarWidth) / 2);
+        if (g != gutter)
+        {
+            gutter = g;
+            header.Invalidate();
+        }
+        previewPanel.Padding = new Padding(gutter + 4, 2, Math.Max(28, w - (gutter + 4 + RowW)), 14);
+        if (list != null && list.Padding.Left != gutter) list.Padding = new Padding(gutter, 0, 16, 24);
+    }
+
+    // Moving to a monitor with another resolution or scaling: the window may be resized or the work area may change.
+    void OnDisplayChanged(object sender, EventArgs e)
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+        BeginInvoke((Action)(() => { if (!IsDisposed) { Recentre(); PerformLayout(); Invalidate(true); } }));
+    }
+
+    protected override void OnDpiChanged(DpiChangedEventArgs e)
+    {
+        base.OnDpiChanged(e);
+        Recentre();
+    }
+
+    protected override void OnResizeEnd(EventArgs e)
+    {
+        base.OnResizeEnd(e);
+        Recentre();
     }
 
     static KeyValuePair<string, string[]> G(string name, params string[] pages) { return new KeyValuePair<string, string[]>(name, pages); }
@@ -12083,7 +12123,7 @@ class SettingsForm : Form
         content.SuspendLayout();
         foreach (Control ctl in content.Controls.Cast<Control>().ToList()) ctl.Dispose();
         arrangeList = null; gpuCount = -1;
-        list = new NoJumpFlow { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(24, 0, 16, 24), BackColor = Theme.Bg };
+        list = new NoJumpFlow { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true, Padding = new Padding(gutter, 0, 16, 24), BackColor = Theme.Bg };
         content.Controls.Add(list);
         KinetikSuite.Look.Current.ScrollBars(list);
 
