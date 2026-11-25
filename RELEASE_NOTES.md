@@ -1,3 +1,10 @@
+# Kinetik Stats v5.0.4
+
+Settings now stays tidy on big screens.
+
+- **Fixed: the Settings window's layout when maximized or on a wide monitor.** The page content is now centred in a fixed-width column, with the title and taskbar preview lined up to it, instead of sitting against the left edge. It re-centres when the window is resized, moved between monitors, or the display settings or scaling change.
+
+
 # Kinetik Stats v5.0.2
 
 A quicker way to turn the taskbar stats off and on.
